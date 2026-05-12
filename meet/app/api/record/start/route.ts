@@ -36,10 +36,10 @@ export async function GET(req: NextRequest) {
       { layout: 'speaker' },
     );
 
-    return new NextResponse(null, { status: 200 });
+    return new NextResponse(null, { status: 200, headers: { 'Cache-Control': 'no-store' } });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Failed to start recording';
-    return new NextResponse(message, { status: 500 });
+    return new NextResponse(message, { status: 500, headers: { 'Cache-Control': 'no-store' } });
   }
 }
 

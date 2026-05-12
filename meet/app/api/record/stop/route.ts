@@ -25,13 +25,13 @@ export async function GET(req: NextRequest) {
 
     const active = (await egressClient.listEgress({ roomName })).filter((e) => e.status < 2);
     if (active.length === 0) {
-      return new NextResponse('No active recording found', { status: 404 });
+      return new NextResponse('No active recording found', { status: 404, headers: { 'Cache-Control': 'no-store' } });
     }
 
     await Promise.all(active.map((e) => egressClient.stopEgress(e.egressId)));
-    return new NextResponse(null, { status: 200 });
+    return new NextResponse(null, { status: 200, headers: { 'Cache-Control': 'no-store' } });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Failed to stop recording';
-    return new NextResponse(message, { status: 500 });
+    return new NextResponse(message, { status: 500, headers: { 'Cache-Control': 'no-store' } });
   }
 }

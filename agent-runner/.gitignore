@@ -1,0 +1,24 @@
+__pycache__/
+*.py[cod]
+
+# Virtual environments
+.venv/
+env/
+venv/
+ENV/
+
+# Tooling caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+
+# Environment files
+.env
+.env.*
+.envrc
+!.env.example
+!.env.*.example
+!.env.*.*.example
+!.envrc.example

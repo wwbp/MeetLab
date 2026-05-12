@@ -1,0 +1,80 @@
+services:
+  bastion:
+    image: ubuntu:24.04
+    command: bash -lc "sleep infinity"
+    volumes:
+      - ..:/workspace:cached
+
+  redis:
+    image: redis:7-alpine
+    command: redis-server --bind 0.0.0.0 --protected-mode no
+    ports:
+      - "6379:6379"
+
+  transport-server:
+    image: livekit/livekit-server:latest
+    command: ["--dev", "--bind", "0.0.0.0", "--config", "/config/livekit.yaml"]
+    ports:
+      - "7880:7880/tcp"
+      - "7881:7881/tcp"
+      - "7882:7882/udp"
+    volumes:
+      - ./livekit.yaml:/config/livekit.yaml:ro
+    depends_on:
+      - redis
+
+  egress:
+    image: livekit/egress:latest
+    cap_add:
+      - SYS_ADMIN
+    environment:
+      EGRESS_CONFIG_BODY: |
+        log_level: debug
+        api_key: devkey
+        api_secret: secret
+        ws_url: ws://transport-server:7880
+        insecure: true
+        redis:
+          address: redis:6379
+    volumes:
+      - ../recordings:/recordings
+    depends_on:
+      - transport-server
+      - redis
+
+  agent-runner:
+    build:
+      context: ../agent-runner
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file:
+      - ../agent-runner/.env.runner
+    volumes:
+      - ../agent-runner:/app:cached
+      - agent-runner-venv:/app/.venv
+    ports:
+      - "7860:7860"
+    depends_on:
+      - transport-server
+
+  meet:
+    build:
+      context: ../meet
+      dockerfile: Dockerfile
+      target: dev
+    env_file:
+      - ../meet/.env.local
+    environment:
+      - BOT_RUNNER_URL=http://agent-runner:7860/
+    volumes:
+      - ../meet:/app:cached
+      - meet-node-modules:/app/node_modules
+    ports:
+      - "3000:3000"
+    depends_on:
+      - transport-server
+      - agent-runner
+
+volumes:
+  agent-runner-venv:
+  meet-node-modules:

@@ -1,0 +1,4 @@
+rtc:
+  enable_loopback_candidate: true
+redis:
+  address: redis:6379

@@ -1,0 +1,9 @@
+.next
+node_modules
+.pnpm-store
+.git
+.env.local
+.env*.local
+tests
+*.test.ts
+*.test.mjs

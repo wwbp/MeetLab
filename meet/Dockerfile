@@ -28,6 +28,8 @@ COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
+ENV NEXT_PUBLIC_SHOW_SETTINGS_MENU=true
+ENV NEXT_PUBLIC_LK_RECORD_ENDPOINT=/api/record
 RUN pnpm build
 
 # ── Stage 4: minimal runtime ──────────────────────────────────────────────────

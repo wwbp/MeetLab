@@ -1,0 +1,43 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Run Makefile Tests
+    runs-on: ubuntu-latest
+    env:
+      COMPOSE_DOCKER_CLI_BUILD: "1"
+      DOCKER_BUILDKIT: "1"
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Prepare local test env files
+        run: |
+          set -euo pipefail
+          cp agent-runner/.env.runner.example agent-runner/.env.runner
+          cp meet/.env.local.example meet/.env.local
+          {
+            echo ""
+            echo "OPENAI_API_KEY=ci-test-key"
+          } >> agent-runner/.env.runner
+
+      - name: Run tests
+        run: make test
+
+      - name: Show compose logs on failure
+        if: failure()
+        run: docker compose -f .devcontainer/docker-compose.yml logs --tail=300
+
+      - name: Stop compose services
+        if: always()
+        run: make stop

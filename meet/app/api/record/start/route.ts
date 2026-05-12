@@ -33,7 +33,7 @@ export async function GET(req: NextRequest) {
     await egressClient.startRoomCompositeEgress(
       roomName,
       { file: fileOutput },
-      { layout: 'grid' },
+      { layout: 'speaker' },
     );
 
     return new NextResponse(null, { status: 200 });

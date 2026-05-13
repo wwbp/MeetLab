@@ -2,7 +2,19 @@ import '../styles/globals.css';
 import '@livekit/components-styles';
 import '@livekit/components-styles/prefabs';
 import type { Metadata, Viewport } from 'next';
+import Script from 'next/script';
 import { ClientToaster } from '@/components/client-toaster';
+import { THEME_MEDIA_QUERY, THEME_STORAGE_KEY } from '@/lib/utils';
+
+const THEME_SCRIPT = `
+  const doc = document.documentElement;
+  const theme = localStorage.getItem("${THEME_STORAGE_KEY}") ?? "system";
+  if (theme === "system") {
+    doc.classList.add(window.matchMedia("${THEME_MEDIA_QUERY}").matches ? "dark" : "light");
+  } else {
+    doc.classList.add(theme);
+  }
+`.trim().replace(/\n/g, '').replace(/\s+/g, ' ');
 
 export const metadata: Metadata = {
   title: {
@@ -52,6 +64,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en" suppressHydrationWarning>
       <body data-lk-theme="default">
+        <Script id="theme-script" strategy="beforeInteractive" dangerouslySetInnerHTML={{ __html: THEME_SCRIPT }} />
         <ClientToaster />
         {children}
       </body>

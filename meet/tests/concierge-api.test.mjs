@@ -288,61 +288,6 @@ test('room update and room+bot health are available for monitoring', async () =>
   );
 });
 
-test('connection-details route provisions room credentials and starts a bot', async () => {
-  const connection = await jsonRequest('/api/agent-connection', {
-    method: 'POST',
-    body: JSON.stringify({}),
-  });
-  assert.equal(connection.response.status, 200, `connection-details failed: ${connection.text}`);
-  assert.ok(connection.json?.serverUrl, `missing serverUrl: ${connection.text}`);
-  assert.ok(connection.json?.roomName, `missing roomName: ${connection.text}`);
-  assert.ok(connection.json?.participantToken, `missing participantToken: ${connection.text}`);
-
-  const roomName = connection.json.roomName;
-  createdRooms.add(roomName);
-
-  const bots = await waitFor(
-    async () => {
-      const result = await jsonRequest(`/api/concierge/rooms/${encodeURIComponent(roomName)}/bots`);
-      if (result.response.status !== 200) {
-        return null;
-      }
-      if (!Array.isArray(result.json?.bots) || result.json.bots.length === 0) {
-        return null;
-      }
-      return result;
-    },
-    { timeoutMs: 20_000, description: 'bot participant created from connection-details flow' }
-  );
-
-  assert.equal(bots.response.status, 200);
-  assert.ok(
-    typeof bots.json?.bots?.[0]?.identity === 'string' &&
-      bots.json.bots[0].identity.startsWith('bot_'),
-    `unexpected bot identity payload: ${bots.text}`
-  );
-});
-
-test('connection-details handles empty and malformed bodies correctly', async () => {
-  const emptyBody = await jsonRequest('/api/agent-connection', {
-    method: 'POST',
-  });
-  assert.equal(emptyBody.response.status, 200, `empty body should be accepted: ${emptyBody.text}`);
-  assert.ok(emptyBody.json?.roomName, `missing roomName for empty body: ${emptyBody.text}`);
-  createdRooms.add(emptyBody.json.roomName);
-
-  const malformedBody = await jsonRequest('/api/agent-connection', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: '{',
-  });
-  assert.equal(
-    malformedBody.response.status,
-    400,
-    `malformed JSON body should return 400: ${malformedBody.text}`
-  );
-});
-
 test('failed bot start releases room claim and allows a clean retry', async () => {
   const roomName = createRoomName('concierge-start-fail-cleanup');
   await createRoom(roomName);

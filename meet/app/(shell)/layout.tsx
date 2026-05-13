@@ -1,7 +1,6 @@
 import { Public_Sans } from 'next/font/google';
-import { ApplyThemeScript } from '@/components/agent/apply-theme-script';
 import { cn } from '@/lib/utils';
-import '@/styles/agent-globals.css';
+import '@/styles/theme.css';
 import { NavLinks } from '@/components/console/nav-links';
 import { LogoutButton } from '@/components/console/logout-button';
 
@@ -14,7 +13,6 @@ export default function ShellLayout({ children }: { children: React.ReactNode })
   return (
     <>
       <title>MeetLab</title>
-      <ApplyThemeScript />
       <div className={cn(publicSans.variable, 'bg-background text-foreground font-sans antialiased')}>
         <div className="flex min-h-svh flex-col">
           <header className="border-foreground/10 flex h-12 shrink-0 items-center gap-4 border-b px-4">

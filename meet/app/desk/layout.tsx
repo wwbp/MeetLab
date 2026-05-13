@@ -1,8 +1,7 @@
 import { Public_Sans } from 'next/font/google';
-import { ApplyThemeScript } from '@/components/agent/apply-theme-script';
-import { ThemeToggle } from '@/components/agent/theme-toggle';
+import { ThemeToggle } from '@/components/ui/theme-toggle';
 import { cn } from '@/lib/utils';
-import '@/styles/agent-globals.css';
+import '@/styles/theme.css';
 
 const publicSans = Public_Sans({
   variable: '--font-public-sans',
@@ -17,7 +16,6 @@ export default function DeskLayout({ children }: LayoutProps) {
   return (
     <>
       <title>Desk | Rooms and Bot Ops</title>
-      <ApplyThemeScript />
       <div
         className={cn(
           publicSans.variable,

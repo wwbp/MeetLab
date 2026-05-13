@@ -1,11 +1,12 @@
 import { AccessToken } from 'livekit-server-sdk';
 import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';
-import test from 'node:test';
+import { before, test } from 'node:test';
 
 const BASE_URL = process.env.CONCIERGE_BASE_URL ?? 'http://localhost:3000';
 const ROOM_COUNT = 5;
 const MOCK_USER_COUNT_PER_ROOM = 5;
+let sessionCookie = '';
 
 function createRoomName(index) {
   return `concierge-load-${Date.now()}-${index}-${randomUUID().slice(0, 8)}`;
@@ -16,6 +17,9 @@ async function jsonRequest(path, options = {}) {
   const headers = new Headers(options.headers ?? {});
   if (options.body !== undefined && !headers.has('Content-Type')) {
     headers.set('Content-Type', 'application/json');
+  }
+  if (sessionCookie && !headers.has('Cookie')) {
+    headers.set('Cookie', sessionCookie);
   }
   const response = await fetch(url, { ...options, headers });
   const text = await response.text().catch(() => '');
@@ -29,6 +33,42 @@ async function jsonRequest(path, options = {}) {
   }
   return { response, text, json };
 }
+
+async function waitForConciergeReady() {
+  const timeoutMs = 60_000;
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    try {
+      const res = await fetch(`${BASE_URL}/api/console/login`, { method: 'HEAD' });
+      if (res.status > 0) return;
+    } catch {
+      // keep polling
+    }
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+  }
+  throw new Error(`Meet server did not become ready at ${BASE_URL} within ${timeoutMs}ms`);
+}
+
+async function loginForTest() {
+  const password = process.env.CONSOLE_PASSWORD ?? 'changeme';
+  const res = await fetch(`${BASE_URL}/api/console/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ password }),
+  });
+  if (!res.ok) {
+    throw new Error(`Console login failed (${res.status}) — is CONSOLE_PASSWORD set correctly?`);
+  }
+  const setCookie = res.headers.get('set-cookie') ?? '';
+  const match = setCookie.match(/console-session=[^;]+/);
+  if (!match) throw new Error('No console-session cookie in login response');
+  sessionCookie = match[0];
+}
+
+before(async () => {
+  await waitForConciergeReady();
+  await loginForTest();
+});
 
 function webhookAuthCredentials() {
   const apiKey = process.env.LIVEKIT_API_KEY;

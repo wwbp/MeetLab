@@ -7,7 +7,7 @@ BOT_LONGEVITY_MESSAGE_SECONDS ?= 10
 
 MSG ?= migration
 
-.PHONY: up down start stop logs migrate migration test test-unit test-integration test-bot-longevity setup-livekit-cloud revert-livekit-local test-livekit-tooling
+.PHONY: up down start stop logs migrate migration test test-unit test-integration test-bot-longevity setup-livekit-cloud revert-livekit-local test-livekit-tooling scan scan-agent-runner scan-meet
 
 up:
 	$(COMPOSE) up --build -d
@@ -50,6 +50,16 @@ test-bot-longevity:
 		BOT_LONGEVITY_POLL_SECONDS=$(BOT_LONGEVITY_POLL_SECONDS) \
 		BOT_LONGEVITY_MESSAGE_SECONDS=$(BOT_LONGEVITY_MESSAGE_SECONDS) \
 		uv run python -m unittest -v tests.test_bot_longevity_minimal
+
+scan: scan-agent-runner scan-meet
+
+scan-agent-runner:
+	$(COMPOSE) up -d agent-runner
+	$(COMPOSE) exec -T agent-runner uv run pip-audit
+
+scan-meet:
+	$(COMPOSE) up -d meet
+	$(COMPOSE) exec -T meet pnpm audit
 
 setup-livekit-cloud:
 	./scripts/setup_livekit_cloud.sh setup \

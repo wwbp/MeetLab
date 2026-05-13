@@ -67,6 +67,7 @@ services:
       - ../agent-runner/.env.runner
     environment:
       - DATABASE_URL=postgresql+asyncpg://meetlab:meetlab@postgres:5432/meetlab
+      - BOT_RUNNER_SECRET=${BOT_RUNNER_SECRET:-}
     volumes:
       - ../agent-runner:/app:cached
       - agent-runner-venv:/app/.venv
@@ -87,6 +88,7 @@ services:
       - ../meet/.env.local
     environment:
       - BOT_RUNNER_URL=http://agent-runner:7860/
+      - BOT_RUNNER_SECRET=${BOT_RUNNER_SECRET:-}
     volumes:
       - ../meet:/app:cached
       - meet-node-modules:/app/node_modules

@@ -1,15 +1,20 @@
+import os
 import traceback
 import uuid
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional
 
-from fastapi import BackgroundTasks, FastAPI, Request
+from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from livekit import api
 from loguru import logger
 from sqladmin import Admin, ModelView
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.middleware.sessions import SessionMiddleware
+from starlette.responses import Response as StarletteResponse
 
+from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from config import load_config, require
@@ -20,10 +25,36 @@ from runner_types import LiveKitRunnerArguments
 
 config = load_config()
 LIVEKIT_API_KEY = require(config.livekit_api_key, "LIVEKIT_API_KEY")
+BOT_RUNNER_SECRET = os.environ.get("BOT_RUNNER_SECRET")
 LIVEKIT_API_SECRET = require(config.livekit_api_secret, "LIVEKIT_API_SECRET")
 LIVEKIT_URL = require(config.livekit_url, "LIVEKIT_URL")
 
+
+def verify_api_key(request: Request):
+    if BOT_RUNNER_SECRET:
+        auth = request.headers.get("Authorization", "")
+        if auth != f"Bearer {BOT_RUNNER_SECRET}":
+            raise HTTPException(status_code=401, detail="Unauthorized")
+
+
+class ConsoleDbAuthMiddleware(BaseHTTPMiddleware):
+    """Block direct access to /console/db/** unless the shared bearer token is present.
+
+    The Next.js proxy always injects the token, so the UI still works. Direct browser
+    access to port 7860 (e.g. from a CloudFront origin or local dev) returns 401.
+    """
+
+    async def dispatch(self, request: Request, call_next):
+        if request.url.path.startswith("/console/db"):
+            if BOT_RUNNER_SECRET:
+                auth = request.headers.get("Authorization", "")
+                if auth != f"Bearer {BOT_RUNNER_SECRET}":
+                    return StarletteResponse("Unauthorized", status_code=401)
+        return await call_next(request)
+
+
 app = FastAPI(title="LiveKit Bot Runner")
+app.add_middleware(ConsoleDbAuthMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -31,10 +62,14 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+# SessionMiddleware is required for SQLAdmin CSRF tokens on create/edit forms.
+app.add_middleware(SessionMiddleware, secret_key=LIVEKIT_API_SECRET)
+
 
 # --- SQLAdmin ---
 
-admin = Admin(app, engine, title="MeetLab Admin")
+# base_url matches the Next.js rewrite so all SQLAdmin internal links work through the proxy.
+admin = Admin(app, engine, title="MeetLab Admin", base_url="/console/db")
 
 
 class SpeakerAdmin(ModelView, model=Speaker):
@@ -148,7 +183,7 @@ async def _create_bot_token(
 
 
 @app.post("/start")
-async def start_bot(request: Request, background_tasks: BackgroundTasks):
+async def start_bot(request: Request, background_tasks: BackgroundTasks, _=Depends(verify_api_key)):
     try:
         try:
             body = await request.json()
@@ -245,7 +280,7 @@ async def start_bot(request: Request, background_tasks: BackgroundTasks):
 
 
 @app.post("/events", status_code=202)
-async def log_event(request: Request):
+async def log_event(request: Request, _=Depends(verify_api_key)):
     try:
         body = await request.json()
     except Exception:
@@ -271,10 +306,67 @@ async def log_event(request: Request):
 
 
 @app.get("/config")
-async def get_config(room: str | None = None):
+async def get_config(room: str | None = None, _=Depends(verify_api_key)):
     cfg = await load_bot_config(room)
     return {
         "scope": room or "global",
+        "system_prompt": cfg.system_prompt,
+        "greeting": cfg.greeting,
+        "vad_stop_secs": cfg.vad_stop_secs,
+        "llm_model": cfg.llm_model,
+        "tts_voice": cfg.tts_voice,
+    }
+
+
+@app.put("/config")
+async def update_config(request: Request, _=Depends(verify_api_key)):
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "request body must be valid JSON"}, status_code=400)
+
+    scope = body.get("scope", "global")
+    if not isinstance(scope, str) or not scope.strip():
+        return JSONResponse({"error": "scope must be a non-empty string"}, status_code=400)
+    scope = scope.strip()
+
+    fields: Dict[str, Any] = {}
+    if "system_prompt" in body:
+        if not isinstance(body["system_prompt"], str):
+            return JSONResponse({"error": "system_prompt must be a string"}, status_code=400)
+        fields["system_prompt"] = body["system_prompt"]
+    if "greeting" in body:
+        if not isinstance(body["greeting"], str):
+            return JSONResponse({"error": "greeting must be a string"}, status_code=400)
+        fields["greeting"] = body["greeting"]
+    if "vad_stop_secs" in body:
+        if not isinstance(body["vad_stop_secs"], (int, float)):
+            return JSONResponse({"error": "vad_stop_secs must be a number"}, status_code=400)
+        fields["vad_stop_secs"] = float(body["vad_stop_secs"])
+    if "llm_model" in body:
+        if not isinstance(body["llm_model"], str) or not body["llm_model"].strip():
+            return JSONResponse({"error": "llm_model must be a non-empty string"}, status_code=400)
+        fields["llm_model"] = body["llm_model"].strip()
+    if "tts_voice" in body:
+        if not isinstance(body["tts_voice"], str) or not body["tts_voice"].strip():
+            return JSONResponse({"error": "tts_voice must be a non-empty string"}, status_code=400)
+        fields["tts_voice"] = body["tts_voice"].strip()
+
+    async with AsyncSessionLocal() as session:
+        async with session.begin():
+            result = await session.execute(select(BotConfig).where(BotConfig.scope == scope))
+            row = result.scalar_one_or_none()
+            if row is None:
+                row = BotConfig(scope=scope, **fields)
+                session.add(row)
+            else:
+                for k, v in fields.items():
+                    setattr(row, k, v)
+                row.updated_at = datetime.now(timezone.utc)
+
+    cfg = await load_bot_config(scope if scope != "global" else None)
+    return {
+        "scope": scope,
         "system_prompt": cfg.system_prompt,
         "greeting": cfg.greeting,
         "vad_stop_secs": cfg.vad_stop_secs,

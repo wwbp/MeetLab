@@ -1,2 +1,12 @@
-*.zip
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Recordings written by egress container
 recordings/
+
+# Archives
+*.zip

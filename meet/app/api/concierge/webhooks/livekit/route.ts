@@ -107,7 +107,7 @@ export async function POST(request: Request) {
     maybeRecordTrackSubscriptionSignal(storedEvent);
     maybeReconcileBotClaim(storedEvent);
 
-    const { botRunnerUrl } = getServerConfig();
+    const { botRunnerUrl, botRunnerSecret } = getServerConfig();
     if (botRunnerUrl) {
       const payload = {
         type: storedEvent.event,
@@ -115,9 +115,11 @@ export async function POST(request: Request) {
         participant_identity: storedEvent.participantIdentity ?? undefined,
         received_at: storedEvent.receivedAt,
       };
+      const fwdHeaders: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (botRunnerSecret) fwdHeaders['Authorization'] = `Bearer ${botRunnerSecret}`;
       fetch(`${botRunnerUrl}events`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: fwdHeaders,
         body: JSON.stringify(payload),
       }).catch(() => {
         // fire-and-forget: log nothing, never throws into the webhook response

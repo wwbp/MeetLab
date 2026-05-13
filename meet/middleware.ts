@@ -10,6 +10,11 @@ export const config = {
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
+  // Webhook uses its own LiveKit JWT auth — not console session
+  if (pathname === '/api/concierge/webhooks/livekit') {
+    return NextResponse.next();
+  }
+
   const token = request.cookies.get(COOKIE_NAME)?.value;
   if (token) {
     try {

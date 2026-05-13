@@ -4,24 +4,6 @@ import { useEffect, useState } from 'react';
 import { MonitorIcon, MoonIcon, SunIcon } from '@phosphor-icons/react';
 import { THEME_MEDIA_QUERY, THEME_STORAGE_KEY, cn } from '@/lib/utils';
 
-const THEME_SCRIPT = `
-  const doc = document.documentElement;
-  const theme = localStorage.getItem("${THEME_STORAGE_KEY}") ?? "system";
-
-  if (theme === "system") {
-    if (window.matchMedia("${THEME_MEDIA_QUERY}").matches) {
-      doc.classList.add("dark");
-    } else {
-      doc.classList.add("light");
-    }
-  } else {
-    doc.classList.add(theme);
-  }
-`
-  .trim()
-  .replace(/\n/g, '')
-  .replace(/\s+/g, ' ');
-
 export type ThemeMode = 'dark' | 'light' | 'system';
 
 function applyTheme(theme: ThemeMode) {
@@ -43,10 +25,6 @@ function applyTheme(theme: ThemeMode) {
 
 interface ThemeToggleProps {
   className?: string;
-}
-
-export function ApplyThemeScript() {
-  return <script id="theme-script">{THEME_SCRIPT}</script>;
 }
 
 export function ThemeToggle({ className }: ThemeToggleProps) {

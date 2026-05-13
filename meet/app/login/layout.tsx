@@ -1,5 +1,5 @@
 import { Public_Sans } from 'next/font/google';
-import { ApplyThemeScript } from '@/components/agent/theme-toggle';
+import { ApplyThemeScript } from '@/components/agent/apply-theme-script';
 import { cn } from '@/lib/utils';
 import '@/styles/agent-globals.css';
 

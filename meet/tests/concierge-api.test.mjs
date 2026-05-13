@@ -7,9 +7,26 @@ import { after, before, test } from 'node:test';
 const BASE_URL = process.env.CONCIERGE_BASE_URL ?? 'http://localhost:3000';
 const ROOMS_API = `${BASE_URL}/api/concierge/rooms`;
 const createdRooms = new Set();
+let sessionCookie = '';
 
 function createRoomName(prefix) {
   return `${prefix}-${Date.now()}-${randomUUID().slice(0, 8)}`;
+}
+
+async function loginForTest() {
+  const password = process.env.CONSOLE_PASSWORD ?? 'changeme';
+  const res = await fetch(`${BASE_URL}/api/console/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ password }),
+  });
+  if (!res.ok) {
+    throw new Error(`Console login failed (${res.status}) — is CONSOLE_PASSWORD set correctly?`);
+  }
+  const setCookie = res.headers.get('set-cookie') ?? '';
+  const match = setCookie.match(/console-session=[^;]+/);
+  if (!match) throw new Error('No console-session cookie in login response');
+  sessionCookie = match[0];
 }
 
 async function jsonRequest(path, options = {}) {
@@ -17,6 +34,9 @@ async function jsonRequest(path, options = {}) {
   const headers = new Headers(options.headers ?? {});
   if (options.body !== undefined && !headers.has('Content-Type')) {
     headers.set('Content-Type', 'application/json');
+  }
+  if (sessionCookie && !headers.has('Cookie')) {
+    headers.set('Cookie', sessionCookie);
   }
   const response = await fetch(url, { ...options, headers });
   let text = '';
@@ -100,16 +120,15 @@ async function waitForConciergeReady() {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
     try {
-      const { response } = await jsonRequest('/api/concierge/rooms');
-      if (response.ok) {
-        return;
-      }
+      // Probe the unprotected login endpoint — any HTTP response means the server is up.
+      const res = await fetch(`${BASE_URL}/api/console/login`, { method: 'HEAD' });
+      if (res.status > 0) return;
     } catch {
-      // Keep polling until timeout.
+      // Network error — keep polling.
     }
     await new Promise((resolve) => setTimeout(resolve, 1000));
   }
-  throw new Error(`Concierge API did not become ready at ${ROOMS_API} within ${timeoutMs}ms`);
+  throw new Error(`Meet server did not become ready at ${BASE_URL} within ${timeoutMs}ms`);
 }
 
 async function waitFor(
@@ -131,7 +150,8 @@ async function waitFor(
 }
 
 before(async () => {
-  await waitForConciergeReady();
+  await waitForConciergeReady();  // wait for server up (unprotected endpoint)
+  await loginForTest();           // then acquire session cookie
 });
 
 after(async () => {

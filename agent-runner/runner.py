@@ -63,7 +63,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 # SessionMiddleware is required for SQLAdmin CSRF tokens on create/edit forms.
-app.add_middleware(SessionMiddleware, secret_key=os.environ.get("LIVEKIT_API_SECRET", "changeme"))
+app.add_middleware(SessionMiddleware, secret_key=LIVEKIT_API_SECRET)
 
 
 # --- SQLAdmin ---

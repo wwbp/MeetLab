@@ -1,101 +1,106 @@
-# LiveKit Meet Lab
+# MeetLab
 
-A local development stack combining conferencing, voice agent, and admin UI in a single Next.js app.
+A self-hosted conferencing and voice agent stack. One `make start` brings up a LiveKit media server, a FastAPI bot runner, and a Next.js app covering the conference UI, voice agent UI, and operator console — all in Docker.
 
 ## Services
 
 | Service | Port | Role |
 |---------|------|------|
-| `transport-server` | 7880 | LiveKit media server |
-| `redis` | 6379 | Message bus between transport-server and egress |
+| `transport-server` | 7880 | LiveKit media server (`--dev` mode) |
+| `agent-runner` | 7860 | FastAPI — spawns Pipecat voice bots, stores transcripts |
+| `meet` | 3000 | Next.js 16 — operator console, conference UI, voice agent UI |
 | `egress` | — | LiveKit egress — composite room recording |
-| `agent-runner` | 7860 | FastAPI — spawns Pipecat voice bots |
-| `meet` | 3000 | Next.js 16 — conferencing, voice agent UI, Concierge admin |
+| `redis` | 6379 | Message bus for egress |
 
-## Quick Start
+## Quick start
 
 **Prerequisites:** Docker Desktop, OpenAI API key.
 
 ```bash
-cd stacks/r3-livekit-meet-lab
-cp agent-runner/.env.runner.example agent-runner/.env.runner   # set OPENAI_API_KEY
-cp meet/.env.local.example meet/.env.local
+cp agent-runner/.env.runner.example agent-runner/.env.runner   # add OPENAI_API_KEY
+cp meet/.env.local.example meet/.env.local                     # set CONSOLE_PASSWORD + BOT_RUNNER_SECRET
 make start
 ```
 
-Open:
-- `http://localhost:3000` — voice agent
-- `http://localhost:3000/desk` — Concierge admin
-- `http://localhost:3000/rooms/<name>` — Meet conferencing
-- `http://localhost:7860/health` — agent-runner health check
+Open `http://localhost:3000` and sign in with the password you set in `CONSOLE_PASSWORD`.
+
+| URL | What it is |
+|-----|-----------|
+| `http://localhost:3000` | Operator console (login required) |
+| `http://localhost:3000/agent` | Voice agent demo UI |
+| `http://localhost:3000/rooms/<name>` | Conference room |
+| `http://localhost:7860/health` | agent-runner health check |
+
+## Operator console
+
+After signing in at `/` you have three tabs:
+
+- **Rooms & Bots** — create/delete rooms, start/stop bots, view event history
+- **Bot Config** — edit system prompt, greeting, LLM model, TTS voice, VAD threshold; scoped globally or per room
+- **DB Admin** — SQLAdmin over Postgres; view and edit speakers, conversations, utterances, events
+
+## Environment
+
+Both env files share `LIVEKIT_API_KEY` / `LIVEKIT_API_SECRET` — the values must match. Local dev defaults are `devkey` / `secret`.
+
+`BOT_RUNNER_SECRET` is a shared bearer token between `meet` and `agent-runner`. Set the same value in both files. Without it all agent-runner endpoints are open.
+
+| File | Key variables |
+|------|--------------|
+| `agent-runner/.env.runner` | `OPENAI_API_KEY`, `LIVEKIT_URL`, `BOT_RUNNER_SECRET` |
+| `meet/.env.local` | `LIVEKIT_URL_PUBLIC`, `LIVEKIT_URL_INTERNAL`, `BOT_RUNNER_URL`, `CONSOLE_PASSWORD`, `BOT_RUNNER_SECRET` |
 
 ## Commands
 
 ```bash
-make start                          # build + start all services
-make stop                           # stop and remove volumes
-make logs SERVICE=meet              # tail service logs (agent-runner | meet | transport-server | egress | redis)
-make test                           # unit + integration tests
-make test-bot-longevity             # long-running bot drop timing test
-make setup-livekit-cloud \
-  LIVEKIT_CLOUD_URL=wss://... \
-  LIVEKIT_API_KEY=... \
-  LIVEKIT_API_SECRET=...            # switch to LiveKit Cloud
-make revert-livekit-local           # revert to local LiveKit
-make test-livekit-tooling           # test the cloud-switch script
+make start                    # build + start all services, run migrations
+make stop                     # stop and remove volumes
+make logs SERVICE=meet        # tail logs (meet | agent-runner | transport-server | egress | redis)
+
+make test                     # unit + integration
+make test-unit                # Python unittest (agent-runner) + Vitest (meet)
+make test-integration         # concierge API + load tests (requires running stack)
+make test-bot-longevity       # long-running bot drop timing test
+
+make scan                     # pip-audit + pnpm audit for known CVEs
+
+make migration MSG="add index" # generate Alembic migration
+make migrate                  # apply pending migrations
 ```
 
-Bot longevity test knobs (all optional):
+### Bot longevity test knobs
 
 | Variable | Default | Meaning |
 |----------|---------|---------|
 | `BOT_LONGEVITY_MAX_SECONDS` | `1050` | Test fails if bot drops before this many seconds |
 | `BOT_LONGEVITY_POLL_SECONDS` | `5` | Polling interval |
-| `BOT_LONGEVITY_MESSAGE_SECONDS` | `10` | Interval between chat messages sent to bot |
-
-## Environment
-
-`LIVEKIT_API_KEY` and `LIVEKIT_API_SECRET` must match across both env files. Local defaults are `devkey` / `secret`.
-
-| File | Key variables |
-|------|--------------|
-| `agent-runner/.env.runner` | `OPENAI_API_KEY`, `LIVEKIT_URL=ws://transport-server:7880` |
-| `meet/.env.local` | `LIVEKIT_URL_PUBLIC`, `LIVEKIT_URL_INTERNAL`, `BOT_RUNNER_URL`, `STORAGE_BACKEND`, recording vars |
+| `BOT_LONGEVITY_MESSAGE_SECONDS` | `10` | Interval between chat messages sent to the bot |
 
 ## Recording
 
-Recording uses LiveKit Egress. In local dev the egress container writes MP4 files to `./recordings/` (bind-mounted, created automatically). In staging/production LiveKit Cloud's managed egress writes directly to S3.
+In local dev the egress container writes MP4 files to `./recordings/` at the project root. In production, LiveKit Cloud's managed egress writes directly to S3.
 
 ### Local dev
 
-Recording is enabled by default via `meet/.env.local`. Join any room at `http://localhost:3000/rooms/<name>`, click the **⚙ gear icon** in the control bar, open the **Recording** tab, and click **Start Recording**. A red dot appears for all participants while recording is active.
+Recording is enabled by default. Join any room, click the **⚙ gear icon** in the control bar, open the **Recording** tab, and click **Start Recording**.
 
-Recordings land in `recordings/` at the project root as `<timestamp>-<roomName>.mp4`.
+### Production (S3)
 
-### Staging / production (S3)
-
-Set these environment variables on your deployment (Elastic Beanstalk, etc.):
+Set these on your deployment:
 
 | Variable | Value |
 |----------|-------|
-| `NEXT_PUBLIC_SHOW_SETTINGS_MENU` | `true` |
-| `NEXT_PUBLIC_LK_RECORD_ENDPOINT` | `/api/record` |
 | `STORAGE_BACKEND` | `s3` |
-| `S3_BUCKET` | `meetlab-data` |
-| `S3_REGION` | `us-east-1` |
-| `S3_KEY_ID` | IAM access key |
+| `S3_BUCKET` | your bucket name |
+| `S3_REGION` | e.g. `us-east-1` |
+| `S3_KEY_ID` | IAM access key (`s3:PutObject` on the bucket) |
 | `S3_KEY_SECRET` | IAM secret key |
 
-The IAM key needs `s3:PutObject` on `arn:aws:s3:::meetlab-data/*`. LiveKit Cloud egress writes the file; the meet server only initiates the request.
+Point the LiveKit Cloud webhook at `https://<your-domain>/api/concierge/webhooks/livekit`.
 
-Configure the LiveKit Cloud webhook in your project dashboard to point at:
-```
-https://<your-domain>/api/concierge/webhooks/livekit
-```
+## Remote demos with ngrok
 
-## Remote demos with ngrok (optional)
-
-For external access, first point the stack at a public LiveKit endpoint (LiveKit Cloud recommended):
+Switch to LiveKit Cloud first (local transport-server isn't reachable externally):
 
 ```bash
 make setup-livekit-cloud \
@@ -103,24 +108,10 @@ make setup-livekit-cloud \
   LIVEKIT_API_KEY=<key> \
   LIVEKIT_API_SECRET=<secret>
 make start
-```
-
-Verify the public URL is returned:
-
-```bash
-docker compose -f .devcontainer/docker-compose.yml exec -T meet \
-  curl -sS "http://localhost:3000/api/connection-details?roomName=smoke&participantName=smoke"
-```
-
-Then tunnel port 3000:
-
-```bash
 ngrok http 3000
 ```
 
-Share links of the form `https://<ngrok-domain>/rooms/<roomName>`.
-
-Revert when done:
+Share links of the form `https://<ngrok-domain>/rooms/<roomName>`. Revert with:
 
 ```bash
 make revert-livekit-local && make start
@@ -128,8 +119,7 @@ make revert-livekit-local && make start
 
 ## Known constraints
 
-- All concierge state is in-memory — a `meet` restart clears all room claims and bot assignments.
-- `livekit-server:latest` and `livekit/egress:latest` are unpinned; pin before any production deployment.
-- LiveKit runs in `--dev` mode (`devkey`/`secret`, no security checks).
-- Token TTL is 15 minutes with no refresh path.
-- The `recordings/` directory is excluded from git; files persist across `make start/stop` but are deleted by `make down` (removes volumes and bind-mounts are unaffected — files remain on disk).
+- All room/bot state in `meet` is in-memory — a restart clears everything. Sessions in flight are stranded.
+- `livekit-server:latest` and `livekit/egress:latest` are unpinned — pin before production.
+- LiveKit runs in `--dev` mode; `devkey`/`secret` defaults and no JWT validation.
+- Bot token TTL is 15 minutes with no refresh path — long sessions will silently drop.

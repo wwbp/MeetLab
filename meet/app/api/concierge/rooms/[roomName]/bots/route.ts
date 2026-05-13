@@ -83,9 +83,12 @@ async function callBotRunnerStart(
       };
     }
 
+    const runnerHeaders: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (config.botRunnerSecret) runnerHeaders['Authorization'] = `Bearer ${config.botRunnerSecret}`;
+
     const response = await fetch(endpoint, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: runnerHeaders,
       body: JSON.stringify(body),
       signal: controller.signal,
     });

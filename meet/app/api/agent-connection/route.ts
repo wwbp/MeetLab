@@ -89,11 +89,13 @@ export async function POST(req: Request) {
     try {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 10000);
+      const agentHeaders: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (config.botRunnerSecret) agentHeaders['Authorization'] = `Bearer ${config.botRunnerSecret}`;
       let botResponse: Response;
       try {
         botResponse = await fetch(`${apiUrl}start`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: agentHeaders,
           body: JSON.stringify({
             room_name: roomName,
             room_config: body.room_config,

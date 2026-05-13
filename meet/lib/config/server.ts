@@ -4,6 +4,7 @@ export type ServerConfig = {
   livekitApiKey?: string;
   livekitApiSecret?: string;
   botRunnerUrl?: string;
+  botRunnerSecret?: string;
 };
 
 export function getServerConfig(): ServerConfig {
@@ -16,6 +17,7 @@ export function getServerConfig(): ServerConfig {
     livekitApiKey: process.env.LIVEKIT_API_KEY,
     livekitApiSecret: process.env.LIVEKIT_API_SECRET,
     botRunnerUrl: process.env.BOT_RUNNER_URL,
+    botRunnerSecret: process.env.BOT_RUNNER_SECRET,
   };
 }
 

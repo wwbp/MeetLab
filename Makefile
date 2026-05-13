@@ -5,7 +5,9 @@ BOT_LONGEVITY_MAX_SECONDS ?= 1050
 BOT_LONGEVITY_POLL_SECONDS ?= 5
 BOT_LONGEVITY_MESSAGE_SECONDS ?= 10
 
-.PHONY: up down start stop logs test test-unit test-integration test-bot-longevity setup-livekit-cloud revert-livekit-local test-livekit-tooling
+MSG ?= migration
+
+.PHONY: up down start stop logs migrate migration test test-unit test-integration test-bot-longevity setup-livekit-cloud revert-livekit-local test-livekit-tooling
 
 up:
 	$(COMPOSE) up --build -d
@@ -13,9 +15,15 @@ up:
 down:
 	$(COMPOSE) down -v
 
-start: up
+start: up migrate
 
 stop: down
+
+migrate:
+	$(COMPOSE) exec -T agent-runner uv run alembic upgrade head
+
+migration:
+	$(COMPOSE) exec -T agent-runner uv run alembic revision --autogenerate -m "$(MSG)"
 
 logs:
 	$(COMPOSE) logs -f --tail=$(LOG_TAIL) $(SERVICE)
@@ -33,7 +41,7 @@ test-integration:
 	$(COMPOSE) exec -T meet pnpm test:load
 
 test-bot-longevity:
-	$(COMPOSE) up -d transport-server agent-runner web-client
+	$(COMPOSE) up -d transport-server agent-runner meet
 	$(COMPOSE) exec -T agent-runner \
 		env \
 		RUN_BOT_LONGEVITY_TEST=1 \

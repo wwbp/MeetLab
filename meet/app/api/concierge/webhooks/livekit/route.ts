@@ -8,6 +8,7 @@ import { pushConciergeEvent } from '@/lib/concierge/events-store';
 import { noStoreHeaders } from '@/lib/concierge/http-utils';
 import { getWebhookReceiver, mapWebhookEvent } from '@/lib/concierge/livekit-admin';
 import type { ConciergeEvent } from '@/lib/concierge/types';
+import { getServerConfig } from '@/lib/config/server';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -105,6 +106,24 @@ export async function POST(request: Request) {
     const storedEvent = pushConciergeEvent(mapWebhookEvent(event));
     maybeRecordTrackSubscriptionSignal(storedEvent);
     maybeReconcileBotClaim(storedEvent);
+
+    const { botRunnerUrl } = getServerConfig();
+    if (botRunnerUrl) {
+      const payload = {
+        type: storedEvent.event,
+        room_name: storedEvent.roomName ?? undefined,
+        participant_identity: storedEvent.participantIdentity ?? undefined,
+        received_at: storedEvent.receivedAt,
+      };
+      fetch(`${botRunnerUrl}events`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      }).catch(() => {
+        // fire-and-forget: log nothing, never throws into the webhook response
+      });
+    }
+
     return NextResponse.json({ ok: true, event: storedEvent }, { headers: noStoreHeaders() });
   } catch (error) {
     const message =

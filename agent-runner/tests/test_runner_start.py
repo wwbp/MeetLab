@@ -29,7 +29,16 @@ class RunnerStartApiTests(unittest.TestCase):
 
             cls.runner_module = runner_module
 
-        cls.client = TestClient(cls.runner_module.app)
+        # Use TestClient as a context manager so all requests share a single
+        # anyio BlockingPortal (one event loop). Without this, each post() call
+        # creates a new event loop and asyncpg raises "Future attached to a
+        # different loop" when the pool tries to reuse connections.
+        cls._client_ctx = TestClient(cls.runner_module.app)
+        cls.client = cls._client_ctx.__enter__()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls._client_ctx.__exit__(None, None, None)
 
     # ------------------------------------------------------------------
     # Input validation — room_name

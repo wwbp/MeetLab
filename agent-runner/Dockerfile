@@ -31,4 +31,4 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 EXPOSE 7860
 
 # Start your runner (change if your entrypoint differs)
-CMD ["uv", "run", "python", "runner.py"]
+CMD ["sh", "-c", "uv run alembic upgrade head && uv run python runner.py"]

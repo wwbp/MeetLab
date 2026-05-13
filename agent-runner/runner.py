@@ -8,8 +8,14 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from livekit import api
 from loguru import logger
+from sqladmin import Admin, ModelView
+
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from config import load_config, require
+from db.config_loader import load_bot_config
+from db.engine import AsyncSessionLocal, engine
+from db.models import BotConfig, Conversation, Event, Speaker, Utterance
 from runner_types import LiveKitRunnerArguments
 
 config = load_config()
@@ -25,6 +31,85 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# --- SQLAdmin ---
+
+admin = Admin(app, engine, title="MeetLab Admin")
+
+
+class SpeakerAdmin(ModelView, model=Speaker):
+    column_list = [Speaker.id, Speaker.meta]
+    name = "Speaker"
+    name_plural = "Speakers"
+
+
+class ConversationAdmin(ModelView, model=Conversation):
+    column_list = [
+        Conversation.id,
+        Conversation.room_name,
+        Conversation.bot_identity,
+        Conversation.status,
+        Conversation.started_at,
+        Conversation.ended_at,
+    ]
+    column_searchable_list = [Conversation.room_name]
+    column_sortable_list = [Conversation.started_at, Conversation.status]
+    name = "Conversation"
+    name_plural = "Conversations"
+
+
+class UtteranceAdmin(ModelView, model=Utterance):
+    column_list = [
+        Utterance.id,
+        Utterance.conv_id,
+        Utterance.speaker_id,
+        Utterance.text,
+        Utterance.ts,
+        Utterance.meta,
+    ]
+    column_searchable_list = [Utterance.text, Utterance.conv_id]
+    column_sortable_list = [Utterance.ts]
+    name = "Utterance"
+    name_plural = "Utterances"
+
+
+class EventAdmin(ModelView, model=Event):
+    column_list = [
+        Event.id,
+        Event.type,
+        Event.room_name,
+        Event.conv_id,
+        Event.payload,
+        Event.created_at,
+    ]
+    column_searchable_list = [Event.type, Event.room_name]
+    column_sortable_list = [Event.created_at]
+    can_create = False
+    can_edit = False
+    can_delete = False
+    name = "Event"
+    name_plural = "Events"
+
+
+class BotConfigAdmin(ModelView, model=BotConfig):
+    column_list = [
+        BotConfig.scope,
+        BotConfig.system_prompt,
+        BotConfig.greeting,
+        BotConfig.vad_stop_secs,
+        BotConfig.llm_model,
+        BotConfig.tts_voice,
+        BotConfig.updated_at,
+    ]
+    name = "Bot Config"
+    name_plural = "Bot Configs"
+
+
+admin.add_view(SpeakerAdmin)
+admin.add_view(ConversationAdmin)
+admin.add_view(UtteranceAdmin)
+admin.add_view(EventAdmin)
+admin.add_view(BotConfigAdmin)
 
 
 def _room_slug(room_name: str) -> str:
@@ -115,17 +200,36 @@ async def start_bot(request: Request, background_tasks: BackgroundTasks):
             agent_name=agent_name,
         )
 
+        session_id = str(uuid.uuid4())
+
+        async with AsyncSessionLocal() as session:
+            async with session.begin():
+                await session.execute(
+                    pg_insert(Speaker)
+                    .values(id=bot_identity, meta={"role": "bot"})
+                    .on_conflict_do_nothing(index_elements=["id"])
+                )
+                session.add(
+                    Conversation(
+                        id=session_id,
+                        room_name=room_name,
+                        bot_identity=bot_identity,
+                        status="running",
+                    )
+                )
+
         runner_args = LiveKitRunnerArguments(
             url=LIVEKIT_URL,
             token=bot_token,
             room_name=room_name,
+            session_id=session_id,
+            bot_identity=bot_identity,
             body=body,
         )
 
         from bot import bot
         background_tasks.add_task(bot, runner_args)
 
-        session_id = str(uuid.uuid4())
         logger.info(f"Starting bot session {session_id} in room {room_name}")
 
         return {
@@ -138,6 +242,45 @@ async def start_bot(request: Request, background_tasks: BackgroundTasks):
     except Exception as e:
         logger.error(f"Error starting bot: {e}\n{traceback.format_exc()}")
         return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.post("/events", status_code=202)
+async def log_event(request: Request):
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "request body must be valid JSON"}, status_code=400)
+    if not isinstance(body, dict):
+        return JSONResponse({"error": "request body must be a JSON object"}, status_code=400)
+
+    event_type = body.get("type")
+    if not isinstance(event_type, str) or not event_type.strip():
+        return JSONResponse({"error": "type is required"}, status_code=400)
+
+    async with AsyncSessionLocal() as session:
+        async with session.begin():
+            session.add(
+                Event(
+                    type=event_type.strip(),
+                    room_name=body.get("room_name"),
+                    conv_id=body.get("conv_id"),
+                    payload={k: v for k, v in body.items() if k not in ("type", "room_name", "conv_id")},
+                )
+            )
+    return {"status": "accepted"}
+
+
+@app.get("/config")
+async def get_config(room: str | None = None):
+    cfg = await load_bot_config(room)
+    return {
+        "scope": room or "global",
+        "system_prompt": cfg.system_prompt,
+        "greeting": cfg.greeting,
+        "vad_stop_secs": cfg.vad_stop_secs,
+        "llm_model": cfg.llm_model,
+        "tts_voice": cfg.tts_voice,
+    }
 
 
 @app.get("/health")

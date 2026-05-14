@@ -59,18 +59,16 @@ class AdminAuth(AuthenticationBackend):
 
 
 class ProxyHeadersMiddleware(BaseHTTPMiddleware):
-    """Rewrite scope so Starlette/SQLAdmin builds correct https:// URLs behind CloudFront."""
+    """Rewrite ASGI scope scheme from CloudFront-Forwarded-Proto so SQLAdmin generates https:// URLs."""
 
     async def dispatch(self, request: Request, call_next):
-        proto = request.headers.get("x-forwarded-proto", "")
-        host = request.headers.get("x-forwarded-host", "") or request.headers.get("host", "")
-        if proto or host:
-            scope = dict(request.scope)
-            if proto:
-                scope["scheme"] = proto.split(",")[0].strip()
-            if host:
-                scope["server"] = (host.split(":")[0], int(host.split(":")[1]) if ":" in host else (443 if scope.get("scheme") == "https" else 80))
-            request = Request(scope, request.receive, request._send)
+        # CloudFront sends CloudFront-Forwarded-Proto (not X-Forwarded-Proto) to the origin.
+        proto = (
+            request.headers.get("cloudfront-forwarded-proto")
+            or request.headers.get("x-forwarded-proto")
+        )
+        if proto:
+            request.scope["scheme"] = proto.split(",")[0].strip()
         return await call_next(request)
 
 

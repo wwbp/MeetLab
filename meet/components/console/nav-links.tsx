@@ -7,7 +7,7 @@ import { cn } from '@/lib/utils';
 const NAV_ITEMS = [
   { label: 'Rooms & Bots', href: '/' },
   { label: 'Bot Config', href: '/config' },
-  { label: 'DB Admin', href: '/db', external: true },
+  { label: 'DB Admin', href: '/api/db', external: true },
 ];
 
 export function NavLinks() {

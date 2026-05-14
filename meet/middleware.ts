@@ -4,7 +4,7 @@ import { jwtVerify } from 'jose';
 const COOKIE_NAME = 'console-session';
 
 export const config = {
-  matcher: ['/', '/config', '/db/:path*', '/api/db', '/api/db/:path*', '/api/concierge/:path*', '/api/console/logout', '/api/console/config'],
+  matcher: ['/', '/config', '/db/:path*', '/api/concierge/:path*', '/api/console/logout', '/api/console/config'],
 };
 
 export async function middleware(request: NextRequest) {

@@ -10,8 +10,10 @@ from fastapi.responses import JSONResponse
 from livekit import api
 from loguru import logger
 from sqladmin import Admin, ModelView
+from sqladmin.authentication import AuthenticationBackend
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.middleware.sessions import SessionMiddleware
+from starlette.requests import Request as StarletteRequest
 from starlette.responses import Response as StarletteResponse
 
 from sqlalchemy import select
@@ -37,20 +39,43 @@ def verify_api_key(request: Request):
             raise HTTPException(status_code=401, detail="Unauthorized")
 
 
-class ConsoleDbAuthMiddleware(BaseHTTPMiddleware):
-    """Block direct access to /api/db/** unless the shared bearer token is present."""
+CONSOLE_PASSWORD = os.environ.get("CONSOLE_PASSWORD")
+
+
+class AdminAuth(AuthenticationBackend):
+    async def login(self, request: StarletteRequest) -> bool:
+        form = await request.form()
+        if CONSOLE_PASSWORD and form.get("password") == CONSOLE_PASSWORD:
+            request.session["admin_authenticated"] = True
+            return True
+        return False
+
+    async def logout(self, request: StarletteRequest) -> bool:
+        request.session.clear()
+        return True
+
+    async def authenticate(self, request: StarletteRequest) -> bool:
+        return bool(request.session.get("admin_authenticated"))
+
+
+class ProxyHeadersMiddleware(BaseHTTPMiddleware):
+    """Rewrite scope so Starlette/SQLAdmin builds correct https:// URLs behind CloudFront."""
 
     async def dispatch(self, request: Request, call_next):
-        if request.url.path.startswith("/api/db"):
-            if BOT_RUNNER_SECRET:
-                auth = request.headers.get("Authorization", "")
-                if auth != f"Bearer {BOT_RUNNER_SECRET}":
-                    return StarletteResponse("Unauthorized", status_code=401)
+        proto = request.headers.get("x-forwarded-proto", "")
+        host = request.headers.get("x-forwarded-host", "") or request.headers.get("host", "")
+        if proto or host:
+            scope = dict(request.scope)
+            if proto:
+                scope["scheme"] = proto.split(",")[0].strip()
+            if host:
+                scope["server"] = (host.split(":")[0], int(host.split(":")[1]) if ":" in host else (443 if scope.get("scheme") == "https" else 80))
+            request = Request(scope, request.receive, request._send)
         return await call_next(request)
 
 
 app = FastAPI(title="LiveKit Bot Runner")
-app.add_middleware(ConsoleDbAuthMiddleware)
+app.add_middleware(ProxyHeadersMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -64,7 +89,7 @@ app.add_middleware(SessionMiddleware, secret_key=LIVEKIT_API_SECRET)
 
 # --- SQLAdmin ---
 
-admin = Admin(app, engine, title="MeetLab Admin", base_url="/api/db")
+admin = Admin(app, engine, title="MeetLab Admin", base_url="/api/db", authentication_backend=AdminAuth(secret_key=LIVEKIT_API_SECRET))
 
 
 class SpeakerAdmin(ModelView, model=Speaker):

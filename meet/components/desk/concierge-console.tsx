@@ -285,7 +285,7 @@ export function ConciergeConsole() {
   }, []);
 
   return (
-    <div className="bg-background min-h-svh">
+    <div className="bg-background">
       <div className="mx-auto w-full max-w-6xl space-y-6 px-4 py-6 sm:px-8 sm:py-10">
         <header className="space-y-2">
           <p className="text-muted-foreground font-mono text-xs uppercase">Desk</p>

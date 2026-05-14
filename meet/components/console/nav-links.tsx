@@ -7,7 +7,7 @@ import { cn } from '@/lib/utils';
 const NAV_ITEMS = [
   { label: 'Rooms & Bots', href: '/' },
   { label: 'Bot Config', href: '/config' },
-  { label: 'DB Admin', href: '/db' },
+  { label: 'DB Admin', href: '/db', external: true },
 ];
 
 export function NavLinks() {
@@ -15,19 +15,18 @@ export function NavLinks() {
 
   return (
     <nav className="flex items-center gap-1">
-      {NAV_ITEMS.map(({ label, href }) => {
+      {NAV_ITEMS.map(({ label, href, external }) => {
         const isActive = href === '/' ? pathname === '/' : pathname.startsWith(href);
-        return (
-          <Link
-            key={href}
-            href={href}
-            className={cn(
-              'rounded px-3 py-1.5 text-sm transition-colors',
-              isActive
-                ? 'bg-foreground text-background'
-                : 'text-muted-foreground hover:text-foreground'
-            )}
-          >
+        const className = cn(
+          'rounded px-3 py-1.5 text-sm transition-colors',
+          isActive ? 'bg-foreground text-background' : 'text-muted-foreground hover:text-foreground'
+        );
+        return external ? (
+          <a key={href} href={href} target="_blank" rel="noopener noreferrer" className={className}>
+            {label}
+          </a>
+        ) : (
+          <Link key={href} href={href} className={className}>
             {label}
           </Link>
         );

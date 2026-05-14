@@ -38,14 +38,10 @@ def verify_api_key(request: Request):
 
 
 class ConsoleDbAuthMiddleware(BaseHTTPMiddleware):
-    """Block direct access to /console/db/** unless the shared bearer token is present.
-
-    The Next.js proxy always injects the token, so the UI still works. Direct browser
-    access to port 7860 (e.g. from a CloudFront origin or local dev) returns 401.
-    """
+    """Block direct access to /db/** unless the shared bearer token is present."""
 
     async def dispatch(self, request: Request, call_next):
-        if request.url.path.startswith("/console/db"):
+        if request.url.path.startswith("/db"):
             if BOT_RUNNER_SECRET:
                 auth = request.headers.get("Authorization", "")
                 if auth != f"Bearer {BOT_RUNNER_SECRET}":
@@ -68,8 +64,7 @@ app.add_middleware(SessionMiddleware, secret_key=LIVEKIT_API_SECRET)
 
 # --- SQLAdmin ---
 
-# base_url matches the Next.js rewrite so all SQLAdmin internal links work through the proxy.
-admin = Admin(app, engine, title="MeetLab Admin", base_url="/console/db")
+admin = Admin(app, engine, title="MeetLab Admin", base_url="/db")
 
 
 class SpeakerAdmin(ModelView, model=Speaker):

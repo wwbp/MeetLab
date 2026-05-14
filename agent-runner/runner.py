@@ -38,10 +38,10 @@ def verify_api_key(request: Request):
 
 
 class ConsoleDbAuthMiddleware(BaseHTTPMiddleware):
-    """Block direct access to /db/** unless the shared bearer token is present."""
+    """Block direct access to /api/db/** unless the shared bearer token is present."""
 
     async def dispatch(self, request: Request, call_next):
-        if request.url.path.startswith("/db"):
+        if request.url.path.startswith("/api/db"):
             if BOT_RUNNER_SECRET:
                 auth = request.headers.get("Authorization", "")
                 if auth != f"Bearer {BOT_RUNNER_SECRET}":
@@ -64,7 +64,7 @@ app.add_middleware(SessionMiddleware, secret_key=LIVEKIT_API_SECRET)
 
 # --- SQLAdmin ---
 
-admin = Admin(app, engine, title="MeetLab Admin", base_url="/db")
+admin = Admin(app, engine, title="MeetLab Admin", base_url="/api/db")
 
 
 class SpeakerAdmin(ModelView, model=Speaker):

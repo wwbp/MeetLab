@@ -255,12 +255,26 @@ export function ConciergeConsole() {
     <div className="bg-background">
       <div className="mx-auto w-full max-w-6xl space-y-6 px-4 py-6 sm:px-8 sm:py-10">
         <header className="space-y-2">
-          <p className="text-muted-foreground font-mono text-xs uppercase">Desk</p>
-          <h1 className="text-3xl font-medium">Rooms and Bot Ops</h1>
-          <p className="text-muted-foreground text-sm">
-            Minimal control plane: create or update rooms, run one bot per room, share join links,
-            and watch room and bot health.
-          </p>
+          <div className="flex items-start justify-between gap-4">
+            <div className="space-y-2">
+              <p className="text-muted-foreground font-mono text-xs uppercase">Desk</p>
+              <h1 className="text-3xl font-medium">Rooms and Bot Ops</h1>
+              <p className="text-muted-foreground text-sm">
+                Minimal control plane: create or update rooms, run one bot per room, share join
+                links, and watch room and bot health.
+              </p>
+            </div>
+            {process.env.NEXT_PUBLIC_TRACES_URL && (
+              <a
+                href={process.env.NEXT_PUBLIC_TRACES_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="border-foreground/20 text-muted-foreground hover:text-foreground shrink-0 border px-3 py-1.5 font-mono text-xs transition-colors"
+              >
+                View Traces ↗
+              </a>
+            )}
+          </div>
         </header>
 
         <section className="grid gap-3 sm:grid-cols-3">

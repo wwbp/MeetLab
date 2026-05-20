@@ -31,7 +31,7 @@ dependencies = [
     { name = "itsdangerous" },
     { name = "loguru" },
     { name = "pip-audit" },
-    { name = "pipecat-ai", extra = ["livekit", "openai"] },
+    { name = "pipecat-ai", extra = ["elevenlabs", "livekit", "openai"] },
     { name = "python-dotenv" },
     { name = "sqladmin" },
     { name = "sqlalchemy", extra = ["asyncio"] },
@@ -47,7 +47,7 @@ requires-dist = [
     { name = "itsdangerous", specifier = ">=2.2.0" },
     { name = "loguru", specifier = ">=0.7.3" },
     { name = "pip-audit", specifier = ">=2.10.0" },
-    { name = "pipecat-ai", extras = ["livekit", "openai", "silero"], specifier = ">=1.1.0,<2.0.0" },
+    { name = "pipecat-ai", extras = ["livekit", "openai", "silero", "elevenlabs"], specifier = ">=1.1.0,<2.0.0" },
     { name = "python-dotenv", specifier = ">=1.2.2" },
     { name = "sqladmin", specifier = ">=0.20.0" },
     { name = "sqlalchemy", extras = ["asyncio"], specifier = ">=2.0.0" },
@@ -1726,6 +1726,9 @@ wheels = [
 ]
 
 [package.optional-dependencies]
+elevenlabs = [
+    { name = "websockets" },
+]
 livekit = [
     { name = "livekit" },
     { name = "livekit-api" },

@@ -28,9 +28,9 @@ from pipecat.processors.aggregators.llm_response_universal import (
     LLMContextAggregatorPair,
     LLMUserAggregatorParams,
 )
+from pipecat.services.elevenlabs.tts import ElevenLabsTTSService
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.services.openai.stt import OpenAISTTService
-from pipecat.services.openai.tts import OpenAITTSService
 from pipecat.transports.livekit.transport import LiveKitParams, LiveKitTransport
 from sqlalchemy import select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -96,6 +96,7 @@ async def bot(runner_args: LiveKitRunnerArguments):
 
     env_config = load_config()
     openai_api_key = require(env_config.openai_api_key, "OPENAI_API_KEY")
+    elevenlabs_api_key = require(env_config.elevenlabs_api_key, "ELEVENLABS_API_KEY")
 
     bot_config = await load_bot_config(runner_args.room_name)
     logger.info(
@@ -105,10 +106,9 @@ async def bot(runner_args: LiveKitRunnerArguments):
 
     stt = OpenAISTTService(api_key=openai_api_key)
     llm = OpenAILLMService(api_key=openai_api_key, model=bot_config.llm_model)
-    tts = OpenAITTSService(
-        api_key=openai_api_key,
-        voice=bot_config.tts_voice,
-        model="gpt-4o-mini-tts",
+    tts = ElevenLabsTTSService(
+        api_key=elevenlabs_api_key,
+        settings=ElevenLabsTTSService.Settings(voice=bot_config.tts_voice),
     )
 
     context = LLMContext([{"role": "system", "content": bot_config.system_prompt}])

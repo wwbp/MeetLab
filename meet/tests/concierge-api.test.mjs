@@ -57,17 +57,29 @@ async function jsonRequest(path, options = {}) {
 }
 
 async function createRoom(roomName) {
-  const { response, json, text } = await jsonRequest('/api/concierge/rooms', {
-    method: 'POST',
-    body: JSON.stringify({ name: roomName }),
-  });
+  // Retry on 409: after a room delete, LiveKit may take a moment to propagate
+  // the deletion, causing an immediate recreate to conflict.
+  const maxAttempts = 4;
+  let last = null;
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    if (attempt > 0) await new Promise((r) => setTimeout(r, 250 * attempt));
+    const result = await jsonRequest('/api/concierge/rooms', {
+      method: 'POST',
+      body: JSON.stringify({ name: roomName }),
+    });
+    if (result.response.status === 201) {
+      createdRooms.add(roomName);
+      assert.equal(result.json?.room?.name, roomName);
+      return;
+    }
+    last = result;
+    if (result.response.status !== 409) break;
+  }
   assert.equal(
-    response.status,
+    last.response.status,
     201,
-    `expected room create 201 for "${roomName}", got ${response.status} body=${text}`
+    `expected room create 201 for "${roomName}", got ${last.response.status} body=${last.text}`
   );
-  createdRooms.add(roomName);
-  assert.equal(json?.room?.name, roomName);
 }
 
 function webhookAuthCredentials() {

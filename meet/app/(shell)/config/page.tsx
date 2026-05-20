@@ -16,7 +16,7 @@ const EMPTY_CONFIG: Omit<BotConfig, 'scope'> = {
   greeting: '',
   vad_stop_secs: 0.6,
   llm_model: 'gpt-4.1',
-  tts_voice: 'alloy',
+  tts_voice: 'WhMcMcvXQ8T2QfmQmlYh',
 };
 
 export default function ConfigPage() {

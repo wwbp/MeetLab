@@ -43,7 +43,7 @@ async def load_bot_config(room_name: str | None = None) -> EffectiveBotConfig:
                 greeting="Hello! How are you doing today?",
                 vad_stop_secs=0.6,
                 llm_model="gpt-4.1",
-                tts_voice="alloy",
+                tts_voice="WhMcMcvXQ8T2QfmQmlYh",
             )
 
         return EffectiveBotConfig(

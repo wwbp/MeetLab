@@ -69,7 +69,6 @@ function prettyStatus(value: string): string {
 export function ConciergeConsole() {
   const [rooms, setRooms] = useState<ConciergeRoom[]>([]);
   const [roomHealthByName, setRoomHealthByName] = useState<RoomHealthByName>({});
-  const [roomMetadataDrafts, setRoomMetadataDrafts] = useState<Record<string, string>>({});
 
   const [newRoomName, setNewRoomName] = useState('');
   const [createWithBot, setCreateWithBot] = useState(true);
@@ -124,21 +123,6 @@ export function ConciergeConsole() {
       }
       setRoomHealthByName(nextHealthByName);
 
-      setRoomMetadataDrafts((current) => {
-        const next = { ...current };
-        for (const room of sortedRooms) {
-          if (next[room.name] === undefined) {
-            next[room.name] = room.metadata ?? '';
-          }
-        }
-        for (const roomName of Object.keys(next)) {
-          if (!sortedRooms.some((room) => room.name === roomName)) {
-            delete next[roomName];
-          }
-        }
-        return next;
-      });
-
       setError(null);
     } catch (loadError) {
       setError(readErrorMessage(loadError));
@@ -174,23 +158,6 @@ export function ConciergeConsole() {
           ? `Room "${roomName}" created and bot start requested`
           : `Room "${roomName}" created`
       );
-      await loadRoomsAndHealth();
-      setError(null);
-    } catch (actionError) {
-      setError(readErrorMessage(actionError));
-    } finally {
-      setRunningAction(null);
-    }
-  }
-
-  async function handleUpdateRoom(roomName: string) {
-    setRunningAction(`update-${roomName}`);
-    try {
-      await requestJson(`/api/concierge/rooms/${encodeURIComponent(roomName)}`, {
-        method: 'PATCH',
-        body: JSON.stringify({ metadata: roomMetadataDrafts[roomName] ?? '' }),
-      });
-      setNotice(`Room "${roomName}" updated`);
       await loadRoomsAndHealth();
       setError(null);
     } catch (actionError) {
@@ -414,30 +381,7 @@ export function ConciergeConsole() {
                   bot identity: <span className="font-mono">{botTrackedIdentity}</span>
                 </p>
 
-                <div className="space-y-2">
-                  <label className="text-muted-foreground block text-xs">Room metadata</label>
-                  <input
-                    value={roomMetadataDrafts[room.name] ?? ''}
-                    onChange={(event) =>
-                      setRoomMetadataDrafts((current) => ({
-                        ...current,
-                        [room.name]: event.target.value,
-                      }))
-                    }
-                    className="border-foreground/20 focus:border-foreground/50 w-full border bg-transparent px-3 py-2 text-sm outline-none"
-                    placeholder="optional metadata"
-                  />
-                </div>
-
                 <div className="flex flex-wrap gap-2">
-                  <Button
-                    size="sm"
-                    variant="secondary"
-                    disabled={runningAction === `update-${room.name}`}
-                    onClick={() => handleUpdateRoom(room.name)}
-                  >
-                    {runningAction === `update-${room.name}` ? 'Saving...' : 'Save Room'}
-                  </Button>
                   <Button
                     size="sm"
                     variant="primary"

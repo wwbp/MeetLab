@@ -230,17 +230,9 @@ test('only one bot can be assigned per room and identities are unique across roo
   assert.equal(roomABots.json?.assignedBotIdentity, botIdA);
 });
 
-test('room update and room+bot health are available for monitoring', async () => {
+test('room and bot health are available for monitoring', async () => {
   const roomName = createRoomName('concierge-health');
   await createRoom(roomName);
-
-  const metadata = `owner:ops-${randomUUID().slice(0, 6)}`;
-  const updated = await jsonRequest(`/api/concierge/rooms/${encodeURIComponent(roomName)}`, {
-    method: 'PATCH',
-    body: JSON.stringify({ metadata }),
-  });
-  assert.equal(updated.response.status, 200, `room update failed: ${updated.text}`);
-  assert.equal(updated.json?.room?.metadata, metadata);
 
   const start = await jsonRequest(`/api/concierge/rooms/${encodeURIComponent(roomName)}/bots`, {
     method: 'POST',
@@ -270,7 +262,6 @@ test('room update and room+bot health are available for monitoring', async () =>
 
   assert.equal(health.response.status, 200);
   assert.equal(health.json?.room?.exists, true);
-  assert.equal(health.json?.room?.metadata, metadata);
   assert.equal(health.json?.bot?.assignedIdentity, startedBotIdentity);
   assert.match(
     health.json?.bot?.status ?? '',

@@ -30,7 +30,7 @@ from pipecat.processors.aggregators.llm_response_universal import (
 )
 from pipecat.services.elevenlabs.tts import ElevenLabsTTSService
 from pipecat.services.openai.llm import OpenAILLMService
-from pipecat.services.openai.stt import OpenAISTTService
+from pipecat.services.openai.stt import OpenAIRealtimeSTTService
 from pipecat.transports.livekit.transport import LiveKitParams, LiveKitTransport
 from sqlalchemy import select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -104,7 +104,20 @@ async def bot(runner_args: LiveKitRunnerArguments):
         f"model={bot_config.llm_model} voice={bot_config.tts_voice} vad={bot_config.vad_stop_secs}s"
     )
 
-    stt = OpenAISTTService(api_key=openai_api_key)
+    # "server": OpenAI server-side VAD (turn_detection=None, no local VAD needed)
+    # "local": Pipecat SileroVAD commits audio (turn_detection=False)
+    server_vad = bot_config.stt_vad_mode == "server"
+    stt = OpenAIRealtimeSTTService(
+        api_key=openai_api_key,
+        turn_detection=None if server_vad else False,
+        settings=OpenAIRealtimeSTTService.Settings(
+            model=bot_config.stt_model,
+            noise_reduction="near_field",
+        ),
+    )
+    logger.info(
+        f"STT: model={bot_config.stt_model} vad_mode={bot_config.stt_vad_mode}"
+    )
     llm = OpenAILLMService(api_key=openai_api_key, model=bot_config.llm_model)
     tts = ElevenLabsTTSService(
         api_key=elevenlabs_api_key,
@@ -115,8 +128,10 @@ async def bot(runner_args: LiveKitRunnerArguments):
     context_aggregator = LLMContextAggregatorPair(
         context,
         user_params=LLMUserAggregatorParams(
-            vad_analyzer=SileroVADAnalyzer(
-                params=VADParams(stop_secs=bot_config.vad_stop_secs)
+            vad_analyzer=(
+                SileroVADAnalyzer(params=VADParams(stop_secs=bot_config.vad_stop_secs))
+                if not server_vad
+                else None
             ),
         ),
     )
@@ -157,8 +172,13 @@ async def bot(runner_args: LiveKitRunnerArguments):
 
     @context_aggregator.user().event_handler("on_user_turn_stopped")
     async def on_user_turn_stopped(aggregator, strategy, message):
+        if not message.content:
+            return
         sid = next(iter(_sid_to_identity), None)
-        identity = _sid_to_identity.get(sid, sid) if sid else "unknown"
+        identity = _sid_to_identity.get(sid, sid) if sid else None
+        if not identity:
+            logger.warning("on_user_turn_stopped: no known participant identity, skipping utterance")
+            return
         ts = _iso_to_unix(message.timestamp)
         utt_id = _new_id()
         async with AsyncSessionLocal() as db:

@@ -13,6 +13,8 @@ class EffectiveBotConfig:
     vad_stop_secs: float
     llm_model: str
     tts_voice: str
+    stt_model: str
+    stt_vad_mode: str  # "server" | "local"
 
 
 async def load_bot_config(room_name: str | None = None) -> EffectiveBotConfig:
@@ -44,6 +46,8 @@ async def load_bot_config(room_name: str | None = None) -> EffectiveBotConfig:
                 vad_stop_secs=0.6,
                 llm_model="gpt-4.1",
                 tts_voice="WhMcMcvXQ8T2QfmQmlYh",
+                stt_model="gpt-realtime-whisper",
+                stt_vad_mode="local",
             )
 
         return EffectiveBotConfig(
@@ -52,4 +56,6 @@ async def load_bot_config(room_name: str | None = None) -> EffectiveBotConfig:
             vad_stop_secs=row.vad_stop_secs,
             llm_model=row.llm_model,
             tts_voice=row.tts_voice,
+            stt_model=row.stt_model,
+            stt_vad_mode=row.stt_vad_mode,
         )

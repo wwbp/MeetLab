@@ -26,6 +26,31 @@ from db.models import BotConfig, Conversation, Event, Speaker, Utterance
 from runner_types import LiveKitRunnerArguments
 
 config = load_config()
+
+if config.enable_tracing:
+    from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+    from pipecat.utils.tracing.setup import setup_tracing
+
+    _headers: dict[str, str] = {}
+    if config.otlp_headers:
+        for pair in config.otlp_headers.split(","):
+            if "=" in pair:
+                k, v = pair.split("=", 1)
+                _headers[k.strip()] = v.strip()
+
+    # OTLPSpanExporter uses the endpoint verbatim (no path appending) when
+    # passed explicitly, so we must include the full OTLP traces path.
+    _raw_endpoint = (config.otlp_endpoint or "http://jaeger:4318").rstrip("/")
+    _exporter = OTLPSpanExporter(
+        endpoint=_raw_endpoint + "/v1/traces",
+        headers=_headers or None,
+    )
+    setup_tracing(
+        service_name="meetlab-agent-runner",
+        exporter=_exporter,
+        console_export=config.otel_console_export,
+    )
+    logger.info(f"OTel tracing enabled → {config.otlp_endpoint or 'http://jaeger:4318'}")
 LIVEKIT_API_KEY = require(config.livekit_api_key, "LIVEKIT_API_KEY")
 BOT_RUNNER_SECRET = os.environ.get("BOT_RUNNER_SECRET")
 LIVEKIT_API_SECRET = require(config.livekit_api_secret, "LIVEKIT_API_SECRET")

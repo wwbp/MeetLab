@@ -142,6 +142,15 @@ async def bot(runner_args: LiveKitRunnerArguments):
             enable_usage_metrics=True,
         ),
         observers=[latency_observer],
+        enable_tracing=env_config.enable_tracing,
+        enable_turn_tracking=env_config.enable_tracing,
+        conversation_id=runner_args.session_id,
+        additional_span_attributes={
+            "room.name": runner_args.room_name,
+            "bot.identity": runner_args.bot_identity,
+            "llm.model": bot_config.llm_model,
+            "tts.voice": bot_config.tts_voice,
+        },
     )
 
     # --- transcript hooks ---

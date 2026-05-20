@@ -109,7 +109,7 @@ async def bot(runner_args: LiveKitRunnerArguments):
     server_vad = bot_config.stt_vad_mode == "server"
     stt = OpenAIRealtimeSTTService(
         api_key=openai_api_key,
-        turn_detection=None if server_vad else False,
+        turn_detection=_turn_detection_for_vad_mode(bot_config.stt_vad_mode),
         settings=OpenAIRealtimeSTTService.Settings(
             model=bot_config.stt_model,
             noise_reduction="near_field",
@@ -236,7 +236,8 @@ async def bot(runner_args: LiveKitRunnerArguments):
     @transport.event_handler("on_participant_connected")
     async def on_participant_connected(transport, participant_id: str):
         room = transport._client.room
-        p = room.remote_participants.get(participant_id)
+        # remote_participants is keyed by identity, not SID — find by SID
+        p = _find_participant_by_sid(room.remote_participants, participant_id)
         if not p:
             return
         identity = p.identity
@@ -303,6 +304,27 @@ async def bot(runner_args: LiveKitRunnerArguments):
                 )
 
     logger.info(f"Bot session {runner_args.session_id} ended ({status})")
+
+
+def _find_participant_by_sid(remote_participants: dict, sid: str):
+    """Find a participant by SID in a dict keyed by identity.
+
+    The LiveKit SDK keys room.remote_participants by *identity*, not SID.
+    Pipecat callbacks pass the participant's SID, so a direct .get() always
+    returns None — we must search by value.
+    """
+    return next((p for p in remote_participants.values() if p.sid == sid), None)
+
+
+def _turn_detection_for_vad_mode(vad_mode: str):
+    """Map stt_vad_mode config value to OpenAIRealtimeSTTService turn_detection.
+
+    "server" → None  (OpenAI server-side VAD; pipecat sends UserStopped before
+                       final transcript, so this mode risks empty LLM turns)
+    "local"  → False (Silero VAD; audio is committed only after silence, giving
+                       time for the transcription to arrive before turn commits)
+    """
+    return None if vad_mode == "server" else False
 
 
 def _new_id() -> str:

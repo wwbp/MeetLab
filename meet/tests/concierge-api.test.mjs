@@ -127,6 +127,18 @@ async function deleteRoom(roomName) {
   createdRooms.delete(roomName);
 }
 
+// LiveKit's DeleteRoom API returns before async cleanup completes, so listRooms
+// can still show the deleted room for a short window. Poll until it's gone.
+async function waitForRoomGone(roomName) {
+  await waitFor(
+    async () => {
+      const { response, json } = await jsonRequest('/api/concierge/rooms');
+      return response.status === 200 && !json?.rooms?.some((r) => r.name === roomName);
+    },
+    { timeoutMs: 10_000, description: `room "${roomName}" to be absent from LiveKit` }
+  );
+}
+
 async function waitForConciergeReady() {
   const timeoutMs = 60_000;
   const start = Date.now();
@@ -375,7 +387,23 @@ test('room delete clears bot claim and supports clean recreate/start cycle', asy
   const firstBotIdentity = firstStart.json?.request?.botIdentity;
   assert.ok(firstBotIdentity, `missing first bot identity: ${firstStart.text}`);
 
+  // Wait for the bot to actually join the LiveKit room before deleting. If we
+  // delete before it connects, the bot joins a non-existent room, which
+  // LiveKit --dev auto-creates, causing the subsequent createRoom to 409.
+  // Once the bot is in the room, deleteRoom sends it a terminal ROOM_DELETED
+  // disconnect, which the LiveKit SDK does not retry.
+  await waitFor(
+    async () => {
+      const { response, json } = await jsonRequest(
+        `/api/concierge/rooms/${encodeURIComponent(roomName)}/bots`
+      );
+      return response.status === 200 && json?.bots?.some((b) => b.identity === firstBotIdentity);
+    },
+    { timeoutMs: 15_000, description: `bot ${firstBotIdentity} to join room before delete` }
+  );
+
   await deleteRoom(roomName);
+  await waitForRoomGone(roomName);
   await createRoom(roomName);
 
   const secondStart = await jsonRequest(

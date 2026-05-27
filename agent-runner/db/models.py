@@ -149,6 +149,7 @@ class BotConfig(Base):
     tts_voice: Mapped[str] = mapped_column(String(64), default="WhMcMcvXQ8T2QfmQmlYh")
     stt_model: Mapped[str] = mapped_column(String(128), default="gpt-realtime-whisper")
     stt_vad_mode: Mapped[str] = mapped_column(String(32), default="local")
+    tts_provider: Mapped[str] = mapped_column(String(32), default="elevenlabs")
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_now, onupdate=_now
     )

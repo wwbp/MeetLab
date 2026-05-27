@@ -2,6 +2,7 @@ import asyncio
 import json
 import os
 import sys
+import time
 import uuid as _uuid_mod
 from datetime import datetime, timezone
 
@@ -14,11 +15,14 @@ from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.frames.frames import (
     InterruptionFrame,
+    LLMTextFrame,
     TranscriptionFrame,
+    TTSAudioRawFrame,
     TTSSpeakFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
 )
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.observers.user_bot_latency_observer import UserBotLatencyObserver
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
@@ -119,10 +123,15 @@ async def bot(runner_args: LiveKitRunnerArguments):
         f"STT: model={bot_config.stt_model} vad_mode={bot_config.stt_vad_mode}"
     )
     llm = OpenAILLMService(api_key=openai_api_key, model=bot_config.llm_model)
-    tts = ElevenLabsTTSService(
-        api_key=elevenlabs_api_key,
-        settings=ElevenLabsTTSService.Settings(voice=bot_config.tts_voice),
-    )
+    if bot_config.tts_provider == "openai":
+        from pipecat.services.openai.tts import OpenAITTSService
+        tts = OpenAITTSService(api_key=openai_api_key, voice=bot_config.tts_voice or "alloy")
+    else:
+        tts = ElevenLabsTTSService(
+            api_key=elevenlabs_api_key,
+            settings=ElevenLabsTTSService.Settings(voice=bot_config.tts_voice),
+        )
+    logger.info(f"TTS: provider={bot_config.tts_provider} voice={bot_config.tts_voice}")
 
     context = LLMContext([{"role": "system", "content": bot_config.system_prompt}])
     context_aggregator = LLMContextAggregatorPair(
@@ -138,13 +147,38 @@ async def bot(runner_args: LiveKitRunnerArguments):
 
     latency_observer = UserBotLatencyObserver()
 
+    # Per-turn timing dict — populated by frame interceptors and turn hooks.
+    # Keys set during a turn: "stt_done", "llm_first", "tts_first".
+    # Cleared in on_assistant_turn_stopped after writing to Utterance.meta.
+    _turn_timing: dict[str, float] = {}
+
+    class _LLMFirstTimer(FrameProcessor):
+        """Records when the first LLM text token is emitted (true TTFT)."""
+
+        async def process_frame(self, frame, direction):
+            await super().process_frame(frame, direction)
+            if direction == FrameDirection.DOWNSTREAM and isinstance(frame, LLMTextFrame):
+                _turn_timing.setdefault("llm_first", time.monotonic())
+            await self.push_frame(frame, direction)
+
+    class _TTSFirstTimer(FrameProcessor):
+        """Records when TTS produces its first audio chunk of each turn."""
+
+        async def process_frame(self, frame, direction):
+            await super().process_frame(frame, direction)
+            if direction == FrameDirection.DOWNSTREAM and isinstance(frame, TTSAudioRawFrame):
+                _turn_timing.setdefault("tts_first", time.monotonic())
+            await self.push_frame(frame, direction)
+
     pipeline = Pipeline(
         [
             transport.input(),
             stt,
             context_aggregator.user(),
             llm,
+            _LLMFirstTimer(),
             tts,
+            _TTSFirstTimer(),
             transport.output(),
             context_aggregator.assistant(),
         ]
@@ -172,6 +206,10 @@ async def bot(runner_args: LiveKitRunnerArguments):
 
     @context_aggregator.user().event_handler("on_user_turn_stopped")
     async def on_user_turn_stopped(aggregator, strategy, message):
+        # Anchor for LLM TTFT: moment the transcript is committed to the LLM context.
+        _turn_timing["stt_done"] = time.monotonic()
+        _turn_timing.pop("llm_first", None)
+        _turn_timing.pop("tts_first", None)
         if not message.content:
             return
         sid = next(iter(_sid_to_identity), None)
@@ -204,6 +242,15 @@ async def bot(runner_args: LiveKitRunnerArguments):
         if _pending_latency_ms[0] is not None:
             meta["latency_ms"] = _pending_latency_ms[0]
             _pending_latency_ms[0] = None
+        t = _turn_timing.copy()
+        _turn_timing.clear()
+        timing: dict = {}
+        if "stt_done" in t and "llm_first" in t:
+            timing["llm_ttft_ms"] = round((t["llm_first"] - t["stt_done"]) * 1000, 1)
+        if "llm_first" in t and "tts_first" in t:
+            timing["tts_first_ms"] = round((t["tts_first"] - t["llm_first"]) * 1000, 1)
+        if timing:
+            meta["timing"] = timing
         async with AsyncSessionLocal() as db:
             async with db.begin():
                 db.add(

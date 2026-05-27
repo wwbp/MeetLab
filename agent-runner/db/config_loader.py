@@ -15,6 +15,7 @@ class EffectiveBotConfig:
     tts_voice: str
     stt_model: str
     stt_vad_mode: str  # "server" | "local"
+    tts_provider: str  # "elevenlabs" | "openai"
 
 
 async def load_bot_config(room_name: str | None = None) -> EffectiveBotConfig:
@@ -48,6 +49,7 @@ async def load_bot_config(room_name: str | None = None) -> EffectiveBotConfig:
                 tts_voice="WhMcMcvXQ8T2QfmQmlYh",
                 stt_model="gpt-realtime-whisper",
                 stt_vad_mode="local",
+                tts_provider="elevenlabs",
             )
 
         return EffectiveBotConfig(
@@ -58,4 +60,5 @@ async def load_bot_config(room_name: str | None = None) -> EffectiveBotConfig:
             tts_voice=row.tts_voice,
             stt_model=row.stt_model,
             stt_vad_mode=row.stt_vad_mode,
+            tts_provider=getattr(row, "tts_provider", "elevenlabs"),
         )

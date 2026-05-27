@@ -4,10 +4,12 @@ SERVICE ?=
 BOT_LONGEVITY_MAX_SECONDS ?= 1050
 BOT_LONGEVITY_POLL_SECONDS ?= 5
 BOT_LONGEVITY_MESSAGE_SECONDS ?= 10
+BENCHMARK_SAMPLES ?= 10
+BENCHMARK_TIMEOUT ?= 30
 
 MSG ?= migration
 
-.PHONY: up down start stop logs migrate migration test test-unit test-integration test-bot-longevity setup-livekit-cloud revert-livekit-local test-livekit-tooling scan scan-agent-runner scan-meet
+.PHONY: up down start stop logs migrate migration test test-unit test-integration test-bot-longevity setup-livekit-cloud revert-livekit-local test-livekit-tooling scan scan-agent-runner scan-meet benchmark benchmark-audio benchmark-full benchmark-report
 
 up:
 	$(COMPOSE) up --build -d
@@ -72,3 +74,28 @@ revert-livekit-local:
 
 test-livekit-tooling:
 	./scripts/test_setup_livekit_cloud.sh
+
+benchmark-audio:
+	$(COMPOSE) up -d agent-runner
+	$(COMPOSE) exec -T agent-runner uv run python tests/generate_benchmark_audio.py
+
+benchmark:
+	$(COMPOSE) up -d transport-server agent-runner
+	$(COMPOSE) exec -T agent-runner uv run alembic upgrade head
+	$(COMPOSE) exec -T agent-runner \
+		env RUN_BENCHMARK=1 \
+		BENCHMARK_SAMPLES=$(BENCHMARK_SAMPLES) \
+		BENCHMARK_TIMEOUT=$(BENCHMARK_TIMEOUT) \
+		uv run python -m unittest -v tests.test_benchmark
+
+benchmark-full:
+	$(COMPOSE) up -d transport-server agent-runner
+	$(COMPOSE) exec -T agent-runner uv run alembic upgrade head
+	$(COMPOSE) exec -T agent-runner \
+		env BENCHMARK_SAMPLES=$(BENCHMARK_SAMPLES) \
+		BENCHMARK_TIMEOUT=$(BENCHMARK_TIMEOUT) \
+		uv run python tests/run_benchmark_matrix.py
+
+benchmark-report:
+	$(COMPOSE) up -d agent-runner
+	$(COMPOSE) exec -T agent-runner uv run python tests/run_benchmark_matrix.py report

@@ -358,6 +358,9 @@ async def get_config(room: str | None = None, _=Depends(verify_api_key)):
         "vad_stop_secs": cfg.vad_stop_secs,
         "llm_model": cfg.llm_model,
         "tts_voice": cfg.tts_voice,
+        "tts_provider": cfg.tts_provider,
+        "stt_model": cfg.stt_model,
+        "stt_vad_mode": cfg.stt_vad_mode,
     }
 
 
@@ -394,6 +397,10 @@ async def update_config(request: Request, _=Depends(verify_api_key)):
         if not isinstance(body["tts_voice"], str) or not body["tts_voice"].strip():
             return JSONResponse({"error": "tts_voice must be a non-empty string"}, status_code=400)
         fields["tts_voice"] = body["tts_voice"].strip()
+    if "tts_provider" in body:
+        if body["tts_provider"] not in ("elevenlabs", "openai"):
+            return JSONResponse({"error": "tts_provider must be 'elevenlabs' or 'openai'"}, status_code=400)
+        fields["tts_provider"] = body["tts_provider"]
 
     async with AsyncSessionLocal() as session:
         async with session.begin():

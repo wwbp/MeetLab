@@ -18,6 +18,7 @@ if _LOCAL_ENV_PATH.exists():
 class Config:
     openai_api_key: Optional[str]
     elevenlabs_api_key: Optional[str]
+    deepgram_api_key: Optional[str]
     livekit_url: Optional[str]
     livekit_api_key: Optional[str]
     livekit_api_secret: Optional[str]
@@ -31,6 +32,7 @@ def load_config() -> Config:
     return Config(
         openai_api_key=os.getenv("OPENAI_API_KEY"),
         elevenlabs_api_key=os.getenv("ELEVENLABS_API_KEY"),
+        deepgram_api_key=os.getenv("DEEPGRAM_API_KEY"),
         livekit_url=os.getenv("LIVEKIT_URL"),
         livekit_api_key=os.getenv("LIVEKIT_API_KEY"),
         livekit_api_secret=os.getenv("LIVEKIT_API_SECRET"),

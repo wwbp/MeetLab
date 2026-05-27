@@ -34,7 +34,9 @@ LIVEKIT_URL_TEST = os.getenv("LIVEKIT_URL", "ws://transport-server:7880")
 API_KEY = os.getenv("LIVEKIT_API_KEY", "devkey")
 API_SECRET = os.getenv("LIVEKIT_API_SECRET", "secret")
 SAMPLES = int(os.getenv("BENCHMARK_SAMPLES", "5"))
-RESPONSE_TIMEOUT = float(os.getenv("BENCHMARK_TIMEOUT", "45"))
+RESPONSE_TIMEOUT = float(os.getenv("BENCHMARK_TIMEOUT", "25"))
+# Max rooms running simultaneously per config. Keeps LiveKit load manageable.
+PARALLEL_SAMPLES = int(os.getenv("BENCHMARK_PARALLEL", "3"))
 
 WAV_PATH = Path(__file__).parent / "fixtures" / "benchmark_prompt.wav"
 RESULTS_PATH = Path(__file__).parent / "fixtures" / "benchmark_results.json"
@@ -46,43 +48,67 @@ RESULTS_PATH = Path(__file__).parent / "fixtures" / "benchmark_results.json"
 # tts_voice for elevenlabs is the ElevenLabs voice ID.
 
 ELEVENLABS_VOICE = "WhMcMcvXQ8T2QfmQmlYh"
-OPENAI_VOICE = "alloy"
+
+# Small models only — no gpt-4.1 / gpt-5.4 / gpt-5.5 flagship.
+# LLM baseline for STT/delay sweeps: gpt-5.4-mini (latest gen mini).
+_EL = {"tts_provider": "elevenlabs", "tts_voice": ELEVENLABS_VOICE}
+_BASE = {"stt_model": "gpt-realtime-whisper", "stt_vad_mode": "local", "stt_delay": None, **_EL}
 
 CONFIG_MATRIX = [
+    # ── STT model sweep (local-vad, no delay, gpt-5.4-mini) ─────────────────
     {
-        "label": "local-vad / gpt-4.1 / elevenlabs",
+        "label": "whisper / gpt-5.4-mini",
+        "llm_model": "gpt-5.4-mini",
+        **_BASE,
+    },
+    {
+        "label": "gpt-4o-transcribe / gpt-5.4-mini",
+        "stt_model": "gpt-4o-transcribe",
         "stt_vad_mode": "local",
-        "llm_model": "gpt-4.1",
-        "tts_provider": "elevenlabs",
-        "tts_voice": ELEVENLABS_VOICE,
+        "stt_delay": None,
+        "llm_model": "gpt-5.4-mini",
+        **_EL,
     },
     {
-        "label": "server-vad / gpt-4.1 / elevenlabs",
-        "stt_vad_mode": "server",
-        "llm_model": "gpt-4.1",
-        "tts_provider": "elevenlabs",
-        "tts_voice": ELEVENLABS_VOICE,
+        "label": "gpt-4o-mini-transcribe / gpt-5.4-mini",
+        "stt_model": "gpt-4o-mini-transcribe",
+        "stt_vad_mode": "local",
+        "stt_delay": None,
+        "llm_model": "gpt-5.4-mini",
+        **_EL,
     },
+    # ── LLM size sweep (whisper, no delay) ───────────────────────────────────
     {
-        "label": "server-vad / gpt-4.1-mini / elevenlabs",
-        "stt_vad_mode": "server",
+        "label": "whisper / gpt-4.1-mini",
         "llm_model": "gpt-4.1-mini",
-        "tts_provider": "elevenlabs",
-        "tts_voice": ELEVENLABS_VOICE,
+        **_BASE,
     },
     {
-        "label": "server-vad / gpt-4.1-mini / openai-tts",
-        "stt_vad_mode": "server",
-        "llm_model": "gpt-4.1-mini",
-        "tts_provider": "openai",
-        "tts_voice": OPENAI_VOICE,
+        "label": "whisper / gpt-4.1-nano",
+        "llm_model": "gpt-4.1-nano",
+        **_BASE,
     },
     {
-        "label": "server-vad / gpt-4o-mini / openai-tts",
-        "stt_vad_mode": "server",
+        "label": "whisper / gpt-4o-mini",
         "llm_model": "gpt-4o-mini",
-        "tts_provider": "openai",
-        "tts_voice": OPENAI_VOICE,
+        **_BASE,
+    },
+    # ── Deepgram STT sweep (local-vad, gpt-5.4-mini) ────────────────────────
+    {
+        "label": "nova-3-general / gpt-5.4-mini",
+        "stt_model": "nova-3-general",
+        "stt_vad_mode": "local",
+        "stt_delay": None,
+        "llm_model": "gpt-5.4-mini",
+        **_EL,
+    },
+    {
+        "label": "nova-3-meeting / gpt-5.4-mini",
+        "stt_model": "nova-3-meeting",
+        "stt_vad_mode": "local",
+        "stt_delay": None,
+        "llm_model": "gpt-5.4-mini",
+        **_EL,
     },
 ]
 
@@ -100,6 +126,9 @@ def _request(method: str, path: str, body: Optional[dict] = None) -> dict:
 
 def _set_room_config(room_name: str, config: dict) -> None:
     payload = {k: v for k, v in config.items() if k != "label"}
+    # Explicitly send stt_delay=null to clear any inherited value
+    if "stt_delay" not in payload:
+        payload["stt_delay"] = None
     payload["scope"] = room_name
     _request("PUT", "/config", payload)
 
@@ -178,7 +207,7 @@ async def _run_sample(room_name: str) -> Optional[dict]:
     await room1.connect(LIVEKIT_URL_TEST, _make_token(room_name, uid1))
     await room2.connect(LIVEKIT_URL_TEST, _make_token(room_name, uid2))
 
-    await asyncio.sleep(4)
+    await asyncio.sleep(1.5)
     await _stream_wav(room1)
 
     meta = await _poll_bot_utterance(session_id, timeout=RESPONSE_TIMEOUT)
@@ -197,30 +226,39 @@ async def _run_sample(room_name: str) -> Optional[dict]:
     return {"stt_ms": stt, "llm_ttft_ms": llm, "tts_first_ms": tts, "e2e_ms": e2e}
 
 
-# ── Config run (N samples) ────────────────────────────────────────────────────
+# ── Config run (N samples, parallel) ─────────────────────────────────────────
 
 async def run_config(cfg: dict, n: int) -> dict:
     label = cfg["label"]
     print(f"\n{'═'*66}")
     print(f"Config: {label}")
-    print(f"  stt_vad_mode={cfg.get('stt_vad_mode')}  llm={cfg.get('llm_model')}  tts={cfg.get('tts_provider')} ({cfg.get('tts_voice', '')[:12]})")
+    delay = cfg.get("stt_delay") or "—"
+    print(f"  stt={cfg.get('stt_model')} vad={cfg.get('stt_vad_mode')} delay={delay}  llm={cfg.get('llm_model')}  tts={cfg.get('tts_provider')} ({cfg.get('tts_voice', '')[:12]})")
+    print(f"  Running {n} samples (parallel={PARALLEL_SAMPLES})...")
     print(f"{'═'*66}")
 
-    samples: list[dict] = []
-    for i in range(n):
+    sem = asyncio.Semaphore(PARALLEL_SAMPLES)
+    print_lock = asyncio.Lock()
+
+    async def _run_one(i: int) -> Optional[dict]:
         room_name = f"bench-{uuid4().hex[:8]}"
         _set_room_config(room_name, cfg)
-        print(f"  [{i+1}/{n}] room={room_name}", end="", flush=True)
-        try:
-            row = await _run_sample(room_name)
-        except Exception as e:
-            print(f"  ERROR: {e}")
-            continue
-        if row is None:
-            print(f"  timeout (>{RESPONSE_TIMEOUT}s)")
-            continue
-        samples.append(row)
-        print(f"  stt≈{row['stt_ms']}ms  llm={row['llm_ttft_ms']}ms  tts={row['tts_first_ms']}ms  e2e={row['e2e_ms']}ms")
+        async with sem:
+            try:
+                row = await _run_sample(room_name)
+            except Exception as e:
+                async with print_lock:
+                    print(f"  [{i+1}/{n}] ERROR: {e}")
+                return None
+        async with print_lock:
+            if row is None:
+                print(f"  [{i+1}/{n}] timeout (>{RESPONSE_TIMEOUT}s)")
+            else:
+                print(f"  [{i+1}/{n}] stt≈{row['stt_ms']}ms  llm={row['llm_ttft_ms']}ms  tts={row['tts_first_ms']}ms  e2e={row['e2e_ms']}ms")
+        return row
+
+    results = await asyncio.gather(*[_run_one(i) for i in range(n)])
+    samples = [r for r in results if r is not None]
 
     metrics = _aggregate(samples)
     record = {

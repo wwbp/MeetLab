@@ -34,7 +34,8 @@ from pipecat.processors.aggregators.llm_response_universal import (
 )
 from pipecat.services.elevenlabs.tts import ElevenLabsTTSService
 from pipecat.services.openai.llm import OpenAILLMService
-from pipecat.services.openai.stt import OpenAIRealtimeSTTService
+from pipecat.services.deepgram.stt import DeepgramSTTService
+from pipecat.services.openai.stt import OpenAIRealtimeSTTService, OpenAIRealtimeSTTSettings
 from pipecat.transports.livekit.transport import LiveKitParams, LiveKitTransport
 from sqlalchemy import select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -44,6 +45,86 @@ from db.config_loader import load_bot_config
 from db.engine import AsyncSessionLocal
 from db.models import Conversation, Speaker, Utterance
 from runner_types import LiveKitRunnerArguments
+
+_STT_DELAY_VALUES = frozenset({"minimal", "low", "medium", "high", "xhigh"})
+
+
+class _OpenAIRealtimeSTT(OpenAIRealtimeSTTService):
+    """OpenAIRealtimeSTTService extended with transcription delay support.
+
+    Pipecat 1.2.1 does not expose the `delay` field from OpenAI's realtime
+    transcription API. This subclass injects it into the session.update
+    payload when provided, so callers can tune latency vs accuracy tradeoffs.
+    """
+
+    def __init__(self, *, transcription_delay: str | None = None, **kwargs):
+        super().__init__(**kwargs)
+        self._transcription_delay = transcription_delay
+
+    async def _send_session_update(self):
+        if not self._transcription_delay:
+            return await super()._send_session_update()
+
+        # Replicate parent payload and inject delay into transcription dict.
+        # Only gpt-realtime-whisper supports this field.
+        from pipecat.services.openai.stt import OPENAI_SAMPLE_RATE
+        from pipecat.utils.language import Language
+
+        settings: OpenAIRealtimeSTTSettings = self._settings
+        transcription: dict = {"model": settings.model, "delay": self._transcription_delay}
+
+        language_code = self._language_to_code(settings.language) if settings.language else None
+        if language_code:
+            transcription["language"] = language_code
+        if settings.prompt:
+            transcription["prompt"] = settings.prompt
+
+        input_audio: dict = {
+            "format": {"type": "audio/pcm", "rate": OPENAI_SAMPLE_RATE},
+            "transcription": transcription,
+        }
+
+        if self._turn_detection is False:
+            input_audio["turn_detection"] = None
+        elif self._turn_detection is not None:
+            input_audio["turn_detection"] = self._turn_detection
+
+        if settings.noise_reduction:
+            input_audio["noise_reduction"] = {"type": settings.noise_reduction}
+
+        await self._ws_send({
+            "type": "session.update",
+            "session": {"type": "transcription", "audio": {"input": input_audio}},
+        })
+
+
+def _build_stt(bot_config, openai_api_key: str, deepgram_api_key: str | None):
+    """Instantiate the STT service based on stt_model prefix.
+
+    Models starting with 'gpt-' use OpenAI Realtime STT; everything else
+    (nova-*, enhanced-*, etc.) uses Deepgram.
+    """
+    if bot_config.stt_model.startswith("gpt-"):
+        return _OpenAIRealtimeSTT(
+            api_key=openai_api_key,
+            turn_detection=_turn_detection_for_vad_mode(bot_config.stt_vad_mode),
+            transcription_delay=bot_config.stt_delay,
+            settings=_OpenAIRealtimeSTT.Settings(
+                model=bot_config.stt_model,
+                noise_reduction="near_field",
+            ),
+        )
+    # Deepgram path — disable server endpointing so local Silero VAD drives commits
+    if not deepgram_api_key:
+        raise ValueError("DEEPGRAM_API_KEY is required for Deepgram STT models")
+    return DeepgramSTTService(
+        api_key=deepgram_api_key,
+        settings=DeepgramSTTService.Settings(
+            model=bot_config.stt_model,
+            endpointing=False,
+        ),
+    )
+
 
 _AVATAR_PATH = os.path.join(os.path.dirname(__file__), "avatar.png")
 _avatar_tasks: set = set()
@@ -111,16 +192,9 @@ async def bot(runner_args: LiveKitRunnerArguments):
     # "server": OpenAI server-side VAD (turn_detection=None, no local VAD needed)
     # "local": Pipecat SileroVAD commits audio (turn_detection=False)
     server_vad = bot_config.stt_vad_mode == "server"
-    stt = OpenAIRealtimeSTTService(
-        api_key=openai_api_key,
-        turn_detection=_turn_detection_for_vad_mode(bot_config.stt_vad_mode),
-        settings=OpenAIRealtimeSTTService.Settings(
-            model=bot_config.stt_model,
-            noise_reduction="near_field",
-        ),
-    )
+    stt = _build_stt(bot_config, openai_api_key, env_config.deepgram_api_key)
     logger.info(
-        f"STT: model={bot_config.stt_model} vad_mode={bot_config.stt_vad_mode}"
+        f"STT: model={bot_config.stt_model} vad_mode={bot_config.stt_vad_mode} delay={bot_config.stt_delay}"
     )
     llm = OpenAILLMService(api_key=openai_api_key, model=bot_config.llm_model)
     if bot_config.tts_provider == "openai":

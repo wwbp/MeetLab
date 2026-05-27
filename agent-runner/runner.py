@@ -361,6 +361,7 @@ async def get_config(room: str | None = None, _=Depends(verify_api_key)):
         "tts_provider": cfg.tts_provider,
         "stt_model": cfg.stt_model,
         "stt_vad_mode": cfg.stt_vad_mode,
+        "stt_delay": cfg.stt_delay,
     }
 
 
@@ -401,6 +402,19 @@ async def update_config(request: Request, _=Depends(verify_api_key)):
         if body["tts_provider"] not in ("elevenlabs", "openai"):
             return JSONResponse({"error": "tts_provider must be 'elevenlabs' or 'openai'"}, status_code=400)
         fields["tts_provider"] = body["tts_provider"]
+    if "stt_model" in body:
+        if not isinstance(body["stt_model"], str) or not body["stt_model"].strip():
+            return JSONResponse({"error": "stt_model must be a non-empty string"}, status_code=400)
+        fields["stt_model"] = body["stt_model"].strip()
+    if "stt_vad_mode" in body:
+        if body["stt_vad_mode"] not in ("local", "server"):
+            return JSONResponse({"error": "stt_vad_mode must be 'local' or 'server'"}, status_code=400)
+        fields["stt_vad_mode"] = body["stt_vad_mode"]
+    if "stt_delay" in body:
+        v = body["stt_delay"]
+        if v is not None and v not in ("minimal", "low", "medium", "high", "xhigh"):
+            return JSONResponse({"error": "stt_delay must be one of: minimal, low, medium, high, xhigh, or null"}, status_code=400)
+        fields["stt_delay"] = v
 
     async with AsyncSessionLocal() as session:
         async with session.begin():
@@ -422,6 +436,10 @@ async def update_config(request: Request, _=Depends(verify_api_key)):
         "vad_stop_secs": cfg.vad_stop_secs,
         "llm_model": cfg.llm_model,
         "tts_voice": cfg.tts_voice,
+        "tts_provider": cfg.tts_provider,
+        "stt_model": cfg.stt_model,
+        "stt_vad_mode": cfg.stt_vad_mode,
+        "stt_delay": cfg.stt_delay,
     }
 
 

@@ -11,6 +11,7 @@ from livekit import api
 from loguru import logger
 from sqladmin import Admin, ModelView
 from sqladmin.authentication import AuthenticationBackend
+from wtforms import SelectField
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 from starlette.requests import Request as StarletteRequest
@@ -169,16 +170,55 @@ class EventAdmin(ModelView, model=Event):
     name_plural = "Events"
 
 
+class _NullableSelectField(SelectField):
+    """SelectField that coerces empty string → None (for nullable DB columns)."""
+    def process_formdata(self, valuelist):
+        super().process_formdata(valuelist)
+        if self.data == "":
+            self.data = None
+
+
+_LLM_CHOICES = [
+    ("gpt-5.4-nano", "gpt-5.4-nano"),
+    ("gpt-5.4-mini", "gpt-5.4-mini"),
+    ("gpt-4.1-nano", "gpt-4.1-nano"),
+    ("gpt-4.1-mini", "gpt-4.1-mini"),
+    ("gpt-4o-mini", "gpt-4o-mini"),
+]
+
+_STT_MODEL_CHOICES = [
+    ("nova-3-general", "nova-3-general (Deepgram)"),
+    ("gpt-realtime-whisper", "gpt-realtime-whisper (OpenAI)"),
+    ("gpt-4o-transcribe", "gpt-4o-transcribe (OpenAI)"),
+    ("gpt-4o-mini-transcribe", "gpt-4o-mini-transcribe (OpenAI)"),
+]
+
+
 class BotConfigAdmin(ModelView, model=BotConfig):
     column_list = [
         BotConfig.scope,
-        BotConfig.system_prompt,
-        BotConfig.greeting,
-        BotConfig.vad_stop_secs,
+        BotConfig.stt_model,
+        BotConfig.stt_vad_mode,
         BotConfig.llm_model,
+        BotConfig.tts_provider,
         BotConfig.tts_voice,
+        BotConfig.vad_stop_secs,
         BotConfig.updated_at,
     ]
+    form_overrides = {
+        "llm_model": SelectField,
+        "stt_model": SelectField,
+        "stt_vad_mode": SelectField,
+        "stt_delay": _NullableSelectField,
+        "tts_provider": SelectField,
+    }
+    form_args = {
+        "llm_model": {"choices": _LLM_CHOICES},
+        "stt_model": {"choices": _STT_MODEL_CHOICES},
+        "stt_vad_mode": {"choices": [("local", "local")]},
+        "stt_delay": {"choices": [("", "— (none)")]},
+        "tts_provider": {"choices": [("elevenlabs", "elevenlabs"), ("openai", "openai")]},
+    }
     name = "Bot Config"
     name_plural = "Bot Configs"
 
@@ -358,6 +398,10 @@ async def get_config(room: str | None = None, _=Depends(verify_api_key)):
         "vad_stop_secs": cfg.vad_stop_secs,
         "llm_model": cfg.llm_model,
         "tts_voice": cfg.tts_voice,
+        "tts_provider": cfg.tts_provider,
+        "stt_model": cfg.stt_model,
+        "stt_vad_mode": cfg.stt_vad_mode,
+        "stt_delay": cfg.stt_delay,
     }
 
 
@@ -394,6 +438,24 @@ async def update_config(request: Request, _=Depends(verify_api_key)):
         if not isinstance(body["tts_voice"], str) or not body["tts_voice"].strip():
             return JSONResponse({"error": "tts_voice must be a non-empty string"}, status_code=400)
         fields["tts_voice"] = body["tts_voice"].strip()
+    if "tts_provider" in body:
+        if body["tts_provider"] not in ("elevenlabs", "openai"):
+            return JSONResponse({"error": "tts_provider must be 'elevenlabs' or 'openai'"}, status_code=400)
+        fields["tts_provider"] = body["tts_provider"]
+    if "stt_model" in body:
+        _valid_stt = {"nova-3-general", "gpt-realtime-whisper", "gpt-4o-transcribe", "gpt-4o-mini-transcribe"}
+        if body["stt_model"] not in _valid_stt:
+            return JSONResponse({"error": f"stt_model must be one of: {', '.join(sorted(_valid_stt))}"}, status_code=400)
+        fields["stt_model"] = body["stt_model"]
+    if "stt_vad_mode" in body:
+        if body["stt_vad_mode"] not in ("local",):
+            return JSONResponse({"error": "stt_vad_mode must be 'local'"}, status_code=400)
+        fields["stt_vad_mode"] = body["stt_vad_mode"]
+    if "stt_delay" in body:
+        v = body["stt_delay"]
+        if v is not None and v not in ("minimal", "low", "medium", "high", "xhigh"):
+            return JSONResponse({"error": "stt_delay must be one of: minimal, low, medium, high, xhigh, or null"}, status_code=400)
+        fields["stt_delay"] = v
 
     async with AsyncSessionLocal() as session:
         async with session.begin():
@@ -415,6 +477,10 @@ async def update_config(request: Request, _=Depends(verify_api_key)):
         "vad_stop_secs": cfg.vad_stop_secs,
         "llm_model": cfg.llm_model,
         "tts_voice": cfg.tts_voice,
+        "tts_provider": cfg.tts_provider,
+        "stt_model": cfg.stt_model,
+        "stt_vad_mode": cfg.stt_vad_mode,
+        "stt_delay": cfg.stt_delay,
     }
 
 

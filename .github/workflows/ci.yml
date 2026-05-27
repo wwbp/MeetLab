@@ -29,6 +29,7 @@ jobs:
           {
             echo ""
             echo "OPENAI_API_KEY=ci-test-key"
+            echo "DEEPGRAM_API_KEY=ci-test-key"
           } >> agent-runner/.env.runner
 
       - name: Run tests

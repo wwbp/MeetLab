@@ -145,9 +145,9 @@ class BotConfig(Base):
         Text, default="Hello! How are you doing today?"
     )
     vad_stop_secs: Mapped[float] = mapped_column(Float, default=0.6)
-    llm_model: Mapped[str] = mapped_column(String(128), default="gpt-4.1")
+    llm_model: Mapped[str] = mapped_column(String(128), default="gpt-5.4-mini")
     tts_voice: Mapped[str] = mapped_column(String(64), default="WhMcMcvXQ8T2QfmQmlYh")
-    stt_model: Mapped[str] = mapped_column(String(128), default="gpt-realtime-whisper")
+    stt_model: Mapped[str] = mapped_column(String(128), default="nova-3-general")
     stt_vad_mode: Mapped[str] = mapped_column(String(32), default="local")
     stt_delay: Mapped[str | None] = mapped_column(String(32), nullable=True)
     tts_provider: Mapped[str] = mapped_column(String(32), default="elevenlabs")

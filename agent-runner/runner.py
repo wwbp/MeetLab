@@ -11,6 +11,7 @@ from livekit import api
 from loguru import logger
 from sqladmin import Admin, ModelView
 from sqladmin.authentication import AuthenticationBackend
+from wtforms import SelectField
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 from starlette.requests import Request as StarletteRequest
@@ -169,16 +170,68 @@ class EventAdmin(ModelView, model=Event):
     name_plural = "Events"
 
 
+class _NullableSelectField(SelectField):
+    """SelectField that coerces empty string → None (for nullable DB columns)."""
+    def process_formdata(self, valuelist):
+        super().process_formdata(valuelist)
+        if self.data == "":
+            self.data = None
+
+
+_LLM_CHOICES = [
+    ("gpt-5.4-mini", "gpt-5.4-mini"),
+    ("gpt-5.4", "gpt-5.4"),
+    ("gpt-5.5", "gpt-5.5"),
+    ("gpt-4.1", "gpt-4.1"),
+    ("gpt-4.1-mini", "gpt-4.1-mini"),
+    ("gpt-4.1-nano", "gpt-4.1-nano"),
+    ("gpt-4o", "gpt-4o"),
+    ("gpt-4o-mini", "gpt-4o-mini"),
+]
+
+_STT_MODEL_CHOICES = [
+    ("nova-3-general", "nova-3-general (Deepgram)"),
+    ("nova-3-meeting", "nova-3-meeting (Deepgram)"),
+    ("nova-3-phonecall", "nova-3-phonecall (Deepgram)"),
+    ("nova-3-voicemail", "nova-3-voicemail (Deepgram)"),
+    ("gpt-realtime-whisper", "gpt-realtime-whisper (OpenAI)"),
+    ("gpt-4o-transcribe", "gpt-4o-transcribe (OpenAI)"),
+    ("gpt-4o-mini-transcribe", "gpt-4o-mini-transcribe (OpenAI)"),
+]
+
+
 class BotConfigAdmin(ModelView, model=BotConfig):
     column_list = [
         BotConfig.scope,
-        BotConfig.system_prompt,
-        BotConfig.greeting,
-        BotConfig.vad_stop_secs,
+        BotConfig.stt_model,
+        BotConfig.stt_vad_mode,
         BotConfig.llm_model,
+        BotConfig.tts_provider,
         BotConfig.tts_voice,
+        BotConfig.vad_stop_secs,
         BotConfig.updated_at,
     ]
+    form_overrides = {
+        "llm_model": SelectField,
+        "stt_model": SelectField,
+        "stt_vad_mode": SelectField,
+        "stt_delay": _NullableSelectField,
+        "tts_provider": SelectField,
+    }
+    form_args = {
+        "llm_model": {"choices": _LLM_CHOICES},
+        "stt_model": {"choices": _STT_MODEL_CHOICES},
+        "stt_vad_mode": {"choices": [("local", "local"), ("server", "server")]},
+        "stt_delay": {"choices": [
+            ("", "— (none)"),
+            ("minimal", "minimal"),
+            ("low", "low"),
+            ("medium", "medium"),
+            ("high", "high"),
+            ("xhigh", "xhigh"),
+        ]},
+        "tts_provider": {"choices": [("elevenlabs", "elevenlabs"), ("openai", "openai")]},
+    }
     name = "Bot Config"
     name_plural = "Bot Configs"
 

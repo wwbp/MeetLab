@@ -221,7 +221,7 @@ class BotConfigAdmin(ModelView, model=BotConfig):
     form_args = {
         "llm_model": {"choices": _LLM_CHOICES},
         "stt_model": {"choices": _STT_MODEL_CHOICES},
-        "stt_vad_mode": {"choices": [("local", "local"), ("server", "server")]},
+        "stt_vad_mode": {"choices": [("local", "local")]},
         "stt_delay": {"choices": [
             ("", "— (none)"),
             ("minimal", "minimal"),
@@ -460,8 +460,8 @@ async def update_config(request: Request, _=Depends(verify_api_key)):
             return JSONResponse({"error": "stt_model must be a non-empty string"}, status_code=400)
         fields["stt_model"] = body["stt_model"].strip()
     if "stt_vad_mode" in body:
-        if body["stt_vad_mode"] not in ("local", "server"):
-            return JSONResponse({"error": "stt_vad_mode must be 'local' or 'server'"}, status_code=400)
+        if body["stt_vad_mode"] not in ("local",):
+            return JSONResponse({"error": "stt_vad_mode must be 'local'"}, status_code=400)
         fields["stt_vad_mode"] = body["stt_vad_mode"]
     if "stt_delay" in body:
         v = body["stt_delay"]

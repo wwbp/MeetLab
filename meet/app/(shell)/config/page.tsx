@@ -19,7 +19,7 @@ const EMPTY_CONFIG: Omit<BotConfig, 'scope'> = {
   system_prompt: '',
   greeting: '',
   stt_model: 'nova-3-general',
-  llm_model: 'gpt-5.4-mini',
+  llm_model: 'gpt-5.4-nano',
   tts_provider: 'elevenlabs',
   tts_voice: 'WhMcMcvXQ8T2QfmQmlYh',
   vad_stop_secs: 0.6,
@@ -28,24 +28,17 @@ const EMPTY_CONFIG: Omit<BotConfig, 'scope'> = {
 };
 
 const STT_MODELS = [
-  { value: 'nova-3-general',       label: 'nova-3-general (Deepgram)' },
-  { value: 'nova-3-meeting',       label: 'nova-3-meeting (Deepgram)' },
-  { value: 'nova-3-phonecall',     label: 'nova-3-phonecall (Deepgram)' },
-  { value: 'nova-3-voicemail',     label: 'nova-3-voicemail (Deepgram)' },
-  { value: 'gpt-realtime-whisper', label: 'gpt-realtime-whisper (OpenAI)' },
-  { value: 'gpt-4o-transcribe',    label: 'gpt-4o-transcribe (OpenAI)' },
+  { value: 'nova-3-general',         label: 'nova-3-general (Deepgram)' },
+  { value: 'gpt-realtime-whisper',   label: 'gpt-realtime-whisper (OpenAI)' },
+  { value: 'gpt-4o-transcribe',      label: 'gpt-4o-transcribe (OpenAI)' },
   { value: 'gpt-4o-mini-transcribe', label: 'gpt-4o-mini-transcribe (OpenAI)' },
 ];
 
 const LLM_MODELS = [
   'gpt-5.4-nano',
   'gpt-5.4-mini',
-  'gpt-5.4',
-  'gpt-5.5',
-  'gpt-4.1',
-  'gpt-4.1-mini',
   'gpt-4.1-nano',
-  'gpt-4o',
+  'gpt-4.1-mini',
   'gpt-4o-mini',
 ];
 

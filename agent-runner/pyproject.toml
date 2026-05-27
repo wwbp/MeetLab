@@ -18,6 +18,7 @@ dependencies = [
     "sqladmin>=0.20.0",
     "sqlalchemy[asyncio]>=2.0.0",
     "uvicorn>=0.38.0",
+    "deepgram-sdk>=7.2.0",
 ]
 
 [tool.uv]

@@ -438,14 +438,8 @@ def _find_participant_by_sid(remote_participants: dict, sid: str):
 
 
 def _turn_detection_for_vad_mode(vad_mode: str):
-    """Map stt_vad_mode config value to OpenAIRealtimeSTTService turn_detection.
-
-    "server" → None  (OpenAI server-side VAD; pipecat sends UserStopped before
-                       final transcript, so this mode risks empty LLM turns)
-    "local"  → False (Silero VAD; audio is committed only after silence, giving
-                       time for the transcription to arrive before turn commits)
-    """
-    return None if vad_mode == "server" else False
+    """Return turn_detection=False (local Silero VAD) — the only supported mode."""
+    return False
 
 
 def _new_id() -> str:

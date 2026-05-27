@@ -181,20 +181,13 @@ class _NullableSelectField(SelectField):
 _LLM_CHOICES = [
     ("gpt-5.4-nano", "gpt-5.4-nano"),
     ("gpt-5.4-mini", "gpt-5.4-mini"),
-    ("gpt-5.4", "gpt-5.4"),
-    ("gpt-5.5", "gpt-5.5"),
-    ("gpt-4.1", "gpt-4.1"),
-    ("gpt-4.1-mini", "gpt-4.1-mini"),
     ("gpt-4.1-nano", "gpt-4.1-nano"),
-    ("gpt-4o", "gpt-4o"),
+    ("gpt-4.1-mini", "gpt-4.1-mini"),
     ("gpt-4o-mini", "gpt-4o-mini"),
 ]
 
 _STT_MODEL_CHOICES = [
     ("nova-3-general", "nova-3-general (Deepgram)"),
-    ("nova-3-meeting", "nova-3-meeting (Deepgram)"),
-    ("nova-3-phonecall", "nova-3-phonecall (Deepgram)"),
-    ("nova-3-voicemail", "nova-3-voicemail (Deepgram)"),
     ("gpt-realtime-whisper", "gpt-realtime-whisper (OpenAI)"),
     ("gpt-4o-transcribe", "gpt-4o-transcribe (OpenAI)"),
     ("gpt-4o-mini-transcribe", "gpt-4o-mini-transcribe (OpenAI)"),
@@ -223,14 +216,7 @@ class BotConfigAdmin(ModelView, model=BotConfig):
         "llm_model": {"choices": _LLM_CHOICES},
         "stt_model": {"choices": _STT_MODEL_CHOICES},
         "stt_vad_mode": {"choices": [("local", "local")]},
-        "stt_delay": {"choices": [
-            ("", "— (none)"),
-            ("minimal", "minimal"),
-            ("low", "low"),
-            ("medium", "medium"),
-            ("high", "high"),
-            ("xhigh", "xhigh"),
-        ]},
+        "stt_delay": {"choices": [("", "— (none)")]},
         "tts_provider": {"choices": [("elevenlabs", "elevenlabs"), ("openai", "openai")]},
     }
     name = "Bot Config"
@@ -457,9 +443,10 @@ async def update_config(request: Request, _=Depends(verify_api_key)):
             return JSONResponse({"error": "tts_provider must be 'elevenlabs' or 'openai'"}, status_code=400)
         fields["tts_provider"] = body["tts_provider"]
     if "stt_model" in body:
-        if not isinstance(body["stt_model"], str) or not body["stt_model"].strip():
-            return JSONResponse({"error": "stt_model must be a non-empty string"}, status_code=400)
-        fields["stt_model"] = body["stt_model"].strip()
+        _valid_stt = {"nova-3-general", "gpt-realtime-whisper", "gpt-4o-transcribe", "gpt-4o-mini-transcribe"}
+        if body["stt_model"] not in _valid_stt:
+            return JSONResponse({"error": f"stt_model must be one of: {', '.join(sorted(_valid_stt))}"}, status_code=400)
+        fields["stt_model"] = body["stt_model"]
     if "stt_vad_mode" in body:
         if body["stt_vad_mode"] not in ("local",):
             return JSONResponse({"error": "stt_vad_mode must be 'local'"}, status_code=400)

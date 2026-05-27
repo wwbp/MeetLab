@@ -12,19 +12,19 @@ Results are appended to tests/fixtures/benchmark_results.json.
 """
 
 import asyncio
+import itertools
 import json
 import os
 import sys
 import time
 import uuid
 import wave
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 from uuid import uuid4
 
 from livekit import api, rtc
-from datetime import timedelta
 import urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
@@ -42,74 +42,43 @@ WAV_PATH = Path(__file__).parent / "fixtures" / "benchmark_prompt.wav"
 RESULTS_PATH = Path(__file__).parent / "fixtures" / "benchmark_results.json"
 
 # ── Config matrix ────────────────────────────────────────────────────────────
-# Each entry is run independently. Add/remove rows to adjust the sweep.
-# "label" is the display name; remaining keys are sent to PUT /config.
-# tts_voice for openai is an OpenAI voice name ("alloy", "echo", etc.)
-# tts_voice for elevenlabs is the ElevenLabs voice ID.
+# Generated from a Cartesian product of all available options.
+# Each entry is run independently; results appended to benchmark_results.json.
 
 ELEVENLABS_VOICE = "WhMcMcvXQ8T2QfmQmlYh"
 
-# Small models only — no gpt-4.1 / gpt-5.4 / gpt-5.5 flagship.
-# LLM baseline for STT/delay sweeps: gpt-5.4-mini (latest gen mini).
-_EL = {"tts_provider": "elevenlabs", "tts_voice": ELEVENLABS_VOICE}
-_BASE = {"stt_model": "gpt-realtime-whisper", "stt_vad_mode": "local", "stt_delay": None, **_EL}
+_STT_MODELS = [
+    # nova-3-general only — meeting/phonecall/voicemail variants 100% timeout
+    # (not available on current Deepgram plan)
+    "nova-3-general",
+    "gpt-realtime-whisper",
+    "gpt-4o-transcribe",
+    "gpt-4o-mini-transcribe",
+]
+
+_LLM_MODELS = [
+    "gpt-5.4-nano",
+    "gpt-5.4-mini",
+    "gpt-4.1-nano",
+    "gpt-4.1-mini",
+    "gpt-4o-mini",
+]
+
+_TTS_OPTIONS = [
+    {"tts_provider": "elevenlabs", "tts_voice": ELEVENLABS_VOICE},
+    {"tts_provider": "openai", "tts_voice": "alloy"},
+]
 
 CONFIG_MATRIX = [
-    # ── STT model sweep (local-vad, no delay, gpt-5.4-mini) ─────────────────
     {
-        "label": "whisper / gpt-5.4-mini",
-        "llm_model": "gpt-5.4-mini",
-        **_BASE,
-    },
-    {
-        "label": "gpt-4o-transcribe / gpt-5.4-mini",
-        "stt_model": "gpt-4o-transcribe",
+        "label": f"{stt} / {llm} / {tts['tts_provider']}",
+        "stt_model": stt,
         "stt_vad_mode": "local",
         "stt_delay": None,
-        "llm_model": "gpt-5.4-mini",
-        **_EL,
-    },
-    {
-        "label": "gpt-4o-mini-transcribe / gpt-5.4-mini",
-        "stt_model": "gpt-4o-mini-transcribe",
-        "stt_vad_mode": "local",
-        "stt_delay": None,
-        "llm_model": "gpt-5.4-mini",
-        **_EL,
-    },
-    # ── LLM size sweep (whisper, no delay) ───────────────────────────────────
-    {
-        "label": "whisper / gpt-4.1-mini",
-        "llm_model": "gpt-4.1-mini",
-        **_BASE,
-    },
-    {
-        "label": "whisper / gpt-4.1-nano",
-        "llm_model": "gpt-4.1-nano",
-        **_BASE,
-    },
-    {
-        "label": "whisper / gpt-4o-mini",
-        "llm_model": "gpt-4o-mini",
-        **_BASE,
-    },
-    # ── Deepgram STT sweep (local-vad, gpt-5.4-mini) ────────────────────────
-    {
-        "label": "nova-3-general / gpt-5.4-mini",
-        "stt_model": "nova-3-general",
-        "stt_vad_mode": "local",
-        "stt_delay": None,
-        "llm_model": "gpt-5.4-mini",
-        **_EL,
-    },
-    {
-        "label": "nova-3-meeting / gpt-5.4-mini",
-        "stt_model": "nova-3-meeting",
-        "stt_vad_mode": "local",
-        "stt_delay": None,
-        "llm_model": "gpt-5.4-mini",
-        **_EL,
-    },
+        "llm_model": llm,
+        **tts,
+    }
+    for stt, llm, tts in itertools.product(_STT_MODELS, _LLM_MODELS, _TTS_OPTIONS)
 ]
 
 
@@ -228,14 +197,14 @@ async def _run_sample(room_name: str) -> Optional[dict]:
 
 # ── Config run (N samples, parallel) ─────────────────────────────────────────
 
-async def run_config(cfg: dict, n: int) -> dict:
+async def run_config(cfg: dict, n: int, idx: int = 0, total: int = 0) -> dict:
     label = cfg["label"]
-    print(f"\n{'═'*66}")
-    print(f"Config: {label}")
-    delay = cfg.get("stt_delay") or "—"
-    print(f"  stt={cfg.get('stt_model')} vad={cfg.get('stt_vad_mode')} delay={delay}  llm={cfg.get('llm_model')}  tts={cfg.get('tts_provider')} ({cfg.get('tts_voice', '')[:12]})")
+    progress = f"[{idx}/{total}]" if total else ""
+    print(f"\n{'═'*70}")
+    print(f"Config {progress}: {label}")
+    print(f"  stt={cfg.get('stt_model')}  llm={cfg.get('llm_model')}  tts={cfg.get('tts_provider')}")
     print(f"  Running {n} samples (parallel={PARALLEL_SAMPLES})...")
-    print(f"{'═'*66}")
+    print(f"{'═'*70}")
 
     sem = asyncio.Semaphore(PARALLEL_SAMPLES)
     print_lock = asyncio.Lock()
@@ -286,7 +255,8 @@ def _aggregate(samples: list[dict]) -> dict:
     keys = ["stt_ms", "llm_ttft_ms", "tts_first_ms", "e2e_ms"]
     out: dict = {}
     for k in keys:
-        vals = sorted(v for s in samples if (v := s.get(k)) is not None)
+        # Discard negative/zero values — artifact of timing races between turns
+        vals = sorted(v for s in samples if (v := s.get(k)) is not None and v > 0)
         if not vals:
             out[k] = None
             continue
@@ -302,11 +272,15 @@ def _aggregate(samples: list[dict]) -> dict:
 
 def _print_config_summary(record: dict) -> None:
     m = record["metrics"]
-    print(f"\n  Summary ({record['n_collected']}/{record['n_requested']} samples):")
+    n_ok = record["n_collected"]
+    n_req = record["n_requested"]
+    print(f"\n  Summary ({n_ok}/{n_req} samples):")
     for key, label in [("stt_ms", "STT"), ("llm_ttft_ms", "LLM TTFT"), ("tts_first_ms", "TTS first"), ("e2e_ms", "E2E")]:
         v = m.get(key)
         if v:
             print(f"    {label:<12}  mean={v['mean']:>6.0f}ms  p50={v['p50']:>6.0f}ms  p95={v['p95']:>6.0f}ms")
+        else:
+            print(f"    {label:<12}  — all samples timed out")
 
 
 # ── Results persistence ───────────────────────────────────────────────────────
@@ -331,7 +305,7 @@ def _append_record(record: dict) -> None:
 
 # ── Comparison report ─────────────────────────────────────────────────────────
 
-def print_report(results: Optional[list[dict]] = None) -> None:
+def print_report(results: Optional[list[dict]] = None, top_n: int = 0) -> None:
     if results is None:
         results = _load_results()
     if not results:
@@ -339,24 +313,34 @@ def print_report(results: Optional[list[dict]] = None) -> None:
         return
 
     keys = ["stt_ms", "llm_ttft_ms", "tts_first_ms", "e2e_ms"]
-    labels = {"stt_ms": "STT (derived)", "llm_ttft_ms": "LLM TTFT", "tts_first_ms": "TTS first", "e2e_ms": "E2E"}
+    labels = {"stt_ms": "STT", "llm_ttft_ms": "LLM TTFT", "tts_first_ms": "TTS first", "e2e_ms": "E2E"}
 
-    col_w = 20
+    # Sort by E2E P50 ascending; configs with no data (timeout) go last
+    def _e2e_p50(r: dict) -> float:
+        m = r["metrics"].get("e2e_ms")
+        return m["p50"] if m else float("inf")
+
+    sorted_results = sorted(results, key=_e2e_p50)
+    if top_n:
+        display = sorted_results[:top_n]
+    else:
+        display = sorted_results
+
+    col_w = 46
     metric_w = 8
-    n_metrics = len(keys)
-    total_w = col_w + n_metrics * (metric_w * 2 + 3) + 4
+    total_w = col_w + len(keys) * (metric_w * 2 + 3) + 6
 
     print(f"\n{'═'*total_w}")
-    print("Benchmark Results — Mean / P50 (ms)")
+    print(f"Benchmark Results — sorted by E2E P50 ({len(sorted_results)} configs)")
+    if top_n:
+        print(f"Showing top {len(display)}")
     print(f"{'═'*total_w}")
 
-    # Header
     header = f"{'Config':<{col_w}}"
     for k in keys:
         header += f"  {labels[k]:>{metric_w*2+1}}"
     print(header)
     print(f"{'─'*total_w}")
-    # Sub-header
     sub = " " * col_w
     for _ in keys:
         sub += f"  {'mean':>{metric_w}} {'p50':>{metric_w}}"
@@ -366,34 +350,38 @@ def print_report(results: Optional[list[dict]] = None) -> None:
     # Collect best-in-class for highlighting
     best: dict[str, float] = {}
     for k in keys:
-        vals = [r["metrics"][k]["mean"] for r in results if r["metrics"].get(k)]
+        vals = [r["metrics"][k]["p50"] for r in display if r["metrics"].get(k)]
         if vals:
             best[k] = min(vals)
 
-    for rec in results:
-        ts = rec["timestamp"][:10]
+    for rec in display:
         label = rec["label"]
         short = label[:col_w - 1] if len(label) >= col_w else label
+        n_ok = rec["n_collected"]
+        n_req = rec["n_requested"]
         row = f"{short:<{col_w}}"
         for k in keys:
             m = rec["metrics"].get(k)
             if m:
                 mean_v = m["mean"]
                 p50_v = m["p50"]
-                star = "*" if best.get(k) == mean_v else " "
+                star = "*" if best.get(k) == p50_v else " "
                 row += f"  {mean_v:>{metric_w-1}.0f}{star} {p50_v:>{metric_w}.0f}"
             else:
                 row += f"  {'—':>{metric_w}}  {'—':>{metric_w}}"
-        print(f"{row}  [{ts}]")
+        suffix = f"  ({n_ok}/{n_req})"
+        print(f"{row}{suffix}")
 
     print(f"{'─'*total_w}")
-    print("* = best in class for that stage\n")
+    print("* = best P50 for that stage  |  (ok/total) = samples collected\n")
 
-    # Winner
-    e2e_recs = [(r["metrics"]["e2e_ms"]["mean"], r["label"]) for r in results if r["metrics"].get("e2e_ms")]
-    if e2e_recs:
-        best_e2e = min(e2e_recs)
-        print(f"Lowest E2E: {best_e2e[1]}  ({best_e2e[0]:.0f}ms mean)")
+    # Top 5 by E2E P50
+    top5 = [(r["metrics"]["e2e_ms"]["p50"], r["label"]) for r in sorted_results if r["metrics"].get("e2e_ms")]
+    if top5:
+        print("── Top 5 by E2E P50 ──────────────────────────────────────────────────────")
+        for rank, (p50, lbl) in enumerate(top5[:5], 1):
+            print(f"  #{rank}  {p50:>6.0f}ms  {lbl}")
+        print()
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────
@@ -420,17 +408,20 @@ async def _main() -> None:
             print(f"No configs matched BENCHMARK_CONFIGS={only}")
             sys.exit(1)
 
-    print(f"\nRunning {len(matrix)} config(s) × {SAMPLES} samples each")
+    total = len(matrix)
+    print(f"\nRunning {total} config(s) × {SAMPLES} samples each  (parallel={PARALLEL_SAMPLES})")
     all_records: list[dict] = []
 
-    for cfg in matrix:
-        record = await run_config(cfg, SAMPLES)
+    for i, cfg in enumerate(matrix, 1):
+        record = await run_config(cfg, SAMPLES, idx=i, total=total)
         _append_record(record)
         all_records.append(record)
+        # Brief cooldown between configs to let LiveKit drain ghost rooms
+        await asyncio.sleep(3)
 
-    print(f"\n{'═'*66}")
-    print("FULL COMPARISON")
-    print_report(_load_results())
+    print(f"\n{'═'*70}")
+    print("FULL COMPARISON — TOP 20 BY E2E P50")
+    print_report(_load_results(), top_n=20)
 
 
 if __name__ == "__main__":

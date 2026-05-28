@@ -11,8 +11,6 @@ from PIL import Image
 
 from livekit import rtc
 
-from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.frames.frames import (
     InterruptionFrame,
     LLMTextFrame,
@@ -44,6 +42,7 @@ from config import load_config, require
 from db.config_loader import load_bot_config
 from db.engine import AsyncSessionLocal
 from db.models import Conversation, Speaker, Utterance
+from multi_speaker_stt import MultiSpeakerSTT, SpeakerLabelInjector
 from runner_types import LiveKitRunnerArguments
 
 _STT_DELAY_VALUES = frozenset({"minimal", "low", "medium", "high", "xhigh"})
@@ -160,8 +159,16 @@ logger.add(sys.stderr, level="DEBUG")
 async def bot(runner_args: LiveKitRunnerArguments):
     logger.info(f"Bot starting - joining room: {runner_args.room_name}")
 
-    # sid → identity lookup: populated at on_participant_connected
+    # sid → identity lookup: populated at on_participant_connected / on_participant_disconnected
     _sid_to_identity: dict[str, str] = {}
+    # SID of the participant who triggered the current user turn.
+    # Written by _SpeakerTracker (TranscriptionFrame.user_id, reliable for data-channel path)
+    # and on_active_speaker_changed (best-effort for mixed-audio STT path).
+    _current_speaker_sid: list[str | None] = [None]
+    # Raw SID of the last participant who sent a data-channel message.
+    # Set in on_data_received before queueing frames so on_user_turn_stopped
+    # can fall back to it when _sid_to_identity is not yet populated.
+    _last_data_sender: list[str | None] = [None]
     # last utterance ids for reply_to chaining
     _last_user_utt_id: list[str | None] = [None]
     _last_bot_utt_id: list[str | None] = [None]
@@ -189,12 +196,17 @@ async def bot(runner_args: LiveKitRunnerArguments):
         f"model={bot_config.llm_model} voice={bot_config.tts_voice} vad={bot_config.vad_stop_secs}s"
     )
 
-    # "server": OpenAI server-side VAD (turn_detection=None, no local VAD needed)
-    # "local": Pipecat SileroVAD commits audio (turn_detection=False)
-    server_vad = bot_config.stt_vad_mode == "server"
-    stt = _build_stt(bot_config, openai_api_key, env_config.deepgram_api_key)
+    # Per-participant STT: each participant gets a dedicated STT instance so
+    # TranscriptionFrame.user_id is always the correct LiveKit participant SID.
+    # The factory is called once per participant join — OpenAI Realtime STT uses
+    # server-side VAD (turn_detection=None) so each instance handles its own
+    # turn boundaries and emits UserStarted/StoppedSpeakingFrames independently.
+    def _stt_factory():
+        return _build_stt_for_multi_speaker(bot_config, openai_api_key, env_config.deepgram_api_key)
+
+    multi_stt = MultiSpeakerSTT(_stt_factory)
     logger.info(
-        f"STT: model={bot_config.stt_model} vad_mode={bot_config.stt_vad_mode} delay={bot_config.stt_delay}"
+        f"STT: model={bot_config.stt_model} mode=per-participant delay={bot_config.stt_delay}"
     )
     llm = OpenAILLMService(api_key=openai_api_key, model=bot_config.llm_model)
     if bot_config.tts_provider == "openai":
@@ -208,15 +220,11 @@ async def bot(runner_args: LiveKitRunnerArguments):
     logger.info(f"TTS: provider={bot_config.tts_provider} voice={bot_config.tts_voice}")
 
     context = LLMContext([{"role": "system", "content": bot_config.system_prompt}])
+    # VAD is handled per-participant inside each dedicated STT instance, so the
+    # context aggregator does not need its own VAD analyzer.
     context_aggregator = LLMContextAggregatorPair(
         context,
-        user_params=LLMUserAggregatorParams(
-            vad_analyzer=(
-                SileroVADAnalyzer(params=VADParams(stop_secs=bot_config.vad_stop_secs))
-                if not server_vad
-                else None
-            ),
-        ),
+        user_params=LLMUserAggregatorParams(vad_analyzer=None),
     )
 
     latency_observer = UserBotLatencyObserver()
@@ -225,6 +233,29 @@ async def bot(runner_args: LiveKitRunnerArguments):
     # Keys set during a turn: "stt_done", "llm_first", "tts_first".
     # Cleared in on_assistant_turn_stopped after writing to Utterance.meta.
     _turn_timing: dict[str, float] = {}
+
+    class _SpeakerTracker(FrameProcessor):
+        """Records the SID of whoever sent the most recent TranscriptionFrame.
+
+        Sits between the STT service and the context aggregator so it fires on
+        every transcription, regardless of turn order or when participants joined.
+
+        Data-channel path: TranscriptionFrame.user_id is the sender's SID (set
+        explicitly in on_data_received) — perfectly accurate.
+
+        Audio (mixed-STT) path: STT services don't populate user_id on frames
+        they emit, so this tracker has no effect there. Attribution for the audio
+        path is handled by on_active_speaker_changed instead.
+        """
+
+        async def process_frame(self, frame, direction):
+            await super().process_frame(frame, direction)
+            if direction == FrameDirection.DOWNSTREAM and isinstance(frame, TranscriptionFrame):
+                if frame.user_id:
+                    _current_speaker_sid[0] = frame.user_id
+                    identity = _sid_to_identity.get(frame.user_id, frame.user_id)
+                    logger.debug("SpeakerTracker: {} → {}", identity, frame.text[:60])
+            await self.push_frame(frame, direction)
 
     class _LLMFirstTimer(FrameProcessor):
         """Records when the first LLM text token is emitted (true TTFT)."""
@@ -247,7 +278,9 @@ async def bot(runner_args: LiveKitRunnerArguments):
     pipeline = Pipeline(
         [
             transport.input(),
-            stt,
+            multi_stt,
+            _SpeakerTracker(),
+            SpeakerLabelInjector(_sid_to_identity),
             context_aggregator.user(),
             llm,
             _LLMFirstTimer(),
@@ -286,11 +319,31 @@ async def bot(runner_args: LiveKitRunnerArguments):
         _turn_timing.pop("tts_first", None)
         if not message.content:
             return
-        sid = next(iter(_sid_to_identity), None)
-        identity = _sid_to_identity.get(sid, sid) if sid else None
+        # Resolution order for speaker identity:
+        #   1. SID stored by _SpeakerTracker from TranscriptionFrame.user_id
+        #   2. Raw SID stored directly from on_data_received (_last_data_sender)
+        #   3. First known participant (audio-mixed-STT path, no per-frame user_id)
+        speaker_sid = _current_speaker_sid[0] or _last_data_sender[0]
+        if speaker_sid and speaker_sid in _sid_to_identity:
+            identity = _sid_to_identity[speaker_sid]
+        else:
+            sid = next(iter(_sid_to_identity), None)
+            identity = _sid_to_identity.get(sid, sid) if sid else None
         if not identity:
             logger.warning("on_user_turn_stopped: no known participant identity, skipping utterance")
             return
+        # Log full LLM context so we can see what the model receives across speakers.
+        # Visible via: make logs SERVICE=agent-runner
+        logger.debug(
+            "LLM context snapshot — {} messages, last speaker={}\n{}",
+            len(context.messages),
+            identity,
+            "\n".join(
+                "  [{}] {}".format(m["role"], str(m.get("content") or "")[:120])
+                for m in context.messages
+            ),
+        )
+
         ts = _iso_to_unix(message.timestamp)
         utt_id = _new_id()
         async with AsyncSessionLocal() as db:
@@ -372,9 +425,30 @@ async def bot(runner_args: LiveKitRunnerArguments):
                     .on_conflict_do_nothing(index_elements=["id"])
                 )
 
+    @transport.event_handler("on_active_speaker_changed")
+    async def on_active_speaker_changed(transport, participant_id: str):
+        """Update current speaker from LiveKit's active-speaker signal.
+
+        This is the best-effort attribution path for the mixed-audio STT case,
+        where TranscriptionFrame.user_id is not set by the STT service.
+        Only updates the cell when the SID is already known (i.e. the participant
+        has already been seen via on_participant_connected).
+        """
+        if participant_id and participant_id in _sid_to_identity:
+            _current_speaker_sid[0] = participant_id
+            logger.debug(
+                "ActiveSpeaker: {} (sid={})",
+                _sid_to_identity[participant_id],
+                participant_id,
+            )
+
     @transport.event_handler("on_participant_disconnected")
     async def on_participant_disconnected(transport, participant_id: str):
         identity = _sid_to_identity.pop(participant_id, participant_id)
+        # Clear current speaker if this participant just left.
+        if _current_speaker_sid[0] == participant_id:
+            _current_speaker_sid[0] = None
+        await multi_stt.remove_participant(participant_id)
         logger.info(f"Participant disconnected: {identity}")
         if not _sid_to_identity:
             logger.info("No participants remain — cancelling pipeline")
@@ -389,6 +463,22 @@ async def bot(runner_args: LiveKitRunnerArguments):
     @transport.event_handler("on_data_received")
     async def on_data_received(transport, data, participant_id):
         logger.info(f"Received data from participant {participant_id}: {data}")
+        # Guard against race with on_participant_connected: if this sender isn't
+        # in our SID→identity map yet, look them up directly from the room now.
+        if participant_id not in _sid_to_identity:
+            room = transport._client.room
+            p = _find_participant_by_sid(room.remote_participants, participant_id)
+            if p:
+                _sid_to_identity[participant_id] = p.identity
+                logger.info(f"on_data_received: self-registered {p.identity} (sid={participant_id})")
+                async with AsyncSessionLocal() as db:
+                    async with db.begin():
+                        await db.execute(
+                            pg_insert(Speaker)
+                            .values(id=p.identity, meta={"role": "participant"})
+                            .on_conflict_do_nothing(index_elements=["id"])
+                        )
+        _last_data_sender[0] = participant_id
         try:
             json_data = json.loads(data)
         except Exception:
@@ -425,6 +515,37 @@ async def bot(runner_args: LiveKitRunnerArguments):
                 )
 
     logger.info(f"Bot session {runner_args.session_id} ended ({status})")
+
+
+def _build_stt_for_multi_speaker(bot_config, openai_api_key: str, deepgram_api_key: str | None):
+    """Build an STT instance for a single participant in per-participant mode.
+
+    OpenAI Realtime STT: turn_detection=None (server VAD) so each instance drives
+    its own turn boundaries and emits UserStarted/StoppedSpeakingFrames.
+
+    Deepgram: endpointing=200 (server-side silence detection) so transcripts are
+    committed without local VAD. _FrameCollector will wrap final transcripts in
+    VAD frame sandwiches for the context aggregator.
+    """
+    if bot_config.stt_model.startswith("gpt-"):
+        return _OpenAIRealtimeSTT(
+            api_key=openai_api_key,
+            turn_detection=None,  # server VAD per-participant instance
+            transcription_delay=bot_config.stt_delay,
+            settings=_OpenAIRealtimeSTT.Settings(
+                model=bot_config.stt_model,
+                noise_reduction="near_field",
+            ),
+        )
+    if not deepgram_api_key:
+        raise ValueError("DEEPGRAM_API_KEY is required for Deepgram STT models")
+    return DeepgramSTTService(
+        api_key=deepgram_api_key,
+        settings=DeepgramSTTService.Settings(
+            model=bot_config.stt_model,
+            endpointing=200,  # server-side silence detection; _FrameCollector adds VAD frames
+        ),
+    )
 
 
 def _find_participant_by_sid(remote_participants: dict, sid: str):

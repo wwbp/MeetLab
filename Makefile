@@ -9,7 +9,7 @@ BENCHMARK_TIMEOUT ?= 25
 
 MSG ?= migration
 
-.PHONY: up down start stop logs migrate migration test test-unit test-integration test-bot-longevity setup-livekit-cloud revert-livekit-local test-livekit-tooling scan scan-agent-runner scan-meet benchmark benchmark-audio benchmark-full benchmark-report
+.PHONY: up down start stop logs migrate migration test test-unit test-integration test-bot-longevity test-multi-speaker test-multi-speaker-audio setup-livekit-cloud revert-livekit-local test-livekit-tooling scan scan-agent-runner scan-meet benchmark benchmark-audio benchmark-full benchmark-report
 
 up:
 	$(COMPOSE) up --build -d
@@ -42,6 +42,20 @@ test-integration:
 	$(COMPOSE) up -d transport-server agent-runner meet
 	$(COMPOSE) exec -T meet pnpm test:api
 	$(COMPOSE) exec -T meet pnpm test:load
+
+test-multi-speaker:
+	$(COMPOSE) up -d transport-server agent-runner
+	$(COMPOSE) exec -T agent-runner uv run alembic upgrade head
+	$(COMPOSE) exec -T agent-runner \
+		env RUN_MULTI_SPEAKER=1 \
+		uv run python -m unittest -v tests.test_multi_speaker_e2e
+
+test-multi-speaker-audio:
+	$(COMPOSE) up -d transport-server agent-runner
+	$(COMPOSE) exec -T agent-runner uv run alembic upgrade head
+	$(COMPOSE) exec -T agent-runner \
+		env RUN_MULTI_SPEAKER=1 RUN_MULTI_SPEAKER_AUDIO=1 \
+		uv run python -m unittest -v tests.test_multi_speaker_e2e.TestMultiSpeakerE2E.test_07_audio_two_speakers
 
 test-bot-longevity:
 	$(COMPOSE) up -d transport-server agent-runner meet

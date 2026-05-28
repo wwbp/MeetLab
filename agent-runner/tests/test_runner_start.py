@@ -194,6 +194,124 @@ class RunnerStartApiTests(unittest.TestCase):
         self.assertEqual(_room_slug("!!!"), "room")
         self.assertEqual(_room_slug(""), "room")
 
+    # ------------------------------------------------------------------
+    # POST /events
+    # ------------------------------------------------------------------
+
+    def test_events_happy_path_returns_202(self):
+        response = self.client.post(
+            "/events",
+            json={"type": "participant_joined", "room_name": "test-room"},
+        )
+        self.assertEqual(response.status_code, 202)
+        self.assertEqual(response.json().get("status"), "accepted")
+
+    def test_events_missing_type_returns_400(self):
+        response = self.client.post("/events", json={"room_name": "test-room"})
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("type", response.json().get("error", ""))
+
+    def test_events_whitespace_type_returns_400(self):
+        response = self.client.post("/events", json={"type": "   ", "room_name": "test-room"})
+        self.assertEqual(response.status_code, 400)
+
+    def test_events_non_object_body_returns_400(self):
+        response = self.client.post("/events", json=[])
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json().get("error"), "request body must be a JSON object")
+
+    def test_events_invalid_json_returns_400(self):
+        response = self.client.post(
+            "/events",
+            content="{",
+            headers={"Content-Type": "application/json"},
+        )
+        self.assertEqual(response.status_code, 400)
+
+    # ------------------------------------------------------------------
+    # GET /config
+    # ------------------------------------------------------------------
+
+    def test_config_get_returns_all_expected_fields(self):
+        response = self.client.get("/config")
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        for key in (
+            "scope", "system_prompt", "greeting", "vad_stop_secs",
+            "llm_model", "tts_voice", "tts_provider",
+            "stt_model", "stt_vad_mode", "stt_delay",
+        ):
+            self.assertIn(key, body, f"GET /config response missing field: {key}")
+        self.assertEqual(body["scope"], "global")
+
+    def test_config_get_with_room_param_returns_scope_field(self):
+        response = self.client.get("/config?room=some-room")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("scope", response.json())
+
+    # ------------------------------------------------------------------
+    # PUT /config
+    # ------------------------------------------------------------------
+
+    def test_config_put_updates_field_and_echoes_back(self):
+        # Use an isolated scope so we don't corrupt global config for other tests.
+        response = self.client.put(
+            "/config",
+            json={"scope": "test-runner-scope", "llm_model": "gpt-4o-mini"},
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json().get("llm_model"), "gpt-4o-mini")
+
+    def test_config_put_valid_stt_delay_accepted(self):
+        response = self.client.put(
+            "/config",
+            json={"scope": "test-runner-scope", "stt_delay": "low"},
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json().get("stt_delay"), "low")
+
+    def test_config_put_null_stt_delay_clears_field(self):
+        response = self.client.put(
+            "/config",
+            json={"scope": "test-runner-scope", "stt_delay": None},
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertIsNone(response.json().get("stt_delay"))
+
+    def test_config_put_invalid_stt_model_returns_400(self):
+        response = self.client.put(
+            "/config",
+            json={"scope": "test-runner-scope", "stt_model": "whisper-turbo"},
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("stt_model", response.json().get("error", ""))
+
+    def test_config_put_invalid_tts_provider_returns_400(self):
+        response = self.client.put(
+            "/config",
+            json={"scope": "test-runner-scope", "tts_provider": "google"},
+        )
+        self.assertEqual(response.status_code, 400)
+
+    def test_config_put_invalid_stt_delay_returns_400(self):
+        response = self.client.put(
+            "/config",
+            json={"scope": "test-runner-scope", "stt_delay": "turbo"},
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("stt_delay", response.json().get("error", ""))
+
+    def test_config_put_non_object_body_returns_400(self):
+        response = self.client.put("/config", json=[])
+        self.assertEqual(response.status_code, 400)
+
+    def test_config_put_invalid_vad_stop_secs_type_returns_400(self):
+        response = self.client.put(
+            "/config",
+            json={"scope": "test-runner-scope", "vad_stop_secs": "fast"},
+        )
+        self.assertEqual(response.status_code, 400)
+
 
 if __name__ == "__main__":
     unittest.main()

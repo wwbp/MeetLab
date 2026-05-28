@@ -128,14 +128,16 @@ async function deleteRoom(roomName) {
 }
 
 // LiveKit's DeleteRoom API returns before async cleanup completes, so listRooms
-// can still show the deleted room for a short window. Poll until it's gone.
+// can still show the deleted room for a short window. In CI the bot lingers
+// longer because it blocks on external-service connection timeouts (fake keys)
+// before fully disconnecting from LiveKit after ROOM_DELETED — use 30s.
 async function waitForRoomGone(roomName) {
   await waitFor(
     async () => {
       const { response, json } = await jsonRequest('/api/concierge/rooms');
       return response.status === 200 && !json?.rooms?.some((r) => r.name === roomName);
     },
-    { timeoutMs: 10_000, description: `room "${roomName}" to be absent from LiveKit` }
+    { timeoutMs: 30_000, description: `room "${roomName}" to be absent from LiveKit` }
   );
 }
 

@@ -1,0 +1,472 @@
+"""Unit tests for MultiSpeakerSTT and SpeakerLabelInjector.
+
+No external services required. Mock STT instances are used so tests run fast
+inside the container without API keys.
+
+Run via:
+    docker compose -f .devcontainer/docker-compose.yml exec -T agent-runner \
+        uv run python -m unittest tests.test_multi_speaker_stt -v
+"""
+
+import asyncio
+import os
+import sys
+import unittest
+from unittest.mock import AsyncMock, MagicMock
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+
+from pipecat.frames.frames import (
+    CancelFrame,
+    EndFrame,
+    Frame,
+    StartFrame,
+    TranscriptionFrame,
+    UserAudioRawFrame,
+    UserStartedSpeakingFrame,
+    UserStoppedSpeakingFrame,
+)
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessor, FrameProcessorSetup
+
+from multi_speaker_stt import MultiSpeakerSTT, SpeakerLabelInjector, _FrameCollector
+
+
+# ── helpers ───────────────────────────────────────────────────────────────────
+
+def _make_setup() -> FrameProcessorSetup:
+    """Minimal FrameProcessorSetup backed by a mock task manager.
+
+    The mock task_manager delegates create_task to the running asyncio event
+    loop so real coroutines (pump task, per-participant STT input tasks) execute
+    normally during the test. cancel_task is an AsyncMock to support awaiting.
+    """
+    setup = MagicMock(spec=FrameProcessorSetup)
+    tm = MagicMock()
+    tm.get_event_loop.side_effect = asyncio.get_event_loop
+    tm.create_task.side_effect = lambda coro, name=None: asyncio.get_event_loop().create_task(coro)
+    tm.cancel_task = AsyncMock()
+    setup.task_manager = tm
+    setup.clock = MagicMock()
+    setup.clock.get_time.return_value = 0.0
+    setup.observer = None
+    return setup
+
+
+def _make_audio_frame(user_id: str) -> UserAudioRawFrame:
+    # num_frames is computed from audio length; do not pass it explicitly.
+    return UserAudioRawFrame(audio=b"\x00" * 320, sample_rate=16000, num_channels=1, user_id=user_id)
+
+
+def _make_transcription(user_id: str, text: str, finalized: bool = True) -> TranscriptionFrame:
+    return TranscriptionFrame(text=text, user_id=user_id, timestamp="2025-01-01T00:00:00Z", finalized=finalized)
+
+
+class _Sink(FrameProcessor):
+    """Captures frames pushed to it via queue_frame — no pipeline machinery needed.
+
+    Overrides queue_frame so frames land directly in `received` without
+    requiring setup/start on this processor.
+    """
+
+    def __init__(self):
+        super().__init__()
+        self.received: list[Frame] = []
+
+    async def queue_frame(
+        self,
+        frame: Frame,
+        direction: FrameDirection = FrameDirection.DOWNSTREAM,
+        callback=None,
+    ) -> None:
+        if direction == FrameDirection.DOWNSTREAM:
+            self.received.append(frame)
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
+        await super().process_frame(frame, direction)
+        self.received.append(frame)
+
+
+class _ImmediateSTT(FrameProcessor):
+    """Fake STT: on UserAudioRawFrame emits VAD frames + TranscriptionFrame.
+
+    Simulates OpenAI Realtime behaviour (emits its own UserStarted/StoppedSpeakingFrames).
+    """
+
+    def __init__(self, reply_text: str = "hello"):
+        super().__init__()
+        self.reply_text = reply_text
+        self.received_audio: list[UserAudioRawFrame] = []
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
+        await super().process_frame(frame, direction)
+        if direction == FrameDirection.DOWNSTREAM and isinstance(frame, UserAudioRawFrame):
+            self.received_audio.append(frame)
+            await self.push_frame(UserStartedSpeakingFrame(), direction)
+            await self.push_frame(_make_transcription(frame.user_id, self.reply_text), direction)
+            await self.push_frame(UserStoppedSpeakingFrame(), direction)
+        else:
+            await self.push_frame(frame, direction)
+
+
+# ── _FrameCollector ──────────────────────────────────────────────────────────
+
+class TestFrameCollector(unittest.IsolatedAsyncioTestCase):
+    async def test_queues_non_system_downstream_frames(self):
+        q: asyncio.Queue = asyncio.Queue()
+        collector = _FrameCollector(q)
+        tf = _make_transcription("alice", "hi")
+
+        await collector.queue_frame(tf, FrameDirection.DOWNSTREAM)
+
+        self.assertFalse(q.empty())
+        got = q.get_nowait()
+        self.assertIs(got, tf)
+
+    async def test_filters_system_frames(self):
+        q: asyncio.Queue = asyncio.Queue()
+        collector = _FrameCollector(q)
+
+        for sys_frame in [StartFrame(), EndFrame(), CancelFrame()]:
+            await collector.queue_frame(sys_frame, FrameDirection.DOWNSTREAM)
+
+        self.assertTrue(q.empty())
+
+    async def test_ignores_upstream_frames(self):
+        q: asyncio.Queue = asyncio.Queue()
+        collector = _FrameCollector(q)
+
+        await collector.queue_frame(_make_transcription("alice", "hi"), FrameDirection.UPSTREAM)
+
+        self.assertTrue(q.empty())
+
+    async def test_vad_wrap_on_final_transcription(self):
+        q: asyncio.Queue = asyncio.Queue()
+        collector = _FrameCollector(q, needs_vad_wrap=True)
+        tf = _make_transcription("alice", "hi", finalized=True)
+
+        await collector.queue_frame(tf, FrameDirection.DOWNSTREAM)
+
+        frames = []
+        while not q.empty():
+            frames.append(q.get_nowait())
+
+        self.assertEqual(len(frames), 3)
+        self.assertIsInstance(frames[0], UserStartedSpeakingFrame)
+        self.assertIsInstance(frames[1], TranscriptionFrame)
+        self.assertIsInstance(frames[2], UserStoppedSpeakingFrame)
+
+    async def test_no_vad_wrap_for_interim_transcription(self):
+        q: asyncio.Queue = asyncio.Queue()
+        collector = _FrameCollector(q, needs_vad_wrap=True)
+        tf = _make_transcription("alice", "hi", finalized=False)
+
+        await collector.queue_frame(tf, FrameDirection.DOWNSTREAM)
+
+        frames = []
+        while not q.empty():
+            frames.append(q.get_nowait())
+
+        self.assertEqual(len(frames), 1)
+        self.assertIsInstance(frames[0], TranscriptionFrame)
+
+    async def test_end_frame_filtered_explicitly(self):
+        """EndFrame is a ControlFrame (not SystemFrame) in Pipecat 1.2.x — must still be filtered."""
+        q: asyncio.Queue = asyncio.Queue()
+        collector = _FrameCollector(q)
+
+        await collector.queue_frame(EndFrame(), FrameDirection.DOWNSTREAM)
+
+        self.assertTrue(q.empty(), "EndFrame should be filtered even though it is not a SystemFrame")
+
+    async def test_no_vad_wrap_for_finalized_when_disabled(self):
+        """needs_vad_wrap=False: finalized TranscriptionFrame goes directly to queue without sandwich."""
+        q: asyncio.Queue = asyncio.Queue()
+        collector = _FrameCollector(q, needs_vad_wrap=False)
+        tf = _make_transcription("alice", "hi", finalized=True)
+
+        await collector.queue_frame(tf, FrameDirection.DOWNSTREAM)
+
+        frames = []
+        while not q.empty():
+            frames.append(q.get_nowait())
+
+        self.assertEqual(len(frames), 1)
+        self.assertIsInstance(frames[0], TranscriptionFrame)
+        self.assertNotIn(UserStartedSpeakingFrame, [type(f) for f in frames])
+
+    async def test_vad_wrap_passthrough_for_non_transcription(self):
+        """needs_vad_wrap=True: non-TranscriptionFrame is enqueued directly, no VAD sandwich."""
+        q: asyncio.Queue = asyncio.Queue()
+        collector = _FrameCollector(q, needs_vad_wrap=True)
+
+        await collector.queue_frame(UserStartedSpeakingFrame(), FrameDirection.DOWNSTREAM)
+
+        frames = []
+        while not q.empty():
+            frames.append(q.get_nowait())
+
+        self.assertEqual(len(frames), 1)
+        self.assertIsInstance(frames[0], UserStartedSpeakingFrame)
+
+
+# ── MultiSpeakerSTT routing ───────────────────────────────────────────────────
+
+class TestMultiSpeakerSTTRouting(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        self.setup_params = _make_setup()
+
+        def factory():
+            return _ImmediateSTT()
+
+        self.multi_stt = MultiSpeakerSTT(factory)
+        await self.multi_stt.setup(self.setup_params)
+
+        self.sink = _Sink()
+        self.multi_stt.link(self.sink)
+
+        await self.multi_stt.process_frame(StartFrame(), FrameDirection.DOWNSTREAM)
+        await asyncio.sleep(0.05)  # let pump task start
+
+    async def asyncTearDown(self):
+        try:
+            await self.multi_stt.process_frame(CancelFrame(), FrameDirection.DOWNSTREAM)
+        except Exception:
+            pass
+        from db.engine import engine
+        await engine.dispose()
+
+    async def test_creates_distinct_stts_for_different_sids(self):
+        await self.multi_stt.process_frame(_make_audio_frame("alice_sid"), FrameDirection.DOWNSTREAM)
+        await self.multi_stt.process_frame(_make_audio_frame("bob_sid"), FrameDirection.DOWNSTREAM)
+
+        self.assertIn("alice_sid", self.multi_stt._stts)
+        self.assertIn("bob_sid", self.multi_stt._stts)
+        self.assertIsNot(self.multi_stt._stts["alice_sid"], self.multi_stt._stts["bob_sid"])
+
+    async def test_reuses_stt_for_same_sid(self):
+        await self.multi_stt.process_frame(_make_audio_frame("alice_sid"), FrameDirection.DOWNSTREAM)
+        stt_first = self.multi_stt._stts.get("alice_sid")
+
+        await self.multi_stt.process_frame(_make_audio_frame("alice_sid"), FrameDirection.DOWNSTREAM)
+        stt_second = self.multi_stt._stts.get("alice_sid")
+
+        self.assertIsNotNone(stt_first)
+        self.assertIs(stt_first, stt_second)
+
+    async def test_remove_participant_clears_entry(self):
+        await self.multi_stt.process_frame(_make_audio_frame("alice_sid"), FrameDirection.DOWNSTREAM)
+        await self.multi_stt.process_frame(_make_audio_frame("bob_sid"), FrameDirection.DOWNSTREAM)
+
+        await self.multi_stt.remove_participant("alice_sid")
+
+        self.assertNotIn("alice_sid", self.multi_stt._stts)
+        self.assertIn("bob_sid", self.multi_stt._stts)
+
+    async def test_transcription_frames_forwarded_downstream(self):
+        await self.multi_stt.process_frame(_make_audio_frame("alice_sid"), FrameDirection.DOWNSTREAM)
+        await asyncio.sleep(0.1)  # let pump flush
+
+        transcript_frames = [f for f in self.sink.received if isinstance(f, TranscriptionFrame)]
+        self.assertTrue(len(transcript_frames) >= 1, f"Expected TranscriptionFrame downstream, got: {self.sink.received}")
+        self.assertEqual(transcript_frames[0].user_id, "alice_sid")
+
+    async def test_non_audio_frames_pass_through(self):
+        tf = _make_transcription("alice_sid", "direct injection")
+        await self.multi_stt.process_frame(tf, FrameDirection.DOWNSTREAM)
+        await asyncio.sleep(0)
+
+        passthrough = [f for f in self.sink.received if isinstance(f, TranscriptionFrame) and f.text == "direct injection"]
+        self.assertTrue(len(passthrough) >= 1, "Direct TranscriptionFrame should pass through unchanged")
+
+    async def test_audio_frame_without_user_id_not_routed(self):
+        frame = UserAudioRawFrame(audio=b"\x00" * 320, sample_rate=16000, num_channels=1, user_id="")
+        initial_count = len(self.multi_stt._stts)
+
+        await self.multi_stt.process_frame(frame, FrameDirection.DOWNSTREAM)
+
+        self.assertEqual(len(self.multi_stt._stts), initial_count, "Empty user_id should not create a new STT")
+
+    async def test_audio_without_user_id_not_forwarded_downstream(self):
+        """Audio frame with empty user_id is silently dropped — not pushed to the downstream pipeline."""
+        frame = UserAudioRawFrame(audio=b"\x00" * 320, sample_rate=16000, num_channels=1, user_id="")
+        await self.multi_stt.process_frame(frame, FrameDirection.DOWNSTREAM)
+        await asyncio.sleep(0)
+
+        audio_downstream = [f for f in self.sink.received if isinstance(f, UserAudioRawFrame)]
+        self.assertEqual(len(audio_downstream), 0, "Audio with no user_id should be dropped, not forwarded")
+
+    async def test_user_id_not_cross_contaminated(self):
+        """Core attribution invariant: alice's audio produces transcripts with alice's user_id, never bob's."""
+        await self.multi_stt.process_frame(_make_audio_frame("alice_sid"), FrameDirection.DOWNSTREAM)
+        await self.multi_stt.process_frame(_make_audio_frame("bob_sid"), FrameDirection.DOWNSTREAM)
+        await asyncio.sleep(0.1)
+
+        alice_tx = [f for f in self.sink.received if isinstance(f, TranscriptionFrame) and f.user_id == "alice_sid"]
+        bob_tx = [f for f in self.sink.received if isinstance(f, TranscriptionFrame) and f.user_id == "bob_sid"]
+        wrong = [f for f in self.sink.received if isinstance(f, TranscriptionFrame) and f.user_id not in ("alice_sid", "bob_sid")]
+
+        self.assertTrue(len(alice_tx) >= 1, "Expected at least one TranscriptionFrame for alice_sid")
+        self.assertTrue(len(bob_tx) >= 1, "Expected at least one TranscriptionFrame for bob_sid")
+        self.assertEqual(len(wrong), 0, f"Cross-contaminated transcriptions: {[f.user_id for f in wrong]}")
+
+    async def test_end_frame_clears_stts_and_pump(self):
+        """EndFrame tears down all per-participant STTs and stops the pump task."""
+        await self.multi_stt.process_frame(_make_audio_frame("alice_sid"), FrameDirection.DOWNSTREAM)
+        self.assertIn("alice_sid", self.multi_stt._stts)
+        self.assertIsNotNone(self.multi_stt._pump_task)
+
+        await self.multi_stt.process_frame(EndFrame(), FrameDirection.DOWNSTREAM)
+        await asyncio.sleep(0)
+
+        self.assertEqual(len(self.multi_stt._stts), 0, "_stts should be empty after EndFrame")
+        self.assertIsNone(self.multi_stt._pump_task, "_pump_task should be None after EndFrame")
+
+    async def test_cancel_frame_clears_stts_and_pump(self):
+        """CancelFrame tears down all per-participant STTs and stops the pump task."""
+        await self.multi_stt.process_frame(_make_audio_frame("alice_sid"), FrameDirection.DOWNSTREAM)
+        self.assertIn("alice_sid", self.multi_stt._stts)
+
+        await self.multi_stt.process_frame(CancelFrame(), FrameDirection.DOWNSTREAM)
+        await asyncio.sleep(0)
+
+        self.assertEqual(len(self.multi_stt._stts), 0, "_stts should be empty after CancelFrame")
+        self.assertIsNone(self.multi_stt._pump_task, "_pump_task should be None after CancelFrame")
+
+    async def test_remove_nonexistent_sid_is_noop(self):
+        """remove_participant with an unknown SID does not raise and leaves state unchanged."""
+        await self.multi_stt.remove_participant("does_not_exist")
+        self.assertEqual(len(self.multi_stt._stts), 0)
+
+
+# ── SpeakerLabelInjector ──────────────────────────────────────────────────────
+
+class TestSpeakerLabelInjector(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        self.sid_map = {"alice_sid": "alice_123", "bob_sid": "bob_456"}
+        self.injector = SpeakerLabelInjector(self.sid_map)
+        self.setup_params = _make_setup()
+        await self.injector.setup(self.setup_params)
+
+        self.sink = _Sink()
+        self.injector.link(self.sink)
+
+        # Start the injector so push_frame's _check_started passes.
+        await self.injector.process_frame(StartFrame(), FrameDirection.DOWNSTREAM)
+        await asyncio.sleep(0)
+
+    async def asyncTearDown(self):
+        from db.engine import engine
+        await engine.dispose()
+
+    async def test_prepends_identity_for_known_sid(self):
+        await self.injector.process_frame(_make_transcription("alice_sid", "what is X?"), FrameDirection.DOWNSTREAM)
+
+        transcripts = [f for f in self.sink.received if isinstance(f, TranscriptionFrame)]
+        self.assertTrue(
+            any(f.text == "alice_123: what is X?" for f in transcripts),
+            f"Expected labeled text, got: {[f.text for f in transcripts]}",
+        )
+
+    async def test_preserves_user_id_after_labeling(self):
+        await self.injector.process_frame(_make_transcription("alice_sid", "hello"), FrameDirection.DOWNSTREAM)
+
+        transcripts = [f for f in self.sink.received if isinstance(f, TranscriptionFrame)]
+        self.assertTrue(all(f.user_id == "alice_sid" for f in transcripts))
+
+    async def test_unknown_sid_text_unchanged(self):
+        await self.injector.process_frame(_make_transcription("unknown_sid", "mystery"), FrameDirection.DOWNSTREAM)
+
+        transcripts = [f for f in self.sink.received if isinstance(f, TranscriptionFrame)]
+        self.assertTrue(
+            any(f.text == "mystery" for f in transcripts),
+            "Unknown SID should not have label prepended",
+        )
+
+    async def test_empty_text_not_labeled(self):
+        await self.injector.process_frame(_make_transcription("alice_sid", ""), FrameDirection.DOWNSTREAM)
+
+        transcripts = [f for f in self.sink.received if isinstance(f, TranscriptionFrame)]
+        self.assertTrue(all(f.text == "" for f in transcripts))
+
+    async def test_non_transcription_frames_pass_through(self):
+        await self.injector.process_frame(UserStartedSpeakingFrame(), FrameDirection.DOWNSTREAM)
+
+        vad_frames = [f for f in self.sink.received if isinstance(f, UserStartedSpeakingFrame)]
+        self.assertTrue(len(vad_frames) >= 1, "UserStartedSpeakingFrame should pass through")
+
+    async def test_live_dict_update_reflected(self):
+        # Unknown SID — no label
+        await self.injector.process_frame(_make_transcription("charlie_sid", "new person"), FrameDirection.DOWNSTREAM)
+        before = [f for f in self.sink.received if isinstance(f, TranscriptionFrame)]
+        self.assertTrue(any(f.text == "new person" for f in before), "Before: text should be unlabeled")
+
+        self.sink.received.clear()
+        self.sid_map["charlie_sid"] = "charlie_789"  # live update — same dict reference
+
+        await self.injector.process_frame(_make_transcription("charlie_sid", "new person"), FrameDirection.DOWNSTREAM)
+        after = [f for f in self.sink.received if isinstance(f, TranscriptionFrame)]
+        self.assertTrue(
+            any(f.text == "charlie_789: new person" for f in after),
+            f"After dict update: expected labeled text, got {[f.text for f in after]}",
+        )
+
+    async def test_upstream_transcription_not_labeled(self):
+        """TranscriptionFrame going upstream is not modified and does not reach the downstream sink."""
+        await self.injector.process_frame(
+            _make_transcription("alice_sid", "upstream text"),
+            FrameDirection.UPSTREAM,
+        )
+
+        transcripts = [f for f in self.sink.received if isinstance(f, TranscriptionFrame)]
+        self.assertEqual(len(transcripts), 0, "Upstream transcription should not reach the downstream sink")
+
+    async def test_interim_transcription_also_labeled(self):
+        """Label is applied to interim (finalized=False) transcriptions as well as final ones."""
+        await self.injector.process_frame(
+            _make_transcription("alice_sid", "partial", finalized=False),
+            FrameDirection.DOWNSTREAM,
+        )
+
+        transcripts = [f for f in self.sink.received if isinstance(f, TranscriptionFrame)]
+        self.assertTrue(
+            any(f.text == "alice_123: partial" for f in transcripts),
+            f"Interim transcription should also be labeled, got: {[f.text for f in transcripts]}",
+        )
+
+    async def test_finalized_field_preserved_after_labeling(self):
+        """The finalized flag on the new TranscriptionFrame matches the original."""
+        await self.injector.process_frame(
+            _make_transcription("alice_sid", "final", finalized=True),
+            FrameDirection.DOWNSTREAM,
+        )
+        await self.injector.process_frame(
+            _make_transcription("alice_sid", "partial", finalized=False),
+            FrameDirection.DOWNSTREAM,
+        )
+
+        transcripts = [f for f in self.sink.received if isinstance(f, TranscriptionFrame)]
+        final_tx = [f for f in transcripts if "final" in f.text]
+        interim_tx = [f for f in transcripts if "partial" in f.text]
+
+        self.assertTrue(all(f.finalized is True for f in final_tx), "finalized=True should be preserved")
+        self.assertTrue(all(f.finalized is False for f in interim_tx), "finalized=False should be preserved")
+
+    async def test_language_field_preserved_after_labeling(self):
+        """The language field on the new TranscriptionFrame matches the original."""
+        frame = TranscriptionFrame(
+            text="bonjour",
+            user_id="alice_sid",
+            timestamp="2025-01-01T00:00:00Z",
+            language="fr",
+            finalized=True,
+        )
+        await self.injector.process_frame(frame, FrameDirection.DOWNSTREAM)
+
+        transcripts = [f for f in self.sink.received if isinstance(f, TranscriptionFrame)]
+        labeled = [f for f in transcripts if "bonjour" in f.text]
+        self.assertTrue(len(labeled) >= 1)
+        self.assertEqual(labeled[0].language, "fr", "language field should survive the label-prepend")
+
+
+if __name__ == "__main__":
+    unittest.main()

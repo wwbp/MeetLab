@@ -411,6 +411,8 @@ async def update_config(request: Request, _=Depends(verify_api_key)):
         body = await request.json()
     except Exception:
         return JSONResponse({"error": "request body must be valid JSON"}, status_code=400)
+    if not isinstance(body, dict):
+        return JSONResponse({"error": "request body must be a JSON object"}, status_code=400)
 
     scope = body.get("scope", "global")
     if not isinstance(scope, str) or not scope.strip():

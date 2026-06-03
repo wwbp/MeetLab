@@ -78,6 +78,7 @@ services:
     volumes:
       - ../agent-runner:/app:cached
       - agent-runner-venv:/app/.venv
+      - ../recordings:/recordings
     ports:
       - "7860:7860"
     depends_on:

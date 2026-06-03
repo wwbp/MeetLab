@@ -5,9 +5,11 @@ for each participant's individual audio track. MultiSpeakerSTT exploits this by
 routing each participant's frames to a dedicated STT instance, so TranscriptionFrames
 are emitted with the exact LiveKit SID in user_id — no last-write-wins race.
 
-SpeakerLabelInjector sits downstream and prepends "IdentityName: " to each
+SpeakerLabelInjector sits downstream and prepends "DisplayName: " to each
 TranscriptionFrame's text before it reaches the LLM context aggregator, giving
 the model group-conversation awareness ("Alice: what is X?").
+Display names use the LiveKit token name field and strip the __randomPostfix
+added by connection-details for uniqueness.
 
 Usage in bot.py:
     from multi_speaker_stt import MultiSpeakerSTT, SpeakerLabelInjector
@@ -21,7 +23,7 @@ Usage in bot.py:
         transport.input(),
         multi_stt,
         _SpeakerTracker(),
-        SpeakerLabelInjector(_sid_to_identity),
+        SpeakerLabelInjector(_sid_to_identity, _sid_to_name),
         context_aggregator.user(),
         ...
     ])
@@ -203,7 +205,7 @@ def _stt_emits_vad_frames(stt: FrameProcessor) -> bool:
 
 
 class SpeakerLabelInjector(FrameProcessor):
-    """Prepends "IdentityName: " to TranscriptionFrame text before the LLM sees it.
+    """Prepends "DisplayName: " to TranscriptionFrame text before the LLM sees it.
 
     Sits between MultiSpeakerSTT (or _SpeakerTracker) and context_aggregator.user()
     so the LLM context accumulates group-conversation-aware messages:
@@ -211,21 +213,30 @@ class SpeakerLabelInjector(FrameProcessor):
         [assistant] "..."
         [user] "Bob: what is the boiling point of water?"
 
-    Takes a live reference to the bot's _sid_to_identity dict — no copy, so it
-    always reflects the latest participant map.
+    Takes live references to the bot's _sid_to_identity and _sid_to_name dicts —
+    no copy, so they always reflect the latest participant map.
+
+    Display name resolution order:
+      1. sid_to_name[sid]          — LiveKit token name field (clean, user-entered)
+      2. identity.split('__')[0]   — strip the __randomPostfix added for uniqueness
     """
 
-    def __init__(self, sid_to_identity: dict):
+    def __init__(self, sid_to_identity: dict, sid_to_name: dict | None = None):
         super().__init__()
         self.sid_to_identity = sid_to_identity
+        self.sid_to_name = sid_to_name
 
     async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
         await super().process_frame(frame, direction)
         if direction == FrameDirection.DOWNSTREAM and isinstance(frame, TranscriptionFrame):
             identity = self.sid_to_identity.get(frame.user_id)
             if identity and frame.text:
+                if self.sid_to_name is not None:
+                    display = self.sid_to_name.get(frame.user_id) or identity.split("__")[0]
+                else:
+                    display = identity.split("__")[0]
                 frame = TranscriptionFrame(
-                    text=f"{identity}: {frame.text}",
+                    text=f"{display}: {frame.text}",
                     user_id=frame.user_id,
                     timestamp=frame.timestamp,
                     language=frame.language,

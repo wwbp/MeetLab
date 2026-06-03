@@ -17,13 +17,17 @@ from starlette.middleware.sessions import SessionMiddleware
 from starlette.requests import Request as StarletteRequest
 from starlette.responses import Response as StarletteResponse
 
-from sqlalchemy import select
+from fastapi.responses import FileResponse, RedirectResponse
+from sqlalchemy import func, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.orm import selectinload
 
+import storage
+import transcript as transcript_mod
 from config import load_config, require
 from db.config_loader import load_bot_config
 from db.engine import AsyncSessionLocal, engine
-from db.models import BotConfig, Conversation, Event, Speaker, Utterance
+from db.models import BotConfig, Conversation, Event, MediaFile, Speaker, Utterance
 from runner_types import LiveKitRunnerArguments
 
 config = load_config()
@@ -385,7 +389,45 @@ async def log_event(request: Request, _=Depends(verify_api_key)):
                     payload={k: v for k, v in body.items() if k not in ("type", "room_name", "conv_id")},
                 )
             )
+
+    # Flip pending recording MediaFile to available when egress finishes
+    if event_type.strip().lower() in ("egress_ended", "egress_updated"):
+        await _handle_egress_event(body)
+
     return {"status": "accepted"}
+
+
+async def _handle_egress_event(body: dict) -> None:
+    """Update the matching recording MediaFile when LiveKit egress finishes."""
+    payload = body.get("payload") or {}
+    egress_info = payload.get("egressInfo") or payload.get("egress_info") or {}
+    egress_id = egress_info.get("egressId") or egress_info.get("egress_id")
+    raw_status = egress_info.get("status", 0)
+    # LiveKit EgressStatus: EGRESS_ENDING=2, EGRESS_COMPLETE=3, EGRESS_FAILED=4
+    if not egress_id:
+        return
+    if raw_status not in (2, 3, 4):
+        return
+    new_status = "available" if raw_status in (2, 3) else "failed"
+    try:
+        async with AsyncSessionLocal() as db:
+            result = await db.execute(
+                select(MediaFile).where(
+                    MediaFile.meta["egress_id"].astext == egress_id,
+                    MediaFile.type == "recording",
+                )
+            )
+            mf = result.scalar_one_or_none()
+            if mf and mf.status == "pending":
+                async with db.begin():
+                    await db.execute(
+                        update(MediaFile)
+                        .where(MediaFile.id == mf.id)
+                        .values(status=new_status)
+                    )
+                logger.info(f"egress {egress_id}: recording MediaFile {mf.id} → {new_status}")
+    except Exception as exc:
+        logger.warning(f"_handle_egress_event failed for {egress_id}: {exc}")
 
 
 @app.get("/config")
@@ -484,6 +526,307 @@ async def update_config(request: Request, _=Depends(verify_api_key)):
         "stt_vad_mode": cfg.stt_vad_mode,
         "stt_delay": cfg.stt_delay,
     }
+
+
+# ── helpers ──────────────────────────────────────────────────────────────────
+
+def _lk_http_url() -> str:
+    """Convert ws(s):// LiveKit URL to http(s):// for API calls."""
+    return LIVEKIT_URL.replace("wss://", "https://").replace("ws://", "http://")
+
+
+def _media_file_json(mf: MediaFile) -> dict:
+    return {
+        "id": mf.id,
+        "conv_id": mf.conv_id,
+        "type": mf.type,
+        "status": mf.status,
+        "path": mf.path,
+        "created_at": mf.created_at.isoformat(),
+        "meta": mf.meta,
+    }
+
+
+def _conversation_json(conv: Conversation, utterance_count: int) -> dict:
+    return {
+        "id": conv.id,
+        "room_name": conv.room_name,
+        "bot_identity": conv.bot_identity,
+        "started_at": conv.started_at.isoformat(),
+        "ended_at": conv.ended_at.isoformat() if conv.ended_at else None,
+        "status": conv.status,
+        "utterance_count": utterance_count,
+        "media_files": [_media_file_json(mf) for mf in conv.media_files],
+    }
+
+
+# ── recording endpoints ───────────────────────────────────────────────────────
+
+@app.post("/recordings/start")
+async def start_recording(request: Request, _=Depends(verify_api_key)):
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "request body must be valid JSON"}, status_code=400)
+    room_name = body.get("room_name")
+    if not isinstance(room_name, str) or not room_name.strip():
+        return JSONResponse({"error": "room_name is required"}, status_code=400)
+    room_name = room_name.strip()
+
+    # Look up current conversation for this room
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(
+            select(Conversation)
+            .where(Conversation.room_name == room_name, Conversation.status == "running")
+            .order_by(Conversation.started_at.desc())
+            .limit(1)
+        )
+        conv = result.scalar_one_or_none()
+        if not conv:
+            return JSONResponse({"error": "no active session for this room"}, status_code=404)
+
+        # Reject if a recording is already pending/available for this session
+        result = await db.execute(
+            select(MediaFile).where(
+                MediaFile.conv_id == conv.id,
+                MediaFile.type == "recording",
+                MediaFile.status.in_(["pending", "available"]),
+            )
+        )
+        if result.scalar_one_or_none():
+            return JSONResponse({"error": "recording already active for this session"}, status_code=409)
+
+    filepath = storage.build_recording_path(room_name)
+    filename = filepath.split("/")[-1]
+
+    from livekit.protocol.egress import EncodedFileOutput, S3Upload, RoomCompositeEgressRequest
+    cfg = storage._cfg()
+
+    if cfg["backend"] == "s3":
+        missing = [k for k in ("key_id", "key_secret", "bucket", "region") if not cfg[k]]
+        if missing:
+            return JSONResponse({"error": f"S3 not fully configured: {missing}"}, status_code=500)
+        file_output = EncodedFileOutput(
+            filepath=f"recordings/{filename}",
+            s3=S3Upload(
+                access_key=cfg["key_id"],
+                secret=cfg["key_secret"],
+                bucket=cfg["bucket"],
+                region=cfg["region"],
+                **({"endpoint": cfg["endpoint"]} if cfg["endpoint"] else {}),
+            ),
+        )
+    else:
+        file_output = EncodedFileOutput(filepath=filepath)
+
+    async with api.LiveKitAPI(
+        url=_lk_http_url(), api_key=LIVEKIT_API_KEY, api_secret=LIVEKIT_API_SECRET
+    ) as lk:
+        # Check for active egress
+        existing = await lk.egress.list_egress(
+            api.ListEgressRequest(room_name=room_name)
+        )
+        active = [e for e in existing.items if e.status < 2]
+        if active:
+            return JSONResponse({"error": "room already has an active recording egress"}, status_code=409)
+
+        egress_info = await lk.egress.start_room_composite_egress(
+            api.RoomCompositeEgressRequest(
+                room_name=room_name,
+                layout="speaker",
+                file=file_output,
+            )
+        )
+        egress_id = egress_info.egress_id
+
+    media_file_id = str(uuid.uuid4())
+    async with AsyncSessionLocal() as db:
+        async with db.begin():
+            db.add(MediaFile(
+                id=media_file_id,
+                conv_id=conv.id,
+                type="recording",
+                status="pending",
+                path=filepath,
+                meta={"egress_id": egress_id, "filename": filename},
+            ))
+
+    logger.info(f"recording started: room={room_name} egress={egress_id} file={filepath}")
+    return {"media_file_id": media_file_id, "egress_id": egress_id, "path": filepath}
+
+
+@app.post("/recordings/stop")
+async def stop_recording(request: Request, _=Depends(verify_api_key)):
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "request body must be valid JSON"}, status_code=400)
+    room_name = body.get("room_name")
+    if not isinstance(room_name, str) or not room_name.strip():
+        return JSONResponse({"error": "room_name is required"}, status_code=400)
+    room_name = room_name.strip()
+
+    async with api.LiveKitAPI(
+        url=_lk_http_url(), api_key=LIVEKIT_API_KEY, api_secret=LIVEKIT_API_SECRET
+    ) as lk:
+        existing = await lk.egress.list_egress(
+            api.ListEgressRequest(room_name=room_name)
+        )
+        active = [e for e in existing.items if e.status < 2]
+        if not active:
+            return JSONResponse({"error": "no active recording found"}, status_code=404)
+        for e in active:
+            await lk.egress.stop_egress(api.StopEgressRequest(egress_id=e.egress_id))
+
+    logger.info(f"recording stopped: room={room_name} egress_count={len(active)}")
+    return {"stopped": len(active)}
+
+
+# ── media file endpoints ───────────────────────────────────────────────────────
+
+@app.patch("/media-files/{file_id}")
+async def update_media_file(file_id: str, request: Request, _=Depends(verify_api_key)):
+    """Update a MediaFile record — called by the meet webhook on egress_ended."""
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "request body must be valid JSON"}, status_code=400)
+
+    allowed = {"status", "path", "meta"}
+    fields = {k: v for k, v in body.items() if k in allowed}
+    if not fields:
+        return JSONResponse({"error": "no updatable fields provided"}, status_code=400)
+
+    async with AsyncSessionLocal() as db:
+        async with db.begin():
+            result = await db.execute(select(MediaFile).where(MediaFile.id == file_id))
+            mf = result.scalar_one_or_none()
+            if not mf:
+                return JSONResponse({"error": "media file not found"}, status_code=404)
+            await db.execute(
+                update(MediaFile).where(MediaFile.id == file_id).values(**fields)
+            )
+
+    return {"updated": file_id}
+
+
+@app.get("/media-files/{file_id}/download")
+async def download_media_file(file_id: str, _=Depends(verify_api_key)):
+    """Serve or redirect to a stored file.
+
+    S3: returns 302 to a presigned URL.
+    Local: streams the file directly.
+    """
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(select(MediaFile).where(MediaFile.id == file_id))
+        mf = result.scalar_one_or_none()
+
+    if not mf:
+        return JSONResponse({"error": "media file not found"}, status_code=404)
+    if mf.status != "available":
+        return JSONResponse({"error": f"file not ready (status={mf.status})"}, status_code=409)
+    if not mf.path:
+        return JSONResponse({"error": "file path not recorded"}, status_code=500)
+
+    if not storage.is_local():
+        url = storage.get_download_url(mf.path)
+        return RedirectResponse(url=url, status_code=302)
+
+    file_path = storage.local_abs_path(mf.path)
+    if not file_path.exists():
+        return JSONResponse({"error": "file not found on disk"}, status_code=404)
+
+    ext = file_path.suffix.lower()
+    media_types = {".mp4": "video/mp4", ".md": "text/markdown", ".txt": "text/plain"}
+    media_type = media_types.get(ext, "application/octet-stream")
+    return FileResponse(path=str(file_path), media_type=media_type, filename=file_path.name)
+
+
+# ── conversations / meetings endpoints ────────────────────────────────────────
+
+@app.get("/conversations")
+async def list_conversations(
+    limit: int = 50,
+    offset: int = 0,
+    _=Depends(verify_api_key),
+):
+    """List all conversations with utterance counts and media files, newest first."""
+    limit = min(max(limit, 1), 200)
+    offset = max(offset, 0)
+
+    async with AsyncSessionLocal() as db:
+        # Count utterances per conversation in one query
+        count_rows = await db.execute(
+            select(Utterance.conv_id, func.count(Utterance.id).label("cnt"))
+            .group_by(Utterance.conv_id)
+        )
+        utt_counts: dict[str, int] = {row.conv_id: row.cnt for row in count_rows}
+
+        result = await db.execute(
+            select(Conversation)
+            .options(selectinload(Conversation.media_files))
+            .order_by(Conversation.started_at.desc())
+            .limit(limit)
+            .offset(offset)
+        )
+        convs = list(result.scalars().all())
+
+        # Total count for pagination
+        total_result = await db.execute(select(func.count(Conversation.id)))
+        total = total_result.scalar_one()
+
+    return {
+        "conversations": [
+            _conversation_json(c, utt_counts.get(c.id, 0)) for c in convs
+        ],
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+    }
+
+
+@app.post("/conversations/{conv_id}/transcript")
+async def queue_transcript(
+    conv_id: str,
+    background_tasks: BackgroundTasks,
+    _=Depends(verify_api_key),
+):
+    """Queue async transcript generation. Returns immediately with media_file_id."""
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(
+            select(Conversation).where(Conversation.id == conv_id)
+        )
+        conv = result.scalar_one_or_none()
+        if not conv:
+            return JSONResponse({"error": "conversation not found"}, status_code=404)
+
+        # Reject if transcript already pending or available
+        result = await db.execute(
+            select(MediaFile).where(
+                MediaFile.conv_id == conv_id,
+                MediaFile.type == "transcript",
+                MediaFile.status.in_(["pending", "available"]),
+            )
+        )
+        existing = result.scalar_one_or_none()
+        if existing:
+            return JSONResponse(
+                {"error": "transcript already exists", "media_file_id": existing.id},
+                status_code=409,
+            )
+
+        media_file_id = str(uuid.uuid4())
+        async with db.begin():
+            db.add(MediaFile(
+                id=media_file_id,
+                conv_id=conv_id,
+                type="transcript",
+                status="pending",
+            ))
+
+    background_tasks.add_task(transcript_mod.generate_async, conv_id, media_file_id)
+    logger.info(f"transcript queued: conv={conv_id} file={media_file_id}")
+    return {"media_file_id": media_file_id, "status": "pending"}
 
 
 @app.get("/health")

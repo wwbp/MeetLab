@@ -603,7 +603,12 @@ async def start_recording(request: Request, _=Depends(verify_api_key)):
     filepath = storage.build_recording_path(room_name)
     filename = filepath.split("/")[-1]
 
-    from livekit.protocol.egress import EncodedFileOutput, S3Upload, RoomCompositeEgressRequest
+    from livekit.protocol.egress import (
+        EncodedFileOutput,
+        ListEgressRequest,
+        RoomCompositeEgressRequest,
+        S3Upload,
+    )
     cfg = storage._cfg()
 
     if cfg["backend"] == "s3":
@@ -627,15 +632,13 @@ async def start_recording(request: Request, _=Depends(verify_api_key)):
         url=_lk_http_url(), api_key=LIVEKIT_API_KEY, api_secret=LIVEKIT_API_SECRET
     ) as lk:
         # Check for active egress
-        existing = await lk.egress.list_egress(
-            api.ListEgressRequest(room_name=room_name)
-        )
+        existing = await lk.egress.list_egress(ListEgressRequest(room_name=room_name))
         active = [e for e in existing.items if e.status < 2]
         if active:
             return JSONResponse({"error": "room already has an active recording egress"}, status_code=409)
 
         egress_info = await lk.egress.start_room_composite_egress(
-            api.RoomCompositeEgressRequest(
+            RoomCompositeEgressRequest(
                 room_name=room_name,
                 layout="speaker",
                 file=file_output,
@@ -670,17 +673,17 @@ async def stop_recording(request: Request, _=Depends(verify_api_key)):
         return JSONResponse({"error": "room_name is required"}, status_code=400)
     room_name = room_name.strip()
 
+    from livekit.protocol.egress import ListEgressRequest, StopEgressRequest
+
     async with api.LiveKitAPI(
         url=_lk_http_url(), api_key=LIVEKIT_API_KEY, api_secret=LIVEKIT_API_SECRET
     ) as lk:
-        existing = await lk.egress.list_egress(
-            api.ListEgressRequest(room_name=room_name)
-        )
+        existing = await lk.egress.list_egress(ListEgressRequest(room_name=room_name))
         active = [e for e in existing.items if e.status < 2]
         if not active:
             return JSONResponse({"error": "no active recording found"}, status_code=404)
         for e in active:
-            await lk.egress.stop_egress(api.StopEgressRequest(egress_id=e.egress_id))
+            await lk.egress.stop_egress(StopEgressRequest(egress_id=e.egress_id))
 
     logger.info(f"recording stopped: room={room_name} egress_count={len(active)}")
     return {"stopped": len(active)}

@@ -628,23 +628,29 @@ async def start_recording(request: Request, _=Depends(verify_api_key)):
     else:
         file_output = EncodedFileOutput(filepath=filepath)
 
-    async with api.LiveKitAPI(
-        url=_lk_http_url(), api_key=LIVEKIT_API_KEY, api_secret=LIVEKIT_API_SECRET
-    ) as lk:
-        # Check for active egress
-        existing = await lk.egress.list_egress(ListEgressRequest(room_name=room_name))
-        active = [e for e in existing.items if e.status < 2]
-        if active:
-            return JSONResponse({"error": "room already has an active recording egress"}, status_code=409)
+    try:
+        async with api.LiveKitAPI(
+            url=_lk_http_url(), api_key=LIVEKIT_API_KEY, api_secret=LIVEKIT_API_SECRET
+        ) as lk:
+            # Check for active egress
+            existing = await lk.egress.list_egress(ListEgressRequest(room_name=room_name))
+            active = [e for e in existing.items if e.status < 2]
+            if active:
+                return JSONResponse({"error": "room already has an active recording egress"}, status_code=409)
 
-        egress_info = await lk.egress.start_room_composite_egress(
-            RoomCompositeEgressRequest(
-                room_name=room_name,
-                layout="speaker",
-                file=file_output,
+            egress_info = await lk.egress.start_room_composite_egress(
+                RoomCompositeEgressRequest(
+                    room_name=room_name,
+                    layout="speaker",
+                    file=file_output,
+                )
             )
-        )
-        egress_id = egress_info.egress_id
+            egress_id = egress_info.egress_id
+    except Exception as exc:
+        logger.error(f"recording start LiveKit error: room={room_name} error={exc}")
+        msg = str(exc)
+        status = 404 if "not_found" in msg or "does not exist" in msg else 502
+        return JSONResponse({"error": f"LiveKit: {msg}"}, status_code=status)
 
     media_file_id = str(uuid.uuid4())
     async with AsyncSessionLocal() as db:
@@ -675,15 +681,19 @@ async def stop_recording(request: Request, _=Depends(verify_api_key)):
 
     from livekit.protocol.egress import ListEgressRequest, StopEgressRequest
 
-    async with api.LiveKitAPI(
-        url=_lk_http_url(), api_key=LIVEKIT_API_KEY, api_secret=LIVEKIT_API_SECRET
-    ) as lk:
-        existing = await lk.egress.list_egress(ListEgressRequest(room_name=room_name))
-        active = [e for e in existing.items if e.status < 2]
-        if not active:
-            return JSONResponse({"error": "no active recording found"}, status_code=404)
-        for e in active:
-            await lk.egress.stop_egress(StopEgressRequest(egress_id=e.egress_id))
+    try:
+        async with api.LiveKitAPI(
+            url=_lk_http_url(), api_key=LIVEKIT_API_KEY, api_secret=LIVEKIT_API_SECRET
+        ) as lk:
+            existing = await lk.egress.list_egress(ListEgressRequest(room_name=room_name))
+            active = [e for e in existing.items if e.status < 2]
+            if not active:
+                return JSONResponse({"error": "no active recording found"}, status_code=404)
+            for e in active:
+                await lk.egress.stop_egress(StopEgressRequest(egress_id=e.egress_id))
+    except Exception as exc:
+        logger.error(f"recording stop LiveKit error: room={room_name} error={exc}")
+        return JSONResponse({"error": f"LiveKit: {exc}"}, status_code=502)
 
     logger.info(f"recording stopped: room={room_name} egress_count={len(active)}")
     return {"stopped": len(active)}

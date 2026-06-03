@@ -410,6 +410,7 @@ async def _handle_egress_event(body: dict) -> None:
         return
     new_status = "available" if raw_status in (2, 3) else "failed"
     try:
+        # Read phase — own session so SELECT doesn't auto-begin a conflicting tx
         async with AsyncSessionLocal() as db:
             result = await db.execute(
                 select(MediaFile).where(
@@ -418,14 +419,17 @@ async def _handle_egress_event(body: dict) -> None:
                 )
             )
             mf = result.scalar_one_or_none()
-            if mf and mf.status == "pending":
+
+        if mf and mf.status == "pending":
+            # Write phase — fresh session with explicit transaction
+            async with AsyncSessionLocal() as db:
                 async with db.begin():
                     await db.execute(
                         update(MediaFile)
                         .where(MediaFile.id == mf.id)
                         .values(status=new_status)
                     )
-                logger.info(f"egress {egress_id}: recording MediaFile {mf.id} → {new_status}")
+            logger.info(f"egress {egress_id}: recording MediaFile {mf.id} → {new_status}")
     except Exception as exc:
         logger.warning(f"_handle_egress_event failed for {egress_id}: {exc}")
 
@@ -792,31 +796,31 @@ async def queue_transcript(
     _=Depends(verify_api_key),
 ):
     """Queue async transcript generation. Returns immediately with media_file_id."""
+    # Single transaction: check existence + insert atomically to avoid races
+    media_file_id = str(uuid.uuid4())
     async with AsyncSessionLocal() as db:
-        result = await db.execute(
-            select(Conversation).where(Conversation.id == conv_id)
-        )
-        conv = result.scalar_one_or_none()
-        if not conv:
-            return JSONResponse({"error": "conversation not found"}, status_code=404)
-
-        # Reject if transcript already pending or available
-        result = await db.execute(
-            select(MediaFile).where(
-                MediaFile.conv_id == conv_id,
-                MediaFile.type == "transcript",
-                MediaFile.status.in_(["pending", "available"]),
-            )
-        )
-        existing = result.scalar_one_or_none()
-        if existing:
-            return JSONResponse(
-                {"error": "transcript already exists", "media_file_id": existing.id},
-                status_code=409,
-            )
-
-        media_file_id = str(uuid.uuid4())
         async with db.begin():
+            result = await db.execute(
+                select(Conversation).where(Conversation.id == conv_id)
+            )
+            conv = result.scalar_one_or_none()
+            if not conv:
+                return JSONResponse({"error": "conversation not found"}, status_code=404)
+
+            result = await db.execute(
+                select(MediaFile).where(
+                    MediaFile.conv_id == conv_id,
+                    MediaFile.type == "transcript",
+                    MediaFile.status.in_(["pending", "available"]),
+                )
+            )
+            existing = result.scalar_one_or_none()
+            if existing:
+                return JSONResponse(
+                    {"error": "transcript already exists", "media_file_id": existing.id},
+                    status_code=409,
+                )
+
             db.add(MediaFile(
                 id=media_file_id,
                 conv_id=conv_id,

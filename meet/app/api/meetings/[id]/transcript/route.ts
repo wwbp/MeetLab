@@ -22,7 +22,17 @@ export async function POST(
       method: 'POST',
       headers,
     });
-    const data = await res.json();
+    const text = await res.text();
+    let data: unknown;
+    try {
+      data = JSON.parse(text);
+    } catch {
+      // agent-runner returned non-JSON (e.g. nginx 500 page) — surface raw body
+      return NextResponse.json(
+        { error: text.slice(0, 200) || `agent-runner error (${res.status})` },
+        { status: res.status >= 400 ? res.status : 500, headers: noStoreHeaders() },
+      );
+    }
     return NextResponse.json(data, { status: res.status, headers: noStoreHeaders() });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Failed to queue transcript';

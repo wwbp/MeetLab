@@ -564,6 +564,48 @@ def _conversation_json(conv: Conversation, utterance_count: int) -> dict:
     }
 
 
+async def _reconcile_pending_local_recordings() -> None:
+    """Mark finished local recordings available if the webhook was missed."""
+    if not storage.is_local():
+        return
+
+    try:
+        async with AsyncSessionLocal() as db:
+            result = await db.execute(
+                select(MediaFile)
+                .join(Conversation)
+                .where(
+                    MediaFile.type == "recording",
+                    MediaFile.status == "pending",
+                    MediaFile.path.is_not(None),
+                    Conversation.status != "running",
+                )
+            )
+            pending = list(result.scalars().all())
+
+        ready_ids: list[str] = []
+        for mf in pending:
+            if not mf.path:
+                continue
+            file_path = storage.local_abs_path(mf.path)
+            if file_path.exists() and file_path.stat().st_size > 0:
+                ready_ids.append(mf.id)
+
+        if not ready_ids:
+            return
+
+        async with AsyncSessionLocal() as db:
+            async with db.begin():
+                await db.execute(
+                    update(MediaFile)
+                    .where(MediaFile.id.in_(ready_ids))
+                    .values(status="available")
+                )
+        logger.info(f"reconciled {len(ready_ids)} pending local recording(s) to available")
+    except Exception as exc:
+        logger.warning(f"local recording reconciliation failed: {exc}")
+
+
 # ── recording endpoints ───────────────────────────────────────────────────────
 
 @app.post("/recordings/start")
@@ -773,6 +815,8 @@ async def list_conversations(
     """List all conversations with utterance counts and media files, newest first."""
     limit = min(max(limit, 1), 200)
     offset = max(offset, 0)
+
+    await _reconcile_pending_local_recordings()
 
     async with AsyncSessionLocal() as db:
         # Count utterances per conversation in one query

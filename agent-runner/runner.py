@@ -606,6 +606,37 @@ async def _reconcile_pending_local_recordings() -> None:
         logger.warning(f"local recording reconciliation failed: {exc}")
 
 
+def _is_missing_egress_output_error(exc: Exception) -> bool:
+    msg = str(exc).lower()
+    return "invalid_argument" in msg and "missing or invalid field: output" in msg
+
+
+async def _start_room_composite_egress(lk, room_name: str, file_output):
+    from livekit.protocol.egress import RoomCompositeEgressRequest
+
+    try:
+        return await lk.egress.start_room_composite_egress(
+            RoomCompositeEgressRequest(
+                room_name=room_name,
+                layout="speaker",
+                file_outputs=[file_output],
+            )
+        )
+    except Exception as exc:
+        if not _is_missing_egress_output_error(exc):
+            raise
+        logger.warning(
+            "room composite egress rejected file_outputs; retrying with legacy file output"
+        )
+        return await lk.egress.start_room_composite_egress(
+            RoomCompositeEgressRequest(
+                room_name=room_name,
+                layout="speaker",
+                file=file_output,
+            )
+        )
+
+
 # ── recording endpoints ───────────────────────────────────────────────────────
 
 @app.post("/recordings/start")
@@ -648,7 +679,6 @@ async def start_recording(request: Request, _=Depends(verify_api_key)):
     from livekit.protocol.egress import (
         EncodedFileOutput,
         ListEgressRequest,
-        RoomCompositeEgressRequest,
         S3Upload,
     )
     cfg = storage._cfg()
@@ -680,16 +710,7 @@ async def start_recording(request: Request, _=Depends(verify_api_key)):
             if active:
                 return JSONResponse({"error": "room already has an active recording egress"}, status_code=409)
 
-            # Use file_outputs (field #11, repeated) not file (field #6, oneof output).
-            # LiveKit Cloud ≥v1.8 only accepts the new repeated field; the old oneof
-            # field raises TwirpError(invalid_argument, "missing or invalid field: output").
-            egress_info = await lk.egress.start_room_composite_egress(
-                RoomCompositeEgressRequest(
-                    room_name=room_name,
-                    layout="speaker",
-                    file_outputs=[file_output],
-                )
-            )
+            egress_info = await _start_room_composite_egress(lk, room_name, file_output)
             egress_id = egress_info.egress_id
     except Exception as exc:
         logger.error(f"recording start LiveKit error: room={room_name} error={exc}")

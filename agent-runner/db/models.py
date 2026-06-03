@@ -63,6 +63,9 @@ class Conversation(Base):
 
     utterances: Mapped[list["Utterance"]] = relationship(back_populates="conversation")
     events: Mapped[list["Event"]] = relationship(back_populates="conversation")
+    media_files: Mapped[list["MediaFile"]] = relationship(
+        back_populates="conversation", order_by="MediaFile.created_at"
+    )
 
 
 class Utterance(Base):
@@ -96,6 +99,30 @@ class Utterance(Base):
 
     speaker: Mapped["Speaker"] = relationship(back_populates="utterances")
     conversation: Mapped["Conversation"] = relationship(back_populates="utterances")
+
+
+class MediaFile(Base):
+    """One row per generated media file (recording, transcript, audio clip).
+
+    type:   recording | transcript | audio_clip
+    status: pending | available | failed
+    path:   local filesystem path or S3 key — set at creation time
+    meta:   egress_id (recordings), utterance_count (transcripts), size, etc.
+    """
+
+    __tablename__ = "media_files"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True, default=_uuid)
+    conv_id: Mapped[str] = mapped_column(
+        String(64), ForeignKey("conversations.id"), nullable=False, index=True
+    )
+    type: Mapped[str] = mapped_column(String(32), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), default="pending")
+    path: Mapped[str | None] = mapped_column(String(1024))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    meta: Mapped[dict] = mapped_column(JSONB, default=dict, server_default="{}")
+
+    conversation: Mapped["Conversation"] = relationship(back_populates="media_files")
 
 
 class Event(Base):

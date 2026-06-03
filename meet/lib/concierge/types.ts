@@ -96,6 +96,34 @@ export type StartBotResponse = {
   request: ConciergeBotRequest;
 };
 
+export type MediaFileRecord = {
+  id: string;
+  conv_id: string;
+  type: 'recording' | 'transcript' | 'audio_clip';
+  status: 'pending' | 'available' | 'failed';
+  path: string | null;
+  created_at: string;
+  meta: Record<string, unknown>;
+};
+
+export type ConversationRecord = {
+  id: string;
+  room_name: string;
+  bot_identity: string | null;
+  started_at: string;
+  ended_at: string | null;
+  status: 'running' | 'completed' | 'error';
+  utterance_count: number;
+  media_files: MediaFileRecord[];
+};
+
+export type ConversationsResponse = {
+  conversations: ConversationRecord[];
+  total: number;
+  limit: number;
+  offset: number;
+};
+
 export type ConciergeRoomHealthStatus = 'missing' | 'idle' | 'active';
 
 export type ConciergeBotHealthStatus = 'missing' | 'starting' | 'connected_no_tracks' | 'connected';

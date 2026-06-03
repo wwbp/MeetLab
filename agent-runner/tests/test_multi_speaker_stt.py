@@ -467,6 +467,56 @@ class TestSpeakerLabelInjector(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(len(labeled) >= 1)
         self.assertEqual(labeled[0].language, "fr", "language field should survive the label-prepend")
 
+    async def test_postfix_stripped_when_no_name_map(self):
+        """Without sid_to_name, label uses identity with __postfix stripped."""
+        sid_map = {"alice_sid": "Alice__abc1"}
+        injector = SpeakerLabelInjector(sid_map)
+        sink = _Sink()
+        injector.link(sink)
+        await injector.setup(_make_setup())
+        await injector.process_frame(StartFrame(), FrameDirection.DOWNSTREAM)
+
+        await injector.process_frame(_make_transcription("alice_sid", "hi"), FrameDirection.DOWNSTREAM)
+        transcripts = [f for f in sink.received if isinstance(f, TranscriptionFrame)]
+        self.assertTrue(
+            any(f.text == "Alice: hi" for f in transcripts),
+            f"Expected postfix stripped label, got: {[f.text for f in transcripts]}",
+        )
+
+    async def test_sid_to_name_takes_priority_over_identity(self):
+        """When sid_to_name is provided, its value is used instead of stripping the identity."""
+        sid_map = {"alice_sid": "Alice__abc1"}
+        name_map = {"alice_sid": "Alice"}
+        injector = SpeakerLabelInjector(sid_map, name_map)
+        sink = _Sink()
+        injector.link(sink)
+        await injector.setup(_make_setup())
+        await injector.process_frame(StartFrame(), FrameDirection.DOWNSTREAM)
+
+        await injector.process_frame(_make_transcription("alice_sid", "hello"), FrameDirection.DOWNSTREAM)
+        transcripts = [f for f in sink.received if isinstance(f, TranscriptionFrame)]
+        self.assertTrue(
+            any(f.text == "Alice: hello" for f in transcripts),
+            f"Expected clean name from sid_to_name, got: {[f.text for f in transcripts]}",
+        )
+
+    async def test_sid_to_name_falls_back_to_stripped_identity(self):
+        """If sid not in sid_to_name, falls back to stripping __postfix from identity."""
+        sid_map = {"alice_sid": "Alice__abc1"}
+        name_map: dict = {}
+        injector = SpeakerLabelInjector(sid_map, name_map)
+        sink = _Sink()
+        injector.link(sink)
+        await injector.setup(_make_setup())
+        await injector.process_frame(StartFrame(), FrameDirection.DOWNSTREAM)
+
+        await injector.process_frame(_make_transcription("alice_sid", "fallback"), FrameDirection.DOWNSTREAM)
+        transcripts = [f for f in sink.received if isinstance(f, TranscriptionFrame)]
+        self.assertTrue(
+            any(f.text == "Alice: fallback" for f in transcripts),
+            f"Expected stripped-identity fallback, got: {[f.text for f in transcripts]}",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

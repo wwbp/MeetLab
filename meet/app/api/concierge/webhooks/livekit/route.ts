@@ -109,12 +109,17 @@ export async function POST(request: Request) {
 
     const { botRunnerUrl, botRunnerSecret } = getServerConfig();
     if (botRunnerUrl) {
-      const payload = {
+      const payload: Record<string, unknown> = {
         type: storedEvent.event,
         room_name: storedEvent.roomName ?? undefined,
         participant_identity: storedEvent.participantIdentity ?? undefined,
         received_at: storedEvent.receivedAt,
       };
+      // Forward the full webhook payload for egress events so agent-runner can
+      // update MediaFile status when a recording finishes.
+      if (storedEvent.event.toLowerCase().includes('egress')) {
+        payload.payload = storedEvent.payload;
+      }
       const fwdHeaders: Record<string, string> = { 'Content-Type': 'application/json' };
       if (botRunnerSecret) fwdHeaders['Authorization'] = `Bearer ${botRunnerSecret}`;
       fetch(`${botRunnerUrl}events`, {

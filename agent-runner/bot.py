@@ -161,6 +161,8 @@ async def bot(runner_args: LiveKitRunnerArguments):
 
     # sid → identity lookup: populated at on_participant_connected / on_participant_disconnected
     _sid_to_identity: dict[str, str] = {}
+    # sid → clean display name (LiveKit token name field, strips __randomPostfix)
+    _sid_to_name: dict[str, str] = {}
     # SID of the participant who triggered the current user turn.
     # Written by _SpeakerTracker (TranscriptionFrame.user_id, reliable for data-channel path)
     # and on_active_speaker_changed (best-effort for mixed-audio STT path).
@@ -280,7 +282,7 @@ async def bot(runner_args: LiveKitRunnerArguments):
             transport.input(),
             multi_stt,
             _SpeakerTracker(),
-            SpeakerLabelInjector(_sid_to_identity),
+            SpeakerLabelInjector(_sid_to_identity, _sid_to_name),
             context_aggregator.user(),
             llm,
             _LLMFirstTimer(),
@@ -416,12 +418,16 @@ async def bot(runner_args: LiveKitRunnerArguments):
             return
         identity = p.identity
         _sid_to_identity[participant_id] = identity
+        _sid_to_name[participant_id] = p.name or identity.split("__")[0]
         logger.info(f"Participant connected: {identity} (sid={participant_id})")
         async with AsyncSessionLocal() as db:
             async with db.begin():
                 await db.execute(
                     pg_insert(Speaker)
-                    .values(id=identity, meta={"role": "participant"})
+                    .values(id=identity, meta={
+                        "role": "participant",
+                        "display_name": _sid_to_name[participant_id],
+                    })
                     .on_conflict_do_nothing(index_elements=["id"])
                 )
 
@@ -445,6 +451,7 @@ async def bot(runner_args: LiveKitRunnerArguments):
     @transport.event_handler("on_participant_disconnected")
     async def on_participant_disconnected(transport, participant_id: str):
         identity = _sid_to_identity.pop(participant_id, participant_id)
+        _sid_to_name.pop(participant_id, None)
         # Clear current speaker if this participant just left.
         if _current_speaker_sid[0] == participant_id:
             _current_speaker_sid[0] = None
@@ -470,12 +477,16 @@ async def bot(runner_args: LiveKitRunnerArguments):
             p = _find_participant_by_sid(room.remote_participants, participant_id)
             if p:
                 _sid_to_identity[participant_id] = p.identity
+                _sid_to_name[participant_id] = p.name or p.identity.split("__")[0]
                 logger.info(f"on_data_received: self-registered {p.identity} (sid={participant_id})")
                 async with AsyncSessionLocal() as db:
                     async with db.begin():
                         await db.execute(
                             pg_insert(Speaker)
-                            .values(id=p.identity, meta={"role": "participant"})
+                            .values(id=p.identity, meta={
+                                "role": "participant",
+                                "display_name": _sid_to_name[participant_id],
+                            })
                             .on_conflict_do_nothing(index_elements=["id"])
                         )
         _last_data_sender[0] = participant_id

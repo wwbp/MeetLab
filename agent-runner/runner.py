@@ -638,11 +638,14 @@ async def start_recording(request: Request, _=Depends(verify_api_key)):
             if active:
                 return JSONResponse({"error": "room already has an active recording egress"}, status_code=409)
 
+            # Use file_outputs (field #11, repeated) not file (field #6, oneof output).
+            # LiveKit Cloud ≥v1.8 only accepts the new repeated field; the old oneof
+            # field raises TwirpError(invalid_argument, "missing or invalid field: output").
             egress_info = await lk.egress.start_room_composite_egress(
                 RoomCompositeEgressRequest(
                     room_name=room_name,
                     layout="speaker",
-                    file=file_output,
+                    file_outputs=[file_output],
                 )
             )
             egress_id = egress_info.egress_id

@@ -88,6 +88,12 @@ services:
         condition: service_started
       jaeger:
         condition: service_started
+    healthcheck:
+      test: ["CMD-SHELL", "python3 -c \"import urllib.request; urllib.request.urlopen('http://localhost:7860/health')\""]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 10s
 
   meet:
     build:
@@ -105,8 +111,10 @@ services:
     ports:
       - "3000:3000"
     depends_on:
-      - transport-server
-      - agent-runner
+      transport-server:
+        condition: service_started
+      agent-runner:
+        condition: service_healthy
 
 volumes:
   agent-runner-venv:

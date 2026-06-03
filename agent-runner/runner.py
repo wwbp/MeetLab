@@ -611,6 +611,16 @@ def _is_missing_egress_output_error(exc: Exception) -> bool:
     return "invalid_argument" in msg and "missing or invalid field: output" in msg
 
 
+class EgressOutputCompatibilityError(RuntimeError):
+    def __init__(self, file_outputs_error: Exception, legacy_file_error: Exception):
+        self.file_outputs_error = file_outputs_error
+        self.legacy_file_error = legacy_file_error
+        super().__init__(
+            "LiveKit rejected both room composite egress output formats: "
+            f"file_outputs={file_outputs_error}; legacy_file={legacy_file_error}"
+        )
+
+
 async def _start_room_composite_egress(lk, room_name: str, file_output):
     from livekit.protocol.egress import RoomCompositeEgressRequest
 
@@ -628,13 +638,16 @@ async def _start_room_composite_egress(lk, room_name: str, file_output):
         logger.warning(
             "room composite egress rejected file_outputs; retrying with legacy file output"
         )
-        return await lk.egress.start_room_composite_egress(
-            RoomCompositeEgressRequest(
-                room_name=room_name,
-                layout="speaker",
-                file=file_output,
+        try:
+            return await lk.egress.start_room_composite_egress(
+                RoomCompositeEgressRequest(
+                    room_name=room_name,
+                    layout="speaker",
+                    file=file_output,
+                )
             )
-        )
+        except Exception as legacy_exc:
+            raise EgressOutputCompatibilityError(exc, legacy_exc) from legacy_exc
 
 
 # ── recording endpoints ───────────────────────────────────────────────────────
@@ -699,6 +712,12 @@ async def start_recording(request: Request, _=Depends(verify_api_key)):
         )
     else:
         file_output = EncodedFileOutput(filepath=filepath)
+    logger.info(
+        "recording output prepared: "
+        f"room={room_name} backend={cfg['backend']} filepath={file_output.filepath} "
+        f"s3_bucket_set={bool(cfg['bucket'])} s3_region={cfg['region'] or ''} "
+        f"s3_endpoint_set={bool(cfg['endpoint'])}"
+    )
 
     try:
         async with api.LiveKitAPI(

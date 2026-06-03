@@ -564,6 +564,79 @@ def _conversation_json(conv: Conversation, utterance_count: int) -> dict:
     }
 
 
+async def _reconcile_pending_local_recordings() -> None:
+    """Mark finished local recordings available if the webhook was missed."""
+    if not storage.is_local():
+        return
+
+    try:
+        async with AsyncSessionLocal() as db:
+            result = await db.execute(
+                select(MediaFile)
+                .join(Conversation)
+                .where(
+                    MediaFile.type == "recording",
+                    MediaFile.status == "pending",
+                    MediaFile.path.is_not(None),
+                    Conversation.status != "running",
+                )
+            )
+            pending = list(result.scalars().all())
+
+        ready_ids: list[str] = []
+        for mf in pending:
+            if not mf.path:
+                continue
+            file_path = storage.local_abs_path(mf.path)
+            if file_path.exists() and file_path.stat().st_size > 0:
+                ready_ids.append(mf.id)
+
+        if not ready_ids:
+            return
+
+        async with AsyncSessionLocal() as db:
+            async with db.begin():
+                await db.execute(
+                    update(MediaFile)
+                    .where(MediaFile.id.in_(ready_ids))
+                    .values(status="available")
+                )
+        logger.info(f"reconciled {len(ready_ids)} pending local recording(s) to available")
+    except Exception as exc:
+        logger.warning(f"local recording reconciliation failed: {exc}")
+
+
+def _is_missing_egress_output_error(exc: Exception) -> bool:
+    msg = str(exc).lower()
+    return "invalid_argument" in msg and "missing or invalid field: output" in msg
+
+
+async def _start_room_composite_egress(lk, room_name: str, file_output):
+    from livekit.protocol.egress import RoomCompositeEgressRequest
+
+    try:
+        return await lk.egress.start_room_composite_egress(
+            RoomCompositeEgressRequest(
+                room_name=room_name,
+                layout="speaker",
+                file_outputs=[file_output],
+            )
+        )
+    except Exception as exc:
+        if not _is_missing_egress_output_error(exc):
+            raise
+        logger.warning(
+            "room composite egress rejected file_outputs; retrying with legacy file output"
+        )
+        return await lk.egress.start_room_composite_egress(
+            RoomCompositeEgressRequest(
+                room_name=room_name,
+                layout="speaker",
+                file=file_output,
+            )
+        )
+
+
 # ── recording endpoints ───────────────────────────────────────────────────────
 
 @app.post("/recordings/start")
@@ -606,7 +679,6 @@ async def start_recording(request: Request, _=Depends(verify_api_key)):
     from livekit.protocol.egress import (
         EncodedFileOutput,
         ListEgressRequest,
-        RoomCompositeEgressRequest,
         S3Upload,
     )
     cfg = storage._cfg()
@@ -638,16 +710,7 @@ async def start_recording(request: Request, _=Depends(verify_api_key)):
             if active:
                 return JSONResponse({"error": "room already has an active recording egress"}, status_code=409)
 
-            # Use file_outputs (field #11, repeated) not file (field #6, oneof output).
-            # LiveKit Cloud ≥v1.8 only accepts the new repeated field; the old oneof
-            # field raises TwirpError(invalid_argument, "missing or invalid field: output").
-            egress_info = await lk.egress.start_room_composite_egress(
-                RoomCompositeEgressRequest(
-                    room_name=room_name,
-                    layout="speaker",
-                    file_outputs=[file_output],
-                )
-            )
+            egress_info = await _start_room_composite_egress(lk, room_name, file_output)
             egress_id = egress_info.egress_id
     except Exception as exc:
         logger.error(f"recording start LiveKit error: room={room_name} error={exc}")
@@ -773,6 +836,8 @@ async def list_conversations(
     """List all conversations with utterance counts and media files, newest first."""
     limit = min(max(limit, 1), 200)
     offset = max(offset, 0)
+
+    await _reconcile_pending_local_recordings()
 
     async with AsyncSessionLocal() as db:
         # Count utterances per conversation in one query

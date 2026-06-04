@@ -2,78 +2,95 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
-import type { ConversationRecord, ConversationsResponse, MediaFileRecord } from '@/lib/concierge/types';
+import type { ConversationRecord, ConversationsResponse } from '@/lib/concierge/types';
 
 const POLL_INTERVAL_MS = 10_000;
+const PAGE_SIZE = 10;
 
 function formatDate(iso: string): string {
-  return new Date(iso).toLocaleString();
+  return new Date(iso).toLocaleString(undefined, {
+    month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
+  });
 }
 
 function formatDuration(startedAt: string, endedAt: string | null): string {
-  if (!endedAt) return 'ongoing';
+  if (!endedAt) return 'live';
   const secs = Math.round((new Date(endedAt).getTime() - new Date(startedAt).getTime()) / 1000);
   const m = Math.floor(secs / 60);
   const s = secs % 60;
   return m > 0 ? `${m}m ${s}s` : `${s}s`;
 }
 
-function FileCell({
+function FileActions({
   conv,
-  type,
   onGenerate,
   onDownload,
 }: {
   conv: ConversationRecord;
-  type: 'recording' | 'transcript';
   onGenerate: (id: string) => void;
   onDownload: (convId: string, fileId: string) => void;
 }) {
-  const file = conv.media_files.find((f) => f.type === type);
+  const recording = conv.media_files.find((f) => f.type === 'recording');
+  const transcript = conv.media_files.find((f) => f.type === 'transcript');
+  const isRunning = conv.status === 'running';
 
-  if (!file) {
-    if (type === 'transcript') {
-      return (
+  return (
+    <div className="flex flex-wrap gap-1.5">
+      {/* Recording */}
+      {recording?.status === 'available' && (
+        <Button variant="outline" size="sm" onClick={() => onDownload(conv.id, recording.id)}>
+          Video
+        </Button>
+      )}
+      {recording?.status === 'pending' && (
+        <span className="text-xs text-muted-foreground animate-pulse self-center">recording…</span>
+      )}
+      {recording?.status === 'failed' && (
+        <span className="text-xs text-destructive self-center">rec failed</span>
+      )}
+
+      {/* Transcript */}
+      {transcript?.status === 'available' && (
+        <Button variant="outline" size="sm" onClick={() => onDownload(conv.id, transcript.id)}>
+          Transcript
+        </Button>
+      )}
+      {transcript?.status === 'pending' && (
+        <span className="text-xs text-muted-foreground animate-pulse self-center">generating…</span>
+      )}
+      {transcript?.status === 'failed' && (
+        <span className="text-xs text-destructive self-center">tx failed</span>
+      )}
+      {!transcript && (
         <Button
-          variant="outline"
+          variant="ghost"
           size="sm"
           onClick={() => onGenerate(conv.id)}
-          disabled={conv.status === 'running'}
-          title={conv.status === 'running' ? 'Session still running — generate after it ends' : undefined}
+          disabled={isRunning}
+          title={isRunning ? 'Session still running' : 'Generate transcript'}
+          className="text-muted-foreground"
         >
-          Generate
+          + Transcript
         </Button>
-      );
-    }
-    return <span className="text-muted-foreground text-xs">—</span>;
-  }
-
-  if (file.status === 'pending') {
-    return <span className="text-muted-foreground text-xs animate-pulse">generating…</span>;
-  }
-  if (file.status === 'failed') {
-    return <span className="text-destructive text-xs">failed</span>;
-  }
-  // available
-  return (
-    <Button variant="outline" size="sm" onClick={() => onDownload(conv.id, file.id)}>
-      Download
-    </Button>
+      )}
+    </div>
   );
 }
 
 export function MeetingsTab() {
   const [conversations, setConversations] = useState<ConversationRecord[]>([]);
   const [total, setTotal] = useState(0);
-  const [offset, setOffset] = useState(0);
+  const [page, setPage] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
-  const limit = 50;
+
+  const offset = page * PAGE_SIZE;
+  const totalPages = Math.ceil(total / PAGE_SIZE);
 
   const fetchConversations = useCallback(async () => {
     try {
-      const res = await fetch(`/api/meetings?limit=${limit}&offset=${offset}`, { cache: 'no-store' });
+      const res = await fetch(`/api/meetings?limit=${PAGE_SIZE}&offset=${offset}`, { cache: 'no-store' });
       if (!res.ok) throw new Error(await res.text());
       const data = (await res.json()) as ConversationsResponse;
       setConversations(data.conversations);
@@ -110,116 +127,113 @@ export function MeetingsTab() {
     window.open(`/api/meetings/${convId}/files/${fileId}/download`, '_blank');
   };
 
-  const hasPending = conversations.some((c) =>
-    c.media_files.some((f) => f.status === 'pending'),
-  );
-
-  // Poll faster when files are generating
+  // Fast-poll while anything is generating
+  const hasPending = conversations.some((c) => c.media_files.some((f) => f.status === 'pending'));
   useEffect(() => {
     if (!hasPending) return;
     const id = setInterval(() => void fetchConversations(), 3000);
     return () => clearInterval(id);
   }, [hasPending, fetchConversations]);
 
+  // Auto-reconcile recordings stuck in pending >90s (webhook may have been missed)
+  const hasStuckRecording = conversations.some((c) =>
+    c.media_files.some(
+      (f) =>
+        f.type === 'recording' &&
+        f.status === 'pending' &&
+        Date.now() - new Date(f.created_at).getTime() > 90_000,
+    ),
+  );
+  useEffect(() => {
+    if (!hasStuckRecording) return;
+    fetch('/api/meetings/reconcile', { method: 'POST' }).catch(() => {});
+  }, [hasStuckRecording]);
+
   return (
-    <div className="p-6 space-y-4">
+    <div className="p-6 space-y-4 max-w-5xl">
+      {/* Header */}
       <div className="flex items-center justify-between">
         <h1 className="text-lg font-semibold">Meetings</h1>
         <span className="text-muted-foreground text-sm">{total} total</span>
       </div>
 
-      {error && (
+      {/* Errors */}
+      {(error || actionError) && (
         <div className="text-destructive text-sm border border-destructive/30 rounded px-3 py-2">
-          {error}
-        </div>
-      )}
-      {actionError && (
-        <div className="text-destructive text-sm border border-destructive/30 rounded px-3 py-2">
-          {actionError}
+          {error ?? actionError}
         </div>
       )}
 
+      {/* Content */}
       {loading ? (
         <p className="text-muted-foreground text-sm">Loading…</p>
       ) : conversations.length === 0 ? (
         <p className="text-muted-foreground text-sm">No meetings recorded yet.</p>
       ) : (
         <>
-          <div className="overflow-x-auto rounded border">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b bg-muted/40">
-                  <th className="px-4 py-2 text-left font-medium">Room</th>
-                  <th className="px-4 py-2 text-left font-medium">Started</th>
-                  <th className="px-4 py-2 text-left font-medium">Duration</th>
-                  <th className="px-4 py-2 text-left font-medium">Turns</th>
-                  <th className="px-4 py-2 text-left font-medium">Status</th>
-                  <th className="px-4 py-2 text-left font-medium">Recording</th>
-                  <th className="px-4 py-2 text-left font-medium">Transcript</th>
-                </tr>
-              </thead>
-              <tbody>
-                {conversations.map((conv) => (
-                  <tr key={conv.id} className="border-b last:border-0 hover:bg-muted/20">
-                    <td className="px-4 py-2 font-mono text-xs">{conv.room_name}</td>
-                    <td className="px-4 py-2 text-xs">{formatDate(conv.started_at)}</td>
-                    <td className="px-4 py-2 text-xs">{formatDuration(conv.started_at, conv.ended_at)}</td>
-                    <td className="px-4 py-2 text-xs">{conv.utterance_count}</td>
-                    <td className="px-4 py-2">
-                      <span
-                        className={`text-xs px-2 py-0.5 rounded-full ${
-                          conv.status === 'running'
-                            ? 'bg-green-100 text-green-800'
-                            : conv.status === 'error'
-                              ? 'bg-red-100 text-red-800'
-                              : 'bg-muted text-muted-foreground'
-                        }`}
-                      >
-                        {conv.status}
-                      </span>
-                    </td>
-                    <td className="px-4 py-2">
-                      <FileCell
-                        conv={conv}
-                        type="recording"
-                        onGenerate={handleGenerate}
-                        onDownload={handleDownload}
-                      />
-                    </td>
-                    <td className="px-4 py-2">
-                      <FileCell
-                        conv={conv}
-                        type="transcript"
-                        onGenerate={handleGenerate}
-                        onDownload={handleDownload}
-                      />
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          {/* Card grid */}
+          <div className="grid gap-2">
+            {conversations.map((conv) => (
+              <div
+                key={conv.id}
+                className="flex items-center gap-4 rounded border px-4 py-3 hover:bg-muted/10 transition-colors"
+              >
+                {/* Room + date */}
+                <div className="min-w-0 flex-1">
+                  <p className="font-mono text-sm truncate">{conv.room_name}</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    {formatDate(conv.started_at)}
+                    {' · '}
+                    {formatDuration(conv.started_at, conv.ended_at)}
+                    {' · '}
+                    {conv.utterance_count} turns
+                  </p>
+                </div>
+
+                {/* Status badge */}
+                <span
+                  className={`shrink-0 text-xs px-2 py-0.5 rounded-full ${
+                    conv.status === 'running'
+                      ? 'bg-green-100 text-green-800'
+                      : conv.status === 'error'
+                        ? 'bg-red-100 text-red-800'
+                        : 'bg-muted text-muted-foreground'
+                  }`}
+                >
+                  {conv.status === 'running' ? 'live' : conv.status}
+                </span>
+
+                {/* Actions */}
+                <FileActions
+                  conv={conv}
+                  onGenerate={handleGenerate}
+                  onDownload={handleDownload}
+                />
+              </div>
+            ))}
           </div>
 
-          {total > limit && (
-            <div className="flex items-center gap-2">
+          {/* Pagination */}
+          {totalPages > 1 && (
+            <div className="flex items-center justify-between pt-1">
               <Button
                 variant="outline"
                 size="sm"
-                disabled={offset === 0}
-                onClick={() => setOffset(Math.max(0, offset - limit))}
+                disabled={page === 0}
+                onClick={() => setPage(page - 1)}
               >
-                Previous
+                ← Previous
               </Button>
               <span className="text-muted-foreground text-xs">
-                {offset + 1}–{Math.min(offset + limit, total)} of {total}
+                Page {page + 1} of {totalPages}
               </span>
               <Button
                 variant="outline"
                 size="sm"
-                disabled={offset + limit >= total}
-                onClick={() => setOffset(offset + limit)}
+                disabled={page >= totalPages - 1}
+                onClick={() => setPage(page + 1)}
               >
-                Next
+                Next →
               </Button>
             </div>
           )}

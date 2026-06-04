@@ -801,6 +801,92 @@ async def stop_recording(request: Request, _=Depends(verify_api_key)):
     return {"stopped": len(active)}
 
 
+@app.post("/recordings/reconcile")
+async def reconcile_recordings(
+    background_tasks: BackgroundTasks, _=Depends(verify_api_key)
+):
+    """Query LiveKit egress status for all pending recordings and sync MediaFile state.
+
+    Webhooks can be missed (network issues, redeployments, LiveKit Cloud timing).
+    The meetings UI calls this whenever it detects recordings stuck in 'pending'.
+    """
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(
+            select(MediaFile).where(
+                MediaFile.type == "recording",
+                MediaFile.status == "pending",
+            )
+        )
+        pending = list(result.scalars().all())
+
+    if not pending:
+        return {"checked": 0}
+
+    background_tasks.add_task(_reconcile_pending_recordings, pending)
+    logger.info(f"reconcile: queued check for {len(pending)} pending recording(s)")
+    return {"checked": len(pending)}
+
+
+async def _reconcile_pending_recordings(pending: list) -> None:
+    """Background task: compare pending MediaFiles against LiveKit egress state."""
+    from livekit.protocol.egress import ListEgressRequest
+
+    # EgressStatus numeric values from the LiveKit protocol:
+    #   0=STARTING, 1=ACTIVE, 2=ENDING, 3=COMPLETE, 4=FAILED, 5=ABORTED, 6=LIMIT_REACHED
+    TERMINAL_AVAILABLE = (3,)
+    TERMINAL_FAILED = (4, 5, 6)
+
+    try:
+        async with api.LiveKitAPI(
+            url=_lk_http_url(), api_key=LIVEKIT_API_KEY, api_secret=LIVEKIT_API_SECRET
+        ) as lk:
+            for mf in pending:
+                egress_id = (mf.meta or {}).get("egress_id")
+                if not egress_id:
+                    continue
+                try:
+                    resp = await lk.egress.list_egress(
+                        ListEgressRequest(egress_id=egress_id)
+                    )
+                    if not resp.items:
+                        logger.warning(
+                            f"reconcile: egress {egress_id} not found on LiveKit "
+                            f"(media_file={mf.id})"
+                        )
+                        continue
+
+                    egress = resp.items[0]
+                    status_code = egress.status
+                    if status_code in TERMINAL_AVAILABLE:
+                        new_status = "available"
+                    elif status_code in TERMINAL_FAILED:
+                        new_status = "failed"
+                    else:
+                        logger.debug(
+                            f"reconcile: egress {egress_id} still in progress "
+                            f"(status={status_code})"
+                        )
+                        continue
+
+                    async with AsyncSessionLocal() as db:
+                        async with db.begin():
+                            await db.execute(
+                                update(MediaFile)
+                                .where(MediaFile.id == mf.id)
+                                .values(status=new_status)
+                            )
+                    logger.info(
+                        f"reconcile: media_file={mf.id} → {new_status} "
+                        f"(egress={egress_id}, livekit_status={status_code})"
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        f"reconcile: error checking egress {egress_id}: {exc}"
+                    )
+    except Exception as exc:
+        logger.error(f"reconcile: LiveKit API connection error: {exc}")
+
+
 # ── media file endpoints ───────────────────────────────────────────────────────
 
 @app.patch("/media-files/{file_id}")

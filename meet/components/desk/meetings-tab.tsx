@@ -114,6 +114,21 @@ export function MeetingsTab() {
     c.media_files.some((f) => f.status === 'pending'),
   );
 
+  // Recordings stuck in "pending" mean the egress_ended webhook was missed.
+  // Auto-reconcile by querying LiveKit directly once the recording is >90s old.
+  const hasStuckRecording = conversations.some((c) =>
+    c.media_files.some(
+      (f) =>
+        f.type === 'recording' &&
+        f.status === 'pending' &&
+        Date.now() - new Date(f.created_at).getTime() > 90_000,
+    ),
+  );
+  useEffect(() => {
+    if (!hasStuckRecording) return;
+    fetch('/api/meetings/reconcile', { method: 'POST' }).catch(() => {});
+  }, [hasStuckRecording]);
+
   // Poll faster when files are generating
   useEffect(() => {
     if (!hasPending) return;

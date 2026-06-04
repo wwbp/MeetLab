@@ -696,6 +696,23 @@ async def start_recording(request: Request, _=Depends(verify_api_key)):
     )
     cfg = storage._cfg()
 
+    # LiveKit Cloud egress runs on LiveKit's infrastructure and cannot write to
+    # the local filesystem.  S3 (or another cloud backend) is required.
+    # Self-hosted LiveKit with the egress container volume-mounted can use local.
+    lk_url = _lk_http_url()
+    is_cloud_livekit = "livekit.cloud" in lk_url or "livekit.io" in lk_url
+    if is_cloud_livekit and cfg["backend"] != "s3":
+        return JSONResponse(
+            {
+                "error": (
+                    "LiveKit Cloud requires S3 storage for recordings. "
+                    "Set STORAGE_BACKEND=s3 and configure S3_KEY_ID, S3_KEY_SECRET, "
+                    "S3_BUCKET, S3_REGION in the environment."
+                )
+            },
+            status_code=400,
+        )
+
     if cfg["backend"] == "s3":
         missing = [k for k in ("key_id", "key_secret", "bucket", "region") if not cfg[k]]
         if missing:

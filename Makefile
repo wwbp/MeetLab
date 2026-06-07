@@ -6,10 +6,12 @@ BOT_LONGEVITY_POLL_SECONDS ?= 5
 BOT_LONGEVITY_MESSAGE_SECONDS ?= 10
 BENCHMARK_SAMPLES ?= 10
 BENCHMARK_TIMEOUT ?= 25
+BENCHMARK_CONFIGS ?=
+BENCHMARK_WAV ?=
 
 MSG ?= migration
 
-.PHONY: up down start stop logs migrate migration test test-unit test-integration test-bot-longevity test-multi-speaker test-multi-speaker-audio setup-livekit-cloud revert-livekit-local test-livekit-tooling scan scan-agent-runner scan-meet benchmark benchmark-audio benchmark-full benchmark-report
+.PHONY: up down start stop logs migrate migration test test-unit test-integration test-bot-longevity test-multi-speaker test-multi-speaker-audio setup-livekit-cloud revert-livekit-local test-livekit-tooling scan scan-agent-runner scan-meet benchmark benchmark-audio benchmark-audio-long benchmark-full benchmark-exp2 benchmark-report
 
 up:
 	$(COMPOSE) up --build -d
@@ -93,6 +95,8 @@ benchmark-audio:
 	$(COMPOSE) up -d agent-runner
 	$(COMPOSE) exec -T agent-runner uv run python tests/generate_benchmark_audio.py
 
+benchmark-audio-long: benchmark-audio
+
 benchmark:
 	$(COMPOSE) up -d transport-server agent-runner
 	$(COMPOSE) exec -T agent-runner uv run alembic upgrade head
@@ -108,6 +112,18 @@ benchmark-full:
 	$(COMPOSE) exec -T agent-runner \
 		env BENCHMARK_SAMPLES=$(BENCHMARK_SAMPLES) \
 		BENCHMARK_TIMEOUT=$(BENCHMARK_TIMEOUT) \
+		BENCHMARK_CONFIGS="$(BENCHMARK_CONFIGS)" \
+		BENCHMARK_WAV="$(BENCHMARK_WAV)" \
+		uv run python tests/run_benchmark_matrix.py
+
+benchmark-exp2:
+	$(COMPOSE) up -d transport-server agent-runner
+	$(COMPOSE) exec -T agent-runner uv run alembic upgrade head
+	$(COMPOSE) exec -T agent-runner \
+		env BENCHMARK_SAMPLES=$(BENCHMARK_SAMPLES) \
+		BENCHMARK_TIMEOUT=$(BENCHMARK_TIMEOUT) \
+		BENCHMARK_WAV="$(BENCHMARK_WAV)" \
+		BENCHMARK_CONFIGS="nova-3-general / gpt-5.4-nano / elevenlabs [sentence],nova-3-general / gpt-5.4-nano / elevenlabs [sentence][ep=100]" \
 		uv run python tests/run_benchmark_matrix.py
 
 benchmark-report:

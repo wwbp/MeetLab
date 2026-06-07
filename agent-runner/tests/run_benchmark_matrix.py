@@ -38,7 +38,8 @@ RESPONSE_TIMEOUT = float(os.getenv("BENCHMARK_TIMEOUT", "25"))
 # Max rooms running simultaneously per config. Keeps LiveKit load manageable.
 PARALLEL_SAMPLES = int(os.getenv("BENCHMARK_PARALLEL", "3"))
 
-WAV_PATH = Path(__file__).parent / "fixtures" / "benchmark_prompt.wav"
+_WAV_ENV = os.getenv("BENCHMARK_WAV")
+WAV_PATH = Path(_WAV_ENV) if _WAV_ENV else Path(__file__).parent / "fixtures" / "benchmark_prompt.wav"
 RESULTS_PATH = Path(__file__).parent / "fixtures" / "benchmark_results.json"
 
 # ── Config matrix ────────────────────────────────────────────────────────────
@@ -65,20 +66,47 @@ _LLM_MODELS = [
 ]
 
 _TTS_OPTIONS = [
-    {"tts_provider": "elevenlabs", "tts_voice": ELEVENLABS_VOICE},
-    {"tts_provider": "openai", "tts_voice": "alloy"},
+    {"tts_provider": "elevenlabs", "tts_voice": ELEVENLABS_VOICE, "tts_aggregation_mode": "sentence"},
+    {"tts_provider": "elevenlabs", "tts_voice": ELEVENLABS_VOICE, "tts_aggregation_mode": "token"},
+    {"tts_provider": "openai", "tts_voice": "alloy", "tts_aggregation_mode": "sentence"},
 ]
+
+# Deepgram endpointing variants. Only applied to nova-3-* STT models; OpenAI STT
+# ignores this field. 200=default, 100=lower latency (Experiment 2).
+_DEEPGRAM_ENDPOINTING_OPTIONS = [200, 100]
+
+def _endpointing_for_stt(stt_model: str, ep: int) -> dict:
+    """Only include stt_endpointing_ms for Deepgram models."""
+    if stt_model.startswith("nova-"):
+        return {"stt_endpointing_ms": ep}
+    return {"stt_endpointing_ms": 200}  # no-op for OpenAI STT
+
+def _ep_label(stt_model: str, ep: int) -> str:
+    if stt_model.startswith("nova-") and ep != 200:
+        return f"[ep={ep}]"
+    return ""
 
 CONFIG_MATRIX = [
     {
-        "label": f"{stt} / {llm} / {tts['tts_provider']}",
+        "label": (
+            f"{stt} / {llm} / {tts['tts_provider']} [{tts['tts_aggregation_mode']}]"
+            + _ep_label(stt, ep)
+        ),
         "stt_model": stt,
         "stt_vad_mode": "local",
         "stt_delay": None,
         "llm_model": llm,
         **tts,
+        **_endpointing_for_stt(stt, ep),
     }
-    for stt, llm, tts in itertools.product(_STT_MODELS, _LLM_MODELS, _TTS_OPTIONS)
+    for stt, llm, tts, ep in itertools.product(
+        _STT_MODELS, _LLM_MODELS, _TTS_OPTIONS,
+        # Only vary endpointing for Deepgram; use 200 for all others (deduped below)
+        _DEEPGRAM_ENDPOINTING_OPTIONS,
+    )
+    # Deduplicate: OpenAI STT doesn't use endpointing, so ep=200 and ep=100 produce
+    # the same config. Keep only ep=200 for non-Deepgram models.
+    if stt.startswith("nova-") or ep == 200
 ]
 
 
@@ -98,6 +126,9 @@ def _set_room_config(room_name: str, config: dict) -> None:
     # Explicitly send stt_delay=null to clear any inherited value
     if "stt_delay" not in payload:
         payload["stt_delay"] = None
+    # Default endpointing to 200 if not specified
+    if "stt_endpointing_ms" not in payload:
+        payload["stt_endpointing_ms"] = 200
     payload["scope"] = room_name
     _request("PUT", "/config", payload)
 
@@ -202,7 +233,8 @@ async def run_config(cfg: dict, n: int, idx: int = 0, total: int = 0) -> dict:
     progress = f"[{idx}/{total}]" if total else ""
     print(f"\n{'═'*70}")
     print(f"Config {progress}: {label}")
-    print(f"  stt={cfg.get('stt_model')}  llm={cfg.get('llm_model')}  tts={cfg.get('tts_provider')}")
+    ep = cfg.get('stt_endpointing_ms', 200)
+    print(f"  stt={cfg.get('stt_model')}[ep={ep}ms]  llm={cfg.get('llm_model')}  tts={cfg.get('tts_provider')}")
     print(f"  Running {n} samples (parallel={PARALLEL_SAMPLES})...")
     print(f"{'═'*70}")
 

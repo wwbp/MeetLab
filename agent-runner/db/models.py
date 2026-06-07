@@ -178,6 +178,8 @@ class BotConfig(Base):
     stt_vad_mode: Mapped[str] = mapped_column(String(32), default="local")
     stt_delay: Mapped[str | None] = mapped_column(String(32), nullable=True)
     tts_provider: Mapped[str] = mapped_column(String(32), default="elevenlabs")
+    tts_aggregation_mode: Mapped[str] = mapped_column(String(16), default="sentence")
+    stt_endpointing_ms: Mapped[int] = mapped_column(BigInteger, default=200, server_default="200")
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_now, onupdate=_now
     )

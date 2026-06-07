@@ -215,6 +215,8 @@ class BotConfigAdmin(ModelView, model=BotConfig):
         "stt_vad_mode": SelectField,
         "stt_delay": _NullableSelectField,
         "tts_provider": SelectField,
+        "tts_aggregation_mode": SelectField,
+        "stt_endpointing_ms": SelectField,
     }
     form_args = {
         "llm_model": {"choices": _LLM_CHOICES},
@@ -222,6 +224,8 @@ class BotConfigAdmin(ModelView, model=BotConfig):
         "stt_vad_mode": {"choices": [("local", "local")]},
         "stt_delay": {"choices": [("", "— (none)")]},
         "tts_provider": {"choices": [("elevenlabs", "elevenlabs"), ("openai", "openai")]},
+        "tts_aggregation_mode": {"choices": [("sentence", "sentence (default)"), ("token", "token (lower latency)")]},
+        "stt_endpointing_ms": {"choices": [("200", "200ms (default)"), ("100", "100ms (lower latency)"), ("50", "50ms (aggressive)")]},
     }
     name = "Bot Config"
     name_plural = "Bot Configs"
@@ -445,9 +449,11 @@ async def get_config(room: str | None = None, _=Depends(verify_api_key)):
         "llm_model": cfg.llm_model,
         "tts_voice": cfg.tts_voice,
         "tts_provider": cfg.tts_provider,
+        "tts_aggregation_mode": cfg.tts_aggregation_mode,
         "stt_model": cfg.stt_model,
         "stt_vad_mode": cfg.stt_vad_mode,
         "stt_delay": cfg.stt_delay,
+        "stt_endpointing_ms": cfg.stt_endpointing_ms,
     }
 
 
@@ -504,6 +510,14 @@ async def update_config(request: Request, _=Depends(verify_api_key)):
         if v is not None and v not in ("minimal", "low", "medium", "high", "xhigh"):
             return JSONResponse({"error": "stt_delay must be one of: minimal, low, medium, high, xhigh, or null"}, status_code=400)
         fields["stt_delay"] = v
+    if "tts_aggregation_mode" in body:
+        if body["tts_aggregation_mode"] not in ("sentence", "token"):
+            return JSONResponse({"error": "tts_aggregation_mode must be 'sentence' or 'token'"}, status_code=400)
+        fields["tts_aggregation_mode"] = body["tts_aggregation_mode"]
+    if "stt_endpointing_ms" in body:
+        if body["stt_endpointing_ms"] not in (50, 100, 200):
+            return JSONResponse({"error": "stt_endpointing_ms must be 50, 100, or 200"}, status_code=400)
+        fields["stt_endpointing_ms"] = int(body["stt_endpointing_ms"])
 
     async with AsyncSessionLocal() as session:
         async with session.begin():
@@ -526,10 +540,21 @@ async def update_config(request: Request, _=Depends(verify_api_key)):
         "llm_model": cfg.llm_model,
         "tts_voice": cfg.tts_voice,
         "tts_provider": cfg.tts_provider,
+        "tts_aggregation_mode": cfg.tts_aggregation_mode,
         "stt_model": cfg.stt_model,
         "stt_vad_mode": cfg.stt_vad_mode,
         "stt_delay": cfg.stt_delay,
+        "stt_endpointing_ms": cfg.stt_endpointing_ms,
     }
+
+
+# ── Prometheus metrics ────────────────────────────────────────────────────────
+
+@app.get("/metrics", include_in_schema=False)
+async def prometheus_metrics():
+    from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
+    from fastapi.responses import Response
+    return Response(content=generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 
 # ── helpers ──────────────────────────────────────────────────────────────────

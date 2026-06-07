@@ -32,6 +32,7 @@ from pipecat.processors.aggregators.llm_response_universal import (
 )
 from pipecat.services.elevenlabs.tts import ElevenLabsTTSService
 from pipecat.services.openai.llm import OpenAILLMService
+from pipecat.services.tts_service import TextAggregationMode
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.openai.stt import OpenAIRealtimeSTTService, OpenAIRealtimeSTTSettings
 from pipecat.transports.livekit.transport import LiveKitParams, LiveKitTransport
@@ -211,15 +212,28 @@ async def bot(runner_args: LiveKitRunnerArguments):
         f"STT: model={bot_config.stt_model} mode=per-participant delay={bot_config.stt_delay}"
     )
     llm = OpenAILLMService(api_key=openai_api_key, model=bot_config.llm_model)
+    _tts_mode = (
+        TextAggregationMode.TOKEN
+        if bot_config.tts_aggregation_mode == "token"
+        else TextAggregationMode.SENTENCE
+    )
     if bot_config.tts_provider == "openai":
         from pipecat.services.openai.tts import OpenAITTSService
-        tts = OpenAITTSService(api_key=openai_api_key, voice=bot_config.tts_voice or "alloy")
+        tts = OpenAITTSService(
+            api_key=openai_api_key,
+            voice=bot_config.tts_voice or "alloy",
+            text_aggregation_mode=_tts_mode,
+        )
     else:
         tts = ElevenLabsTTSService(
             api_key=elevenlabs_api_key,
             settings=ElevenLabsTTSService.Settings(voice=bot_config.tts_voice),
+            text_aggregation_mode=_tts_mode,
         )
-    logger.info(f"TTS: provider={bot_config.tts_provider} voice={bot_config.tts_voice}")
+    logger.info(
+        f"TTS: provider={bot_config.tts_provider} voice={bot_config.tts_voice}"
+        f" aggregation={bot_config.tts_aggregation_mode}"
+    )
 
     context = LLMContext([{"role": "system", "content": bot_config.system_prompt}])
     # VAD is handled per-participant inside each dedicated STT instance, so the
@@ -368,9 +382,6 @@ async def bot(runner_args: LiveKitRunnerArguments):
         ts = _iso_to_unix(message.timestamp)
         utt_id = _new_id()
         meta: dict = {}
-        if _pending_latency_ms[0] is not None:
-            meta["latency_ms"] = _pending_latency_ms[0]
-            _pending_latency_ms[0] = None
         t = _turn_timing.copy()
         _turn_timing.clear()
         timing: dict = {}
@@ -378,8 +389,31 @@ async def bot(runner_args: LiveKitRunnerArguments):
             timing["llm_ttft_ms"] = round((t["llm_first"] - t["stt_done"]) * 1000, 1)
         if "llm_first" in t and "tts_first" in t:
             timing["tts_first_ms"] = round((t["tts_first"] - t["llm_first"]) * 1000, 1)
+        # E2E: stt_done → tts_first (transcript commit → first TTS audio chunk).
+        # Measured inline here to avoid the audio-task race where BotStartedSpeakingFrame
+        # fires AFTER on_assistant_turn_stopped when the response is short.
+        if "stt_done" in t and "tts_first" in t:
+            meta["latency_ms"] = round((t["tts_first"] - t["stt_done"]) * 1000, 1)
+        # Observer-based fallback (VADUserStopped → BotStartedSpeaking); wins when
+        # the audio task happens to race ahead of the context aggregator commit.
+        elif _pending_latency_ms[0] is not None:
+            meta["latency_ms"] = _pending_latency_ms[0]
+        _pending_latency_ms[0] = None
         if timing:
             meta["timing"] = timing
+        # Observe Prometheus metrics (best-effort — never let this crash the turn)
+        try:
+            import metrics as _m
+            _ep = str(getattr(bot_config, "stt_endpointing_ms", 200))
+            if meta.get("latency_ms"):
+                _m.e2e_latency.labels(stt_model=bot_config.stt_model, endpointing_ms=_ep).observe(meta["latency_ms"])
+            if timing.get("llm_ttft_ms"):
+                _m.llm_ttft.labels(llm_model=bot_config.llm_model).observe(timing["llm_ttft_ms"])
+            if timing.get("tts_first_ms"):
+                _m.tts_first_chunk.labels(tts_provider=bot_config.tts_provider).observe(timing["tts_first_ms"])
+            _m.utterances_total.labels(stt_model=bot_config.stt_model).inc()
+        except Exception:
+            pass
         async with AsyncSessionLocal() as db:
             async with db.begin():
                 db.add(
@@ -534,9 +568,9 @@ def _build_stt_for_multi_speaker(bot_config, openai_api_key: str, deepgram_api_k
     OpenAI Realtime STT: turn_detection=None (server VAD) so each instance drives
     its own turn boundaries and emits UserStarted/StoppedSpeakingFrames.
 
-    Deepgram: endpointing=200 (server-side silence detection) so transcripts are
-    committed without local VAD. _FrameCollector will wrap final transcripts in
-    VAD frame sandwiches for the context aggregator.
+    Deepgram: endpointing driven by bot_config.stt_endpointing_ms (default 200ms,
+    reducible to 100ms for lower latency). _FrameCollector wraps final transcripts
+    in VAD frame sandwiches for the context aggregator.
     """
     if bot_config.stt_model.startswith("gpt-"):
         return _OpenAIRealtimeSTT(
@@ -550,11 +584,12 @@ def _build_stt_for_multi_speaker(bot_config, openai_api_key: str, deepgram_api_k
         )
     if not deepgram_api_key:
         raise ValueError("DEEPGRAM_API_KEY is required for Deepgram STT models")
+    endpointing_ms = getattr(bot_config, "stt_endpointing_ms", 200)
     return DeepgramSTTService(
         api_key=deepgram_api_key,
         settings=DeepgramSTTService.Settings(
             model=bot_config.stt_model,
-            endpointing=200,  # server-side silence detection; _FrameCollector adds VAD frames
+            endpointing=endpointing_ms,
         ),
     )
 

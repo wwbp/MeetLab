@@ -17,6 +17,8 @@ class EffectiveBotConfig:
     stt_vad_mode: str  # "server" | "local"
     stt_delay: str | None  # "minimal" | "low" | "medium" | "high" | "xhigh" | None
     tts_provider: str  # "elevenlabs" | "openai"
+    tts_aggregation_mode: str  # "sentence" | "token"
+    stt_endpointing_ms: int  # 200 | 100 | 50
 
 
 async def load_bot_config(room_name: str | None = None) -> EffectiveBotConfig:
@@ -52,6 +54,8 @@ async def load_bot_config(room_name: str | None = None) -> EffectiveBotConfig:
                 stt_vad_mode="local",
                 stt_delay=None,
                 tts_provider="elevenlabs",
+                tts_aggregation_mode="sentence",
+                stt_endpointing_ms=200,
             )
 
         return EffectiveBotConfig(
@@ -64,4 +68,6 @@ async def load_bot_config(room_name: str | None = None) -> EffectiveBotConfig:
             stt_vad_mode=row.stt_vad_mode,
             stt_delay=getattr(row, "stt_delay", None),
             tts_provider=getattr(row, "tts_provider", "elevenlabs"),
+            tts_aggregation_mode=getattr(row, "tts_aggregation_mode", "sentence"),
+            stt_endpointing_ms=getattr(row, "stt_endpointing_ms", 200),
         )

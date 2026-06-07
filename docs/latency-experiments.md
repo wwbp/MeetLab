@@ -240,12 +240,29 @@ within 60 seconds of a completed utterance.
 
 ### Results
 
-_To be filled in after running._
+Local CPU benchmark, 2026-06-07, short audio ("What is the capital of France?", 1.7s).
+10 samples each. `make benchmark-exp2 BENCHMARK_SAMPLES=10`.
 
-| Variant | LLM P50 | TTS first P50 | E2E P50 (post-transcript) | True E2E P50 (incl. endpointing) | False-term rate |
-|---------|---------|---------------|--------------------------|----------------------------------|-----------------|
-| ep=200 (baseline) | | | | ~700ms | — |
-| ep=100 | | | | ~600ms (expected) | TBD |
+| Variant | LLM P50 | TTS first P50 | E2E P50 (post-transcript) | True E2E P50 (est., incl. endpointing) | False-term rate |
+|---------|---------|---------------|--------------------------|----------------------------------------|-----------------|
+| ep=200 (baseline) | 340ms | 197ms | 522ms | ~722ms (+200ms) | — |
+| ep=100 | 288ms | 239ms | 515ms | ~615ms est. (+100ms) | TBD — qualitative eval needed |
+
+**Why post-transcript E2E numbers are nearly identical (522ms vs 515ms):**
+Our E2E metric starts at `stt_done` (transcript committed to LLM context). The Deepgram
+endpointing wait (200ms or 100ms) happens *before* `stt_done` fires — not captured here.
+The ~100ms saving from ep=100 is real for the user (VAD-stop → first bot audio), but
+invisible to this benchmark. True measurement would require recording the `VADUserStoppedSpeakingFrame`
+timestamp and subtracting it from the first bot audio frame.
+
+**Outlier in ep=100 run:** sample #3 had `tts_first=4858ms` (ElevenLabs spike), inflating
+mean to 1174ms. P50 (515ms) is the reliable number.
+
+**Next steps:**
+1. Qualitative eval — 10-minute live session with `stt_endpointing_ms=100`, count false
+   terminations. If <1 per 10 turns, 100ms is safe to ship as default.
+2. AWS GPU benchmark — same `make benchmark-exp2` against deployed stack for true
+   comparison at lower overall latency baseline.
 
 ---
 

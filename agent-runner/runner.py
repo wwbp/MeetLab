@@ -22,6 +22,7 @@ from sqlalchemy import func, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import selectinload
 
+import metrics  # registers Prometheus histograms at import time
 import storage
 import transcript as transcript_mod
 from config import load_config, require

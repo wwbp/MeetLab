@@ -241,22 +241,27 @@ within 60 seconds of a completed utterance.
 ### Results
 
 Local CPU benchmark, 2026-06-07, short audio ("What is the capital of France?", 1.7s).
-10 samples each. `make benchmark-exp2 BENCHMARK_SAMPLES=10`.
+5 samples each (run #78 and #80 in benchmark_results.json). Full stage breakdown now
+available via Pipecat MetricsFrame (TTFBMetricsData + TextAggregationMetricsData).
 
-| Variant | LLM P50 | TTS first P50 | E2E P50 (post-transcript) | True E2E P50 (est., incl. endpointing) | False-term rate |
-|---------|---------|---------------|--------------------------|----------------------------------------|-----------------|
-| ep=200 (baseline) | 340ms | 197ms | 522ms | ~722ms (+200ms) | — |
-| ep=100 | 288ms | 239ms | 515ms | ~615ms est. (+100ms) | TBD — qualitative eval needed |
+| Stage | ep=200 P50 | ep=100 P50 | Δ |
+|-------|-----------|-----------|---|
+| LLM TTFB | 220ms | 201ms | −19ms |
+| Sentence agg | 45ms | 46ms | +1ms |
+| TTS TTFB | 167ms | 149ms | −18ms |
+| **E2E (post-transcript)** | **433ms** | **442ms** | +9ms |
+| True E2E (est., +endpointing) | ~633ms | ~542ms | **−91ms** |
 
-**Why post-transcript E2E numbers are nearly identical (522ms vs 515ms):**
+**Why post-transcript E2E numbers are nearly identical (433ms vs 442ms):**
 Our E2E metric starts at `stt_done` (transcript committed to LLM context). The Deepgram
 endpointing wait (200ms or 100ms) happens *before* `stt_done` fires — not captured here.
 The ~100ms saving from ep=100 is real for the user (VAD-stop → first bot audio), but
 invisible to this benchmark. True measurement would require recording the `VADUserStoppedSpeakingFrame`
 timestamp and subtracting it from the first bot audio frame.
 
-**Outlier in ep=100 run:** sample #3 had `tts_first=4858ms` (ElevenLabs spike), inflating
-mean to 1174ms. P50 (515ms) is the reliable number.
+**Stage breakdown confirms:** LLM dominates (220ms), TTS TTFB is second (167ms), sentence
+aggregation is small (45ms). Total post-transcript latency is ~430ms; adding ~200ms Deepgram
+endpointing puts true user-perceived E2E at ~630ms.
 
 **Next steps:**
 1. Qualitative eval — 10-minute live session with `stt_endpointing_ms=100`, count false
@@ -276,8 +281,9 @@ Metrics emitted per utterance:
 | Metric | Labels | What it measures |
 |---|---|---|
 | `meetlab_e2e_latency_ms` | `stt_model`, `endpointing_ms` | transcript commit → first TTS audio (ms) |
-| `meetlab_llm_ttft_ms` | `llm_model` | transcript commit → first LLM token (ms) |
-| `meetlab_tts_first_chunk_ms` | `tts_provider` | first LLM token → first audio frame (ms) |
+| `meetlab_llm_ttft_ms` | `llm_model` | LLM API request → first token (ms) |
+| `meetlab_sentence_agg_ms` | `tts_provider` | first LLM token → first sentence sent to TTS (ms) |
+| `meetlab_tts_ttfb_ms` | `tts_provider` | text sent to TTS API → first audio chunk (ms) |
 | `meetlab_utterances_total` | `stt_model` | total bot utterances (counter) |
 
 Verify locally:

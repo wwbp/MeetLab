@@ -4256,5 +4256,1649 @@
         ]
       }
     }
+  },
+  {
+    "run_id": "6d1d5334-9e4b-47ef-8830-f0bc4a14722b",
+    "timestamp": "2026-06-07T22:51:48.259561+00:00",
+    "label": "nova-3-general / gpt-5.4-nano / elevenlabs [sentence]",
+    "config": {
+      "stt_model": "nova-3-general",
+      "stt_vad_mode": "local",
+      "stt_delay": null,
+      "llm_model": "gpt-5.4-nano",
+      "tts_provider": "elevenlabs",
+      "tts_voice": "WhMcMcvXQ8T2QfmQmlYh",
+      "tts_aggregation_mode": "sentence",
+      "stt_endpointing_ms": 200
+    },
+    "n_requested": 10,
+    "n_collected": 10,
+    "metrics": {
+      "stt_ms": null,
+      "llm_ttft_ms": {
+        "mean": 385.9,
+        "p50": 342.0,
+        "p95": 533.7,
+        "min": 200.9,
+        "values": [
+          200.9,
+          251.8,
+          329.7,
+          339.2,
+          342.0,
+          421.1,
+          440.4,
+          455.2,
+          533.7,
+          545.2
+        ]
+      },
+      "sentence_agg_ms": null,
+      "tts_ttfb_ms": null,
+      "tts_first_ms": {
+        "mean": 281.3,
+        "p50": 231.6,
+        "p95": 465.9,
+        "min": 165.8,
+        "values": [
+          165.8,
+          202.2,
+          218.4,
+          221.9,
+          231.6,
+          232.3,
+          256.8,
+          334.5,
+          465.9,
+          483.2
+        ]
+      },
+      "e2e_ms": {
+        "mean": 667.2,
+        "p50": 662.3,
+        "p95": 805.1,
+        "min": 432.5,
+        "values": [
+          432.5,
+          484.1,
+          560.3,
+          657.4,
+          662.3,
+          664.2,
+          710.9,
+          790.5,
+          805.1,
+          904.3
+        ]
+      }
+    }
+  },
+  {
+    "run_id": "fa2527ef-b020-4ead-8007-a00bc3c4be67",
+    "timestamp": "2026-06-07T22:52:20.413741+00:00",
+    "label": "nova-3-general / gpt-5.4-nano / elevenlabs [sentence][ep=100]",
+    "config": {
+      "stt_model": "nova-3-general",
+      "stt_vad_mode": "local",
+      "stt_delay": null,
+      "llm_model": "gpt-5.4-nano",
+      "tts_provider": "elevenlabs",
+      "tts_voice": "WhMcMcvXQ8T2QfmQmlYh",
+      "tts_aggregation_mode": "sentence",
+      "stt_endpointing_ms": 100
+    },
+    "n_requested": 10,
+    "n_collected": 10,
+    "metrics": {
+      "stt_ms": null,
+      "llm_ttft_ms": {
+        "mean": 327.9,
+        "p50": 318.6,
+        "p95": 422.3,
+        "min": 222.8,
+        "values": [
+          222.8,
+          223.1,
+          236.5,
+          300.8,
+          318.6,
+          319.1,
+          354.4,
+          418.7,
+          422.3,
+          462.2
+        ]
+      },
+      "sentence_agg_ms": null,
+      "tts_ttfb_ms": null,
+      "tts_first_ms": {
+        "mean": 270.9,
+        "p50": 256.2,
+        "p95": 361.1,
+        "min": 181.8,
+        "values": [
+          181.8,
+          202.4,
+          205.4,
+          244.0,
+          256.2,
+          280.7,
+          281.6,
+          325.8,
+          361.1,
+          370.1
+        ]
+      },
+      "e2e_ms": {
+        "mean": 598.7,
+        "p50": 548.6,
+        "p95": 742.9,
+        "min": 500.9,
+        "values": [
+          500.9,
+          503.1,
+          504.7,
+          524.0,
+          548.6,
+          598.4,
+          606.6,
+          674.9,
+          742.9,
+          783.4
+        ]
+      }
+    }
+  },
+  {
+    "run_id": "42707a51-062e-4819-b928-bfefa125ea39",
+    "timestamp": "2026-06-07T23:10:36.841323+00:00",
+    "label": "nova-3-general / gpt-5.4-nano / elevenlabs [sentence]",
+    "config": {
+      "stt_model": "nova-3-general",
+      "stt_vad_mode": "local",
+      "stt_delay": null,
+      "llm_model": "gpt-5.4-nano",
+      "tts_provider": "elevenlabs",
+      "tts_voice": "WhMcMcvXQ8T2QfmQmlYh",
+      "tts_aggregation_mode": "sentence",
+      "stt_endpointing_ms": 200
+    },
+    "n_requested": 5,
+    "n_collected": 5,
+    "metrics": {
+      "stt_ms": {
+        "mean": 17.8,
+        "p50": 9.1,
+        "p95": 23.7,
+        "min": 6.4,
+        "values": [
+          6.4,
+          9.1,
+          16.2,
+          23.7,
+          33.6
+        ]
+      },
+      "llm_ttft_ms": {
+        "mean": 481.2,
+        "p50": 239.7,
+        "p95": 646.7,
+        "min": 224.8,
+        "values": [
+          224.8,
+          239.7,
+          298.9,
+          646.7,
+          995.8
+        ]
+      },
+      "sentence_agg_ms": {
+        "mean": 45.1,
+        "p50": 30.2,
+        "p95": 63.9,
+        "min": 8.6,
+        "values": [
+          8.6,
+          30.2,
+          54.2,
+          63.9,
+          68.4
+        ]
+      },
+      "tts_ttfb_ms": {
+        "mean": 159.8,
+        "p50": 157.4,
+        "p95": 167.2,
+        "min": 143.4,
+        "values": [
+          143.4,
+          157.4,
+          161.5,
+          167.2,
+          169.6
+        ]
+      },
+      "tts_first_ms": {
+        "mean": 204.9,
+        "p50": 178.2,
+        "p95": 221.4,
+        "min": 173.6,
+        "values": [
+          173.6,
+          178.2,
+          221.3,
+          221.39999999999998,
+          229.9
+        ]
+      },
+      "e2e_ms": {
+        "mean": 703.9,
+        "p50": 485.8,
+        "p95": 858.5,
+        "min": 422.1,
+        "values": [
+          422.1,
+          485.8,
+          529.3,
+          858.5,
+          1223.6
+        ]
+      }
+    }
+  },
+  {
+    "run_id": "6570406b-4c8a-4b72-8a1b-b24f02f822b6",
+    "timestamp": "2026-06-07T23:10:54.524007+00:00",
+    "label": "nova-3-general / gpt-5.4-nano / elevenlabs [sentence][ep=100]",
+    "config": {
+      "stt_model": "nova-3-general",
+      "stt_vad_mode": "local",
+      "stt_delay": null,
+      "llm_model": "gpt-5.4-nano",
+      "tts_provider": "elevenlabs",
+      "tts_voice": "WhMcMcvXQ8T2QfmQmlYh",
+      "tts_aggregation_mode": "sentence",
+      "stt_endpointing_ms": 100
+    },
+    "n_requested": 5,
+    "n_collected": 5,
+    "metrics": {
+      "stt_ms": {
+        "mean": 10.6,
+        "p50": 9.0,
+        "p95": 10.2,
+        "min": 4.7,
+        "values": [
+          4.7,
+          9.0,
+          10.1,
+          10.2,
+          19.2
+        ]
+      },
+      "llm_ttft_ms": {
+        "mean": 267.6,
+        "p50": 224.3,
+        "p95": 318.2,
+        "min": 219.0,
+        "values": [
+          219.0,
+          224.3,
+          244.2,
+          318.2,
+          332.1
+        ]
+      },
+      "sentence_agg_ms": {
+        "mean": 61.8,
+        "p50": 36.4,
+        "p95": 62.8,
+        "min": 27.1,
+        "values": [
+          27.1,
+          36.4,
+          49.8,
+          62.8,
+          133.0
+        ]
+      },
+      "tts_ttfb_ms": {
+        "mean": 166.7,
+        "p50": 159.8,
+        "p95": 169.0,
+        "min": 140.3,
+        "values": [
+          140.3,
+          159.8,
+          161.5,
+          169.0,
+          202.7
+        ]
+      },
+      "tts_first_ms": {
+        "mean": 228.5,
+        "p50": 197.9,
+        "p95": 252.5,
+        "min": 167.4,
+        "values": [
+          167.4,
+          197.9,
+          222.60000000000002,
+          252.5,
+          302.0
+        ]
+      },
+      "e2e_ms": {
+        "mean": 506.7,
+        "p50": 451.8,
+        "p95": 545.5,
+        "min": 420.6,
+        "values": [
+          420.6,
+          451.8,
+          534.7,
+          545.5,
+          580.8
+        ]
+      }
+    }
+  },
+  {
+    "run_id": "4f66527a-e099-45de-8d6b-0aa257bc598a",
+    "timestamp": "2026-06-07T23:11:12.163465+00:00",
+    "label": "nova-3-general / gpt-5.4-nano / elevenlabs [token]",
+    "config": {
+      "stt_model": "nova-3-general",
+      "stt_vad_mode": "local",
+      "stt_delay": null,
+      "llm_model": "gpt-5.4-nano",
+      "tts_provider": "elevenlabs",
+      "tts_voice": "WhMcMcvXQ8T2QfmQmlYh",
+      "tts_aggregation_mode": "token",
+      "stt_endpointing_ms": 200
+    },
+    "n_requested": 5,
+    "n_collected": 5,
+    "metrics": {
+      "stt_ms": {
+        "mean": 28.6,
+        "p50": 9.3,
+        "p95": 20.2,
+        "min": 4.1,
+        "values": [
+          4.1,
+          9.3,
+          10.9,
+          20.2,
+          98.3
+        ]
+      },
+      "llm_ttft_ms": {
+        "mean": 314.0,
+        "p50": 215.0,
+        "p95": 349.5,
+        "min": 197.9,
+        "values": [
+          197.9,
+          215.0,
+          303.1,
+          349.5,
+          504.5
+        ]
+      },
+      "sentence_agg_ms": null,
+      "tts_ttfb_ms": {
+        "mean": 277.1,
+        "p50": 244.5,
+        "p95": 290.1,
+        "min": 202.6,
+        "values": [
+          202.6,
+          244.5,
+          256.9,
+          290.1,
+          391.5
+        ]
+      },
+      "tts_first_ms": {
+        "mean": 277.1,
+        "p50": 244.5,
+        "p95": 290.1,
+        "min": 202.6,
+        "values": [
+          202.6,
+          244.5,
+          256.9,
+          290.1,
+          391.5
+        ]
+      },
+      "e2e_ms": {
+        "mean": 619.7,
+        "p50": 508.2,
+        "p95": 750.3,
+        "min": 470.4,
+        "values": [
+          470.4,
+          508.2,
+          509.8,
+          750.3,
+          859.7
+        ]
+      }
+    }
+  },
+  {
+    "run_id": "746b9fda-172e-4455-9b7f-25f248de8ce1",
+    "timestamp": "2026-06-07T23:11:28.857918+00:00",
+    "label": "nova-3-general / gpt-5.4-nano / elevenlabs [token][ep=100]",
+    "config": {
+      "stt_model": "nova-3-general",
+      "stt_vad_mode": "local",
+      "stt_delay": null,
+      "llm_model": "gpt-5.4-nano",
+      "tts_provider": "elevenlabs",
+      "tts_voice": "WhMcMcvXQ8T2QfmQmlYh",
+      "tts_aggregation_mode": "token",
+      "stt_endpointing_ms": 100
+    },
+    "n_requested": 5,
+    "n_collected": 5,
+    "metrics": {
+      "stt_ms": {
+        "mean": 6.0,
+        "p50": 5.6,
+        "p95": 7.3,
+        "min": 3.4,
+        "values": [
+          3.4,
+          5.6,
+          6.2,
+          7.3,
+          7.7
+        ]
+      },
+      "llm_ttft_ms": {
+        "mean": 286.7,
+        "p50": 253.7,
+        "p95": 323.6,
+        "min": 237.8,
+        "values": [
+          237.8,
+          253.7,
+          284.4,
+          323.6,
+          333.8
+        ]
+      },
+      "sentence_agg_ms": null,
+      "tts_ttfb_ms": {
+        "mean": 237.7,
+        "p50": 226.2,
+        "p95": 253.8,
+        "min": 209.3,
+        "values": [
+          209.3,
+          226.2,
+          232.9,
+          253.8,
+          266.3
+        ]
+      },
+      "tts_first_ms": {
+        "mean": 237.7,
+        "p50": 226.2,
+        "p95": 253.8,
+        "min": 209.3,
+        "values": [
+          209.3,
+          226.2,
+          232.9,
+          253.8,
+          266.3
+        ]
+      },
+      "e2e_ms": {
+        "mean": 530.4,
+        "p50": 490.0,
+        "p95": 545.5,
+        "min": 469.6,
+        "values": [
+          469.6,
+          490.0,
+          539.1,
+          545.5,
+          607.8
+        ]
+      }
+    }
+  },
+  {
+    "run_id": "e466397b-997e-4732-87e8-fc362d40ada7",
+    "timestamp": "2026-06-07T23:11:47.918805+00:00",
+    "label": "nova-3-general / gpt-5.4-nano / elevenlabs [sentence]",
+    "config": {
+      "stt_model": "nova-3-general",
+      "stt_vad_mode": "local",
+      "stt_delay": null,
+      "llm_model": "gpt-5.4-nano",
+      "tts_provider": "elevenlabs",
+      "tts_voice": "WhMcMcvXQ8T2QfmQmlYh",
+      "tts_aggregation_mode": "sentence",
+      "stt_endpointing_ms": 200
+    },
+    "n_requested": 5,
+    "n_collected": 5,
+    "metrics": {
+      "stt_ms": {
+        "mean": 7.1,
+        "p50": 4.3,
+        "p95": 6.3,
+        "min": 3.7,
+        "values": [
+          3.7,
+          4.3,
+          6.3,
+          14.2
+        ]
+      },
+      "llm_ttft_ms": {
+        "mean": 321.1,
+        "p50": 219.8,
+        "p95": 284.2,
+        "min": 209.8,
+        "values": [
+          209.8,
+          219.8,
+          255.5,
+          284.2,
+          636.1
+        ]
+      },
+      "sentence_agg_ms": {
+        "mean": 74.7,
+        "p50": 45.1,
+        "p95": 79.9,
+        "min": 33.6,
+        "values": [
+          33.6,
+          45.1,
+          53.3,
+          79.9,
+          161.4
+        ]
+      },
+      "tts_ttfb_ms": {
+        "mean": 166.4,
+        "p50": 166.6,
+        "p95": 180.5,
+        "min": 135.0,
+        "values": [
+          135.0,
+          166.6,
+          169.4,
+          180.5,
+          180.7
+        ]
+      },
+      "tts_first_ms": {
+        "mean": 241.1,
+        "p50": 214.9,
+        "p95": 225.6,
+        "min": 203.0,
+        "values": [
+          203.0,
+          214.9,
+          219.89999999999998,
+          225.6,
+          342.1
+        ]
+      },
+      "e2e_ms": {
+        "mean": 541.4,
+        "p50": 433.4,
+        "p95": 514.1,
+        "min": 429.5,
+        "values": [
+          429.5,
+          433.4,
+          484.6,
+          514.1,
+          845.4
+        ]
+      }
+    }
+  },
+  {
+    "run_id": "760f69f9-a7e8-4958-8a15-ff913bca6787",
+    "timestamp": "2026-06-07T23:11:51.335308+00:00",
+    "label": "nova-3-general / gpt-5.4-nano / openai [sentence]",
+    "config": {
+      "stt_model": "nova-3-general",
+      "stt_vad_mode": "local",
+      "stt_delay": null,
+      "llm_model": "gpt-5.4-nano",
+      "tts_provider": "openai",
+      "tts_voice": "alloy",
+      "tts_aggregation_mode": "sentence",
+      "stt_endpointing_ms": 200
+    },
+    "n_requested": 5,
+    "n_collected": 5,
+    "metrics": {
+      "stt_ms": null,
+      "llm_ttft_ms": {
+        "mean": 1401.2,
+        "p50": 961.9,
+        "p95": 1657.7,
+        "min": 919.7,
+        "values": [
+          919.7,
+          961.9,
+          1499.5,
+          1657.7,
+          1967.1
+        ]
+      },
+      "sentence_agg_ms": {
+        "mean": 42.6,
+        "p50": 27.2,
+        "p95": 55.5,
+        "min": 19.9,
+        "values": [
+          19.9,
+          27.2,
+          50.5,
+          55.5,
+          60.0
+        ]
+      },
+      "tts_ttfb_ms": null,
+      "tts_first_ms": null,
+      "e2e_ms": {
+        "mean": 1704.5,
+        "p50": 1239.9,
+        "p95": 1973.9,
+        "min": 1214.7,
+        "values": [
+          1214.7,
+          1239.9,
+          1773.7,
+          1973.9,
+          2320.5
+        ]
+      }
+    }
+  },
+  {
+    "run_id": "f739201c-55bc-4fea-b8c0-166ff9272713",
+    "timestamp": "2026-06-07T23:12:07.421428+00:00",
+    "label": "nova-3-general / gpt-5.4-nano / elevenlabs [sentence][ep=100]",
+    "config": {
+      "stt_model": "nova-3-general",
+      "stt_vad_mode": "local",
+      "stt_delay": null,
+      "llm_model": "gpt-5.4-nano",
+      "tts_provider": "elevenlabs",
+      "tts_voice": "WhMcMcvXQ8T2QfmQmlYh",
+      "tts_aggregation_mode": "sentence",
+      "stt_endpointing_ms": 100
+    },
+    "n_requested": 5,
+    "n_collected": 5,
+    "metrics": {
+      "stt_ms": {
+        "mean": 8.9,
+        "p50": 7.8,
+        "p95": 8.5,
+        "min": 4.8,
+        "values": [
+          4.8,
+          7.8,
+          8.5,
+          14.7
+        ]
+      },
+      "llm_ttft_ms": {
+        "mean": 269.2,
+        "p50": 200.9,
+        "p95": 340.1,
+        "min": 200.3,
+        "values": [
+          200.3,
+          200.9,
+          200.9,
+          340.1,
+          403.6
+        ]
+      },
+      "sentence_agg_ms": {
+        "mean": 78.9,
+        "p50": 45.9,
+        "p95": 94.9,
+        "min": 27.8,
+        "values": [
+          27.8,
+          45.9,
+          71.4,
+          94.9,
+          154.3
+        ]
+      },
+      "tts_ttfb_ms": {
+        "mean": 159.5,
+        "p50": 149.1,
+        "p95": 163.3,
+        "min": 132.8,
+        "values": [
+          132.8,
+          149.1,
+          155.9,
+          163.3,
+          196.4
+        ]
+      },
+      "tts_first_ms": {
+        "mean": 238.4,
+        "p50": 201.8,
+        "p95": 244.0,
+        "min": 160.6,
+        "values": [
+          160.60000000000002,
+          201.8,
+          234.70000000000002,
+          244.0,
+          350.70000000000005
+        ]
+      },
+      "e2e_ms": {
+        "mean": 492.7,
+        "p50": 441.6,
+        "p95": 572.7,
+        "min": 407.5,
+        "values": [
+          407.5,
+          441.6,
+          442.8,
+          572.7,
+          598.8
+        ]
+      }
+    }
+  },
+  {
+    "run_id": "6c7577bf-9ec6-4bcb-8529-2d79ce39b7f7",
+    "timestamp": "2026-06-07T23:12:12.016810+00:00",
+    "label": "nova-3-general / gpt-5.4-nano / openai [sentence][ep=100]",
+    "config": {
+      "stt_model": "nova-3-general",
+      "stt_vad_mode": "local",
+      "stt_delay": null,
+      "llm_model": "gpt-5.4-nano",
+      "tts_provider": "openai",
+      "tts_voice": "alloy",
+      "tts_aggregation_mode": "sentence",
+      "stt_endpointing_ms": 100
+    },
+    "n_requested": 5,
+    "n_collected": 5,
+    "metrics": {
+      "stt_ms": null,
+      "llm_ttft_ms": {
+        "mean": 1054.8,
+        "p50": 700.9,
+        "p95": 1207.2,
+        "min": 626.9,
+        "values": [
+          626.9,
+          700.9,
+          1161.6,
+          1207.2,
+          1577.6
+        ]
+      },
+      "sentence_agg_ms": {
+        "mean": 76.3,
+        "p50": 63.6,
+        "p95": 75.8,
+        "min": 60.9,
+        "values": [
+          60.9,
+          63.6,
+          68.5,
+          75.8,
+          112.9
+        ]
+      },
+      "tts_ttfb_ms": null,
+      "tts_first_ms": null,
+      "e2e_ms": {
+        "mean": 1452.2,
+        "p50": 1090.7,
+        "p95": 1815.0,
+        "min": 1014.5,
+        "values": [
+          1014.5,
+          1090.7,
+          1462.0,
+          1815.0,
+          1878.6
+        ]
+      }
+    }
+  },
+  {
+    "run_id": "1099a5d4-b852-47f2-a725-82df70108d09",
+    "timestamp": "2026-06-07T23:12:28.088604+00:00",
+    "label": "nova-3-general / gpt-5.4-nano / elevenlabs [token]",
+    "config": {
+      "stt_model": "nova-3-general",
+      "stt_vad_mode": "local",
+      "stt_delay": null,
+      "llm_model": "gpt-5.4-nano",
+      "tts_provider": "elevenlabs",
+      "tts_voice": "WhMcMcvXQ8T2QfmQmlYh",
+      "tts_aggregation_mode": "token",
+      "stt_endpointing_ms": 200
+    },
+    "n_requested": 5,
+    "n_collected": 5,
+    "metrics": {
+      "stt_ms": {
+        "mean": 8.9,
+        "p50": 7.2,
+        "p95": 10.4,
+        "min": 6.7,
+        "values": [
+          6.7,
+          7.2,
+          8.8,
+          10.4,
+          11.5
+        ]
+      },
+      "llm_ttft_ms": {
+        "mean": 240.4,
+        "p50": 225.7,
+        "p95": 257.6,
+        "min": 203.6,
+        "values": [
+          203.6,
+          225.7,
+          228.8,
+          257.6,
+          286.3
+        ]
+      },
+      "sentence_agg_ms": null,
+      "tts_ttfb_ms": {
+        "mean": 278.4,
+        "p50": 229.2,
+        "p95": 242.2,
+        "min": 224.6,
+        "values": [
+          224.6,
+          229.2,
+          232.6,
+          242.2,
+          463.2
+        ]
+      },
+      "tts_first_ms": {
+        "mean": 278.4,
+        "p50": 229.2,
+        "p95": 242.2,
+        "min": 224.6,
+        "values": [
+          224.6,
+          229.2,
+          232.6,
+          242.2,
+          463.2
+        ]
+      },
+      "e2e_ms": {
+        "mean": 527.7,
+        "p50": 457.5,
+        "p95": 499.0,
+        "min": 457.3,
+        "values": [
+          457.3,
+          457.5,
+          468.4,
+          499.0,
+          756.2
+        ]
+      }
+    }
+  },
+  {
+    "run_id": "3a2f2a27-972d-4664-a9d3-d92c8ae1ea4d",
+    "timestamp": "2026-06-07T23:12:29.817832+00:00",
+    "label": "nova-3-general / gpt-5.4-mini / elevenlabs [sentence]",
+    "config": {
+      "stt_model": "nova-3-general",
+      "stt_vad_mode": "local",
+      "stt_delay": null,
+      "llm_model": "gpt-5.4-mini",
+      "tts_provider": "elevenlabs",
+      "tts_voice": "WhMcMcvXQ8T2QfmQmlYh",
+      "tts_aggregation_mode": "sentence",
+      "stt_endpointing_ms": 200
+    },
+    "n_requested": 5,
+    "n_collected": 5,
+    "metrics": {
+      "stt_ms": {
+        "mean": 9.7,
+        "p50": 4.8,
+        "p95": 6.1,
+        "min": 4.4,
+        "values": [
+          4.4,
+          4.8,
+          5.6,
+          6.1,
+          27.4
+        ]
+      },
+      "llm_ttft_ms": {
+        "mean": 415.3,
+        "p50": 382.8,
+        "p95": 445.6,
+        "min": 311.2,
+        "values": [
+          311.2,
+          382.8,
+          445.6,
+          445.6,
+          491.2
+        ]
+      },
+      "sentence_agg_ms": {
+        "mean": 83.3,
+        "p50": 57.9,
+        "p95": 77.8,
+        "min": 44.3,
+        "values": [
+          44.3,
+          57.9,
+          61.2,
+          77.8,
+          175.4
+        ]
+      },
+      "tts_ttfb_ms": {
+        "mean": 167.7,
+        "p50": 162.8,
+        "p95": 167.2,
+        "min": 160.2,
+        "values": [
+          160.2,
+          162.8,
+          165.9,
+          167.2,
+          182.4
+        ]
+      },
+      "tts_first_ms": {
+        "mean": 251.0,
+        "p50": 225.1,
+        "p95": 238.0,
+        "min": 207.1,
+        "values": [
+          207.10000000000002,
+          225.1,
+          227.10000000000002,
+          238.0,
+          357.8
+        ]
+      },
+      "e2e_ms": {
+        "mean": 676.0,
+        "p50": 637.3,
+        "p95": 735.3,
+        "min": 523.9,
+        "values": [
+          523.9,
+          637.3,
+          675.5,
+          735.3,
+          807.8
+        ]
+      }
+    }
+  },
+  {
+    "run_id": "93cb2690-1c33-40a7-88c8-200df5bc3965",
+    "timestamp": "2026-06-07T23:12:45.645192+00:00",
+    "label": "nova-3-general / gpt-5.4-nano / elevenlabs [token][ep=100]",
+    "config": {
+      "stt_model": "nova-3-general",
+      "stt_vad_mode": "local",
+      "stt_delay": null,
+      "llm_model": "gpt-5.4-nano",
+      "tts_provider": "elevenlabs",
+      "tts_voice": "WhMcMcvXQ8T2QfmQmlYh",
+      "tts_aggregation_mode": "token",
+      "stt_endpointing_ms": 100
+    },
+    "n_requested": 5,
+    "n_collected": 5,
+    "metrics": {
+      "stt_ms": {
+        "mean": 10.1,
+        "p50": 7.8,
+        "p95": 12.4,
+        "min": 7.4,
+        "values": [
+          7.4,
+          7.8,
+          7.8,
+          12.4,
+          15.2
+        ]
+      },
+      "llm_ttft_ms": {
+        "mean": 233.9,
+        "p50": 218.9,
+        "p95": 244.3,
+        "min": 216.0,
+        "values": [
+          216.0,
+          218.9,
+          238.1,
+          244.3,
+          252.3
+        ]
+      },
+      "sentence_agg_ms": null,
+      "tts_ttfb_ms": {
+        "mean": 205.5,
+        "p50": 186.9,
+        "p95": 212.5,
+        "min": 177.1,
+        "values": [
+          177.1,
+          186.9,
+          208.4,
+          212.5,
+          242.4
+        ]
+      },
+      "tts_first_ms": {
+        "mean": 205.5,
+        "p50": 186.9,
+        "p95": 212.5,
+        "min": 177.1,
+        "values": [
+          177.1,
+          186.9,
+          208.4,
+          212.5,
+          242.4
+        ]
+      },
+      "e2e_ms": {
+        "mean": 449.5,
+        "p50": 432.2,
+        "p95": 464.6,
+        "min": 408.4,
+        "values": [
+          408.4,
+          432.2,
+          432.4,
+          464.6,
+          509.9
+        ]
+      }
+    }
+  },
+  {
+    "run_id": "f6ef1901-760c-4c99-92c2-2b6075b3d2d9",
+    "timestamp": "2026-06-07T23:12:46.984099+00:00",
+    "label": "nova-3-general / gpt-5.4-mini / elevenlabs [sentence][ep=100]",
+    "config": {
+      "stt_model": "nova-3-general",
+      "stt_vad_mode": "local",
+      "stt_delay": null,
+      "llm_model": "gpt-5.4-mini",
+      "tts_provider": "elevenlabs",
+      "tts_voice": "WhMcMcvXQ8T2QfmQmlYh",
+      "tts_aggregation_mode": "sentence",
+      "stt_endpointing_ms": 100
+    },
+    "n_requested": 5,
+    "n_collected": 5,
+    "metrics": {
+      "stt_ms": {
+        "mean": 5.7,
+        "p50": 5.7,
+        "p95": 6.1,
+        "min": 4.2,
+        "values": [
+          4.2,
+          5.7,
+          5.9,
+          6.1,
+          6.5
+        ]
+      },
+      "llm_ttft_ms": {
+        "mean": 304.8,
+        "p50": 268.1,
+        "p95": 296.5,
+        "min": 263.8,
+        "values": [
+          263.8,
+          268.1,
+          271.3,
+          296.5,
+          424.5
+        ]
+      },
+      "sentence_agg_ms": {
+        "mean": 64.5,
+        "p50": 55.8,
+        "p95": 75.2,
+        "min": 51.7,
+        "values": [
+          51.7,
+          55.8,
+          58.1,
+          75.2,
+          81.8
+        ]
+      },
+      "tts_ttfb_ms": {
+        "mean": 154.9,
+        "p50": 155.5,
+        "p95": 157.3,
+        "min": 142.8,
+        "values": [
+          142.8,
+          155.5,
+          155.9,
+          157.3,
+          162.9
+        ]
+      },
+      "tts_first_ms": {
+        "mean": 219.4,
+        "p50": 214.0,
+        "p95": 224.6,
+        "min": 209.0,
+        "values": [
+          209.0,
+          214.0,
+          218.7,
+          224.60000000000002,
+          230.7
+        ]
+      },
+      "e2e_ms": {
+        "mean": 529.9,
+        "p50": 494.5,
+        "p95": 531.4,
+        "min": 482.8,
+        "values": [
+          482.8,
+          494.5,
+          495.9,
+          531.4,
+          645.0
+        ]
+      }
+    }
+  },
+  {
+    "run_id": "956d4d61-53e0-409d-9668-5a8c6724d8dc",
+    "timestamp": "2026-06-07T23:13:04.525717+00:00",
+    "label": "nova-3-general / gpt-5.4-mini / elevenlabs [token]",
+    "config": {
+      "stt_model": "nova-3-general",
+      "stt_vad_mode": "local",
+      "stt_delay": null,
+      "llm_model": "gpt-5.4-mini",
+      "tts_provider": "elevenlabs",
+      "tts_voice": "WhMcMcvXQ8T2QfmQmlYh",
+      "tts_aggregation_mode": "token",
+      "stt_endpointing_ms": 200
+    },
+    "n_requested": 5,
+    "n_collected": 5,
+    "metrics": {
+      "stt_ms": {
+        "mean": 11.2,
+        "p50": 5.7,
+        "p95": 12.3,
+        "min": 2.9,
+        "values": [
+          2.9,
+          5.7,
+          10.6,
+          12.3,
+          24.7
+        ]
+      },
+      "llm_ttft_ms": {
+        "mean": 399.3,
+        "p50": 277.9,
+        "p95": 436.2,
+        "min": 261.3,
+        "values": [
+          261.3,
+          277.9,
+          283.3,
+          436.2,
+          737.7
+        ]
+      },
+      "sentence_agg_ms": null,
+      "tts_ttfb_ms": {
+        "mean": 231.1,
+        "p50": 207.5,
+        "p95": 244.4,
+        "min": 204.6,
+        "values": [
+          204.6,
+          207.5,
+          239.9,
+          244.4,
+          258.9
+        ]
+      },
+      "tts_first_ms": {
+        "mean": 231.1,
+        "p50": 207.5,
+        "p95": 244.4,
+        "min": 204.6,
+        "values": [
+          204.6,
+          207.5,
+          239.9,
+          244.4,
+          258.9
+        ]
+      },
+      "e2e_ms": {
+        "mean": 641.6,
+        "p50": 504.1,
+        "p95": 719.8,
+        "min": 496.5,
+        "values": [
+          496.5,
+          504.1,
+          532.9,
+          719.8,
+          954.6
+        ]
+      }
+    }
+  },
+  {
+    "run_id": "1794cbdb-795f-4e05-aa90-f4a98edf6d23",
+    "timestamp": "2026-06-07T23:13:07.274719+00:00",
+    "label": "nova-3-general / gpt-5.4-nano / openai [sentence]",
+    "config": {
+      "stt_model": "nova-3-general",
+      "stt_vad_mode": "local",
+      "stt_delay": null,
+      "llm_model": "gpt-5.4-nano",
+      "tts_provider": "openai",
+      "tts_voice": "alloy",
+      "tts_aggregation_mode": "sentence",
+      "stt_endpointing_ms": 200
+    },
+    "n_requested": 5,
+    "n_collected": 5,
+    "metrics": {
+      "stt_ms": null,
+      "llm_ttft_ms": {
+        "mean": 1013.9,
+        "p50": 767.7,
+        "p95": 1451.1,
+        "min": 519.4,
+        "values": [
+          519.4,
+          767.7,
+          868.9,
+          1451.1,
+          1462.5
+        ]
+      },
+      "sentence_agg_ms": {
+        "mean": 296.7,
+        "p50": 51.5,
+        "p95": 101.1,
+        "min": 0.1,
+        "values": [
+          0.1,
+          51.5,
+          55.3,
+          101.1,
+          1275.5
+        ]
+      },
+      "tts_ttfb_ms": null,
+      "tts_first_ms": null,
+      "e2e_ms": {
+        "mean": 1553.3,
+        "p50": 1115.7,
+        "p95": 1828.2,
+        "min": 835.6,
+        "values": [
+          835.6,
+          1115.7,
+          1722.6,
+          1828.2,
+          2264.5
+        ]
+      }
+    }
+  },
+  {
+    "run_id": "d1c9ab9a-c452-43a1-8b8f-5d33d5fa8194",
+    "timestamp": "2026-06-07T23:13:21.507597+00:00",
+    "label": "nova-3-general / gpt-5.4-mini / elevenlabs [token][ep=100]",
+    "config": {
+      "stt_model": "nova-3-general",
+      "stt_vad_mode": "local",
+      "stt_delay": null,
+      "llm_model": "gpt-5.4-mini",
+      "tts_provider": "elevenlabs",
+      "tts_voice": "WhMcMcvXQ8T2QfmQmlYh",
+      "tts_aggregation_mode": "token",
+      "stt_endpointing_ms": 100
+    },
+    "n_requested": 5,
+    "n_collected": 5,
+    "metrics": {
+      "stt_ms": {
+        "mean": 6.9,
+        "p50": 4.3,
+        "p95": 7.3,
+        "min": 3.6,
+        "values": [
+          3.6,
+          4.3,
+          6.2,
+          7.3,
+          13.1
+        ]
+      },
+      "llm_ttft_ms": {
+        "mean": 521.9,
+        "p50": 304.7,
+        "p95": 580.8,
+        "min": 300.9,
+        "values": [
+          300.9,
+          304.7,
+          389.1,
+          580.8,
+          1033.9
+        ]
+      },
+      "sentence_agg_ms": null,
+      "tts_ttfb_ms": {
+        "mean": 241.2,
+        "p50": 215.2,
+        "p95": 227.1,
+        "min": 212.8,
+        "values": [
+          212.8,
+          215.2,
+          218.7,
+          227.1,
+          332.2
+        ]
+      },
+      "tts_first_ms": {
+        "mean": 241.2,
+        "p50": 215.2,
+        "p95": 227.1,
+        "min": 212.8,
+        "values": [
+          212.8,
+          215.2,
+          218.7,
+          227.1,
+          332.2
+        ]
+      },
+      "e2e_ms": {
+        "mean": 770.0,
+        "p50": 529.6,
+        "p95": 920.3,
+        "min": 518.0,
+        "values": [
+          518.0,
+          529.6,
+          629.3,
+          920.3,
+          1252.7
+        ]
+      }
+    }
+  },
+  {
+    "run_id": "647b5fec-dff4-4166-897c-df1a2c5196ce",
+    "timestamp": "2026-06-07T23:13:25.815975+00:00",
+    "label": "nova-3-general / gpt-5.4-nano / openai [sentence][ep=100]",
+    "config": {
+      "stt_model": "nova-3-general",
+      "stt_vad_mode": "local",
+      "stt_delay": null,
+      "llm_model": "gpt-5.4-nano",
+      "tts_provider": "openai",
+      "tts_voice": "alloy",
+      "tts_aggregation_mode": "sentence",
+      "stt_endpointing_ms": 100
+    },
+    "n_requested": 5,
+    "n_collected": 5,
+    "metrics": {
+      "stt_ms": null,
+      "llm_ttft_ms": {
+        "mean": 849.1,
+        "p50": 668.5,
+        "p95": 879.5,
+        "min": 566.0,
+        "values": [
+          566.0,
+          668.5,
+          707.8,
+          879.5,
+          1423.9
+        ]
+      },
+      "sentence_agg_ms": {
+        "mean": 77.4,
+        "p50": 70.7,
+        "p95": 79.8,
+        "min": 62.1,
+        "values": [
+          62.1,
+          70.7,
+          72.1,
+          79.8,
+          102.4
+        ]
+      },
+      "tts_ttfb_ms": null,
+      "tts_first_ms": null,
+      "e2e_ms": {
+        "mean": 1208.2,
+        "p50": 955.8,
+        "p95": 1293.9,
+        "min": 850.8,
+        "values": [
+          850.8,
+          955.8,
+          1193.2,
+          1293.9,
+          1747.5
+        ]
+      }
+    }
+  },
+  {
+    "run_id": "6ec175f4-980b-45de-b41d-c0b7bb09ca66",
+    "timestamp": "2026-06-07T23:13:42.272458+00:00",
+    "label": "nova-3-general / gpt-5.4-mini / openai [sentence]",
+    "config": {
+      "stt_model": "nova-3-general",
+      "stt_vad_mode": "local",
+      "stt_delay": null,
+      "llm_model": "gpt-5.4-mini",
+      "tts_provider": "openai",
+      "tts_voice": "alloy",
+      "tts_aggregation_mode": "sentence",
+      "stt_endpointing_ms": 200
+    },
+    "n_requested": 5,
+    "n_collected": 5,
+    "metrics": {
+      "stt_ms": null,
+      "llm_ttft_ms": {
+        "mean": 1152.3,
+        "p50": 848.6,
+        "p95": 1440.0,
+        "min": 824.9,
+        "values": [
+          824.9,
+          848.6,
+          1184.8,
+          1440.0,
+          1463.1
+        ]
+      },
+      "sentence_agg_ms": {
+        "mean": 88.5,
+        "p50": 49.1,
+        "p95": 68.8,
+        "min": 43.0,
+        "values": [
+          43.0,
+          49.1,
+          52.5,
+          68.8,
+          229.0
+        ]
+      },
+      "tts_ttfb_ms": null,
+      "tts_first_ms": null,
+      "e2e_ms": {
+        "mean": 1589.1,
+        "p50": 1474.3,
+        "p95": 1785.6,
+        "min": 1220.9,
+        "values": [
+          1220.9,
+          1474.3,
+          1588.1,
+          1785.6,
+          1876.5
+        ]
+      }
+    }
+  },
+  {
+    "run_id": "ba46129b-49f6-47bb-a7c8-139dbfbe6201",
+    "timestamp": "2026-06-07T23:13:43.503603+00:00",
+    "label": "nova-3-general / gpt-5.4-mini / elevenlabs [sentence]",
+    "config": {
+      "stt_model": "nova-3-general",
+      "stt_vad_mode": "local",
+      "stt_delay": null,
+      "llm_model": "gpt-5.4-mini",
+      "tts_provider": "elevenlabs",
+      "tts_voice": "WhMcMcvXQ8T2QfmQmlYh",
+      "tts_aggregation_mode": "sentence",
+      "stt_endpointing_ms": 200
+    },
+    "n_requested": 5,
+    "n_collected": 5,
+    "metrics": {
+      "stt_ms": {
+        "mean": 9.4,
+        "p50": 8.9,
+        "p95": 10.0,
+        "min": 6.5,
+        "values": [
+          6.5,
+          8.9,
+          9.6,
+          10.0,
+          12.0
+        ]
+      },
+      "llm_ttft_ms": {
+        "mean": 290.6,
+        "p50": 273.7,
+        "p95": 314.2,
+        "min": 260.4,
+        "values": [
+          260.4,
+          273.7,
+          288.9,
+          314.2,
+          315.6
+        ]
+      },
+      "sentence_agg_ms": {
+        "mean": 68.3,
+        "p50": 57.0,
+        "p95": 90.5,
+        "min": 39.7,
+        "values": [
+          39.7,
+          57.0,
+          57.0,
+          90.5,
+          97.2
+        ]
+      },
+      "tts_ttfb_ms": {
+        "mean": 210.5,
+        "p50": 164.9,
+        "p95": 194.0,
+        "min": 157.8,
+        "values": [
+          157.8,
+          164.9,
+          171.6,
+          194.0,
+          364.0
+        ]
+      },
+      "tts_first_ms": {
+        "mean": 278.7,
+        "p50": 214.8,
+        "p95": 255.4,
+        "min": 211.3,
+        "values": [
+          211.3,
+          214.8,
+          251.0,
+          255.4,
+          461.2
+        ]
+      },
+      "e2e_ms": {
+        "mean": 578.7,
+        "p50": 534.7,
+        "p95": 576.1,
+        "min": 487.2,
+        "values": [
+          487.2,
+          534.7,
+          536.5,
+          576.1,
+          759.0
+        ]
+      }
+    }
   }
 ]

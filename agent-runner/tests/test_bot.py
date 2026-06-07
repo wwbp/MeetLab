@@ -211,6 +211,7 @@ class TestConfigLoaderDefaults(unittest.TestCase):
             llm_model="gpt-5.4-nano", tts_voice="WhMcMcvXQ8T2QfmQmlYh",
             stt_model="nova-3-general", stt_vad_mode="local",
             stt_delay=None, tts_provider="elevenlabs",
+            tts_aggregation_mode="sentence", stt_endpointing_ms=200,
         )
         self.assertEqual(cfg.stt_model, "nova-3-general")
         self.assertEqual(cfg.llm_model, "gpt-5.4-nano")

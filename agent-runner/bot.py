@@ -13,15 +13,17 @@ from livekit import rtc
 
 from pipecat.frames.frames import (
     InterruptionFrame,
-    LLMTextFrame,
+    MetricsFrame,
     TranscriptionFrame,
     TTSAudioRawFrame,
     TTSSpeakFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
 )
+from pipecat.metrics.metrics import TextAggregationMetricsData, TTFBMetricsData
+from pipecat.observers.base_observer import BaseObserver, FramePushed
+from pipecat.observers.loggers.metrics_log_observer import MetricsLogObserver
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
-from pipecat.observers.user_bot_latency_observer import UserBotLatencyObserver
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
@@ -175,8 +177,6 @@ async def bot(runner_args: LiveKitRunnerArguments):
     # last utterance ids for reply_to chaining
     _last_user_utt_id: list[str | None] = [None]
     _last_bot_utt_id: list[str | None] = [None]
-    # latency from UserBotLatencyObserver, written into next assistant utterance
-    _pending_latency_ms: list[float | None] = [None]
 
     transport = LiveKitTransport(
         url=runner_args.url,
@@ -243,12 +243,52 @@ async def bot(runner_args: LiveKitRunnerArguments):
         user_params=LLMUserAggregatorParams(vad_analyzer=None),
     )
 
-    latency_observer = UserBotLatencyObserver()
-
-    # Per-turn timing dict — populated by frame interceptors and turn hooks.
-    # Keys set during a turn: "stt_done", "llm_first", "tts_first".
-    # Cleared in on_assistant_turn_stopped after writing to Utterance.meta.
+    # Per-turn timing — stt_done/tts_first anchors for E2E (stt_done → tts_first).
+    # Per-stage breakdown (llm_ttft_ms, sentence_agg_ms, tts_ttfb_ms) comes from
+    # Pipecat's MetricsFrame via _MetricsObserver and is stored in _metrics_data.
     _turn_timing: dict[str, float] = {}
+    _metrics_data: dict[str, float] = {}
+
+    class _MetricsObserver(BaseObserver):
+        """Intercepts Pipecat MetricsFrame to capture per-stage TTFB values.
+
+        Writes to _metrics_data (shared closure dict) so on_assistant_turn_stopped
+        can persist them to Utterance.meta and observe Prometheus histograms.
+        Prometheus observations are also made immediately here so they aren't lost
+        if on_assistant_turn_stopped fires before all MetricsFrames arrive.
+        """
+
+        def __init__(self):
+            super().__init__()
+            self._seen: set = set()
+
+        async def on_push_frame(self, data: FramePushed):
+            frame = data.frame
+            if not isinstance(frame, MetricsFrame) or frame.id in self._seen:
+                return
+            self._seen.add(frame.id)
+            for m in frame.data:
+                try:
+                    self._handle(m)
+                except Exception:
+                    pass
+
+        def _handle(self, m):
+            import metrics as _prom
+            ep = str(getattr(bot_config, "stt_endpointing_ms", 200))
+            if isinstance(m, TTFBMetricsData):
+                val_ms = m.value * 1000
+                p = m.processor.lower()
+                if "llm" in p or "openai" in p:
+                    _metrics_data["llm_ttft_ms"] = val_ms
+                    _prom.llm_ttft.labels(llm_model=bot_config.llm_model).observe(val_ms)
+                elif "elevenlabs" in p or "tts" in p:
+                    _metrics_data["tts_ttfb_ms"] = val_ms
+                    _prom.tts_ttfb.labels(tts_provider=bot_config.tts_provider).observe(val_ms)
+            elif isinstance(m, TextAggregationMetricsData):
+                val_ms = m.value * 1000
+                _metrics_data["sentence_agg_ms"] = val_ms
+                _prom.sentence_agg.labels(tts_provider=bot_config.tts_provider).observe(val_ms)
 
     class _SpeakerTracker(FrameProcessor):
         """Records the SID of whoever sent the most recent TranscriptionFrame.
@@ -273,15 +313,6 @@ async def bot(runner_args: LiveKitRunnerArguments):
                     logger.debug("SpeakerTracker: {} → {}", identity, frame.text[:60])
             await self.push_frame(frame, direction)
 
-    class _LLMFirstTimer(FrameProcessor):
-        """Records when the first LLM text token is emitted (true TTFT)."""
-
-        async def process_frame(self, frame, direction):
-            await super().process_frame(frame, direction)
-            if direction == FrameDirection.DOWNSTREAM and isinstance(frame, LLMTextFrame):
-                _turn_timing.setdefault("llm_first", time.monotonic())
-            await self.push_frame(frame, direction)
-
     class _TTSFirstTimer(FrameProcessor):
         """Records when TTS produces its first audio chunk of each turn."""
 
@@ -299,7 +330,6 @@ async def bot(runner_args: LiveKitRunnerArguments):
             SpeakerLabelInjector(_sid_to_identity, _sid_to_name),
             context_aggregator.user(),
             llm,
-            _LLMFirstTimer(),
             tts,
             _TTSFirstTimer(),
             transport.output(),
@@ -313,7 +343,7 @@ async def bot(runner_args: LiveKitRunnerArguments):
             enable_metrics=True,
             enable_usage_metrics=True,
         ),
-        observers=[latency_observer],
+        observers=[MetricsLogObserver(), _MetricsObserver()],
         enable_tracing=env_config.enable_tracing,
         enable_turn_tracking=env_config.enable_tracing,
         conversation_id=runner_args.session_id,
@@ -329,10 +359,11 @@ async def bot(runner_args: LiveKitRunnerArguments):
 
     @context_aggregator.user().event_handler("on_user_turn_stopped")
     async def on_user_turn_stopped(aggregator, strategy, message):
-        # Anchor for LLM TTFT: moment the transcript is committed to the LLM context.
+        # Anchor for E2E: moment the transcript is committed to the LLM context.
+        # Per-stage breakdown (llm_ttft, sentence_agg, tts_ttfb) comes from MetricsFrame.
         _turn_timing["stt_done"] = time.monotonic()
-        _turn_timing.pop("llm_first", None)
         _turn_timing.pop("tts_first", None)
+        _metrics_data.clear()
         if not message.content:
             return
         # Resolution order for speaker identity:
@@ -384,34 +415,25 @@ async def bot(runner_args: LiveKitRunnerArguments):
         meta: dict = {}
         t = _turn_timing.copy()
         _turn_timing.clear()
+        m = _metrics_data.copy()
+        # Don't clear _metrics_data here — MetricsFrames for TTS may still be in flight.
+        # _MetricsObserver already observed Prometheus; we just read for DB storage.
         timing: dict = {}
-        if "stt_done" in t and "llm_first" in t:
-            timing["llm_ttft_ms"] = round((t["llm_first"] - t["stt_done"]) * 1000, 1)
-        if "llm_first" in t and "tts_first" in t:
-            timing["tts_first_ms"] = round((t["tts_first"] - t["llm_first"]) * 1000, 1)
-        # E2E: stt_done → tts_first (transcript commit → first TTS audio chunk).
-        # Measured inline here to avoid the audio-task race where BotStartedSpeakingFrame
-        # fires AFTER on_assistant_turn_stopped when the response is short.
+        for key in ("llm_ttft_ms", "sentence_agg_ms", "tts_ttfb_ms"):
+            if key in m:
+                timing[key] = round(m[key], 1)
+        # E2E: stt_done → tts_first (transcript committed → first TTS audio chunk).
         if "stt_done" in t and "tts_first" in t:
             meta["latency_ms"] = round((t["tts_first"] - t["stt_done"]) * 1000, 1)
-        # Observer-based fallback (VADUserStopped → BotStartedSpeaking); wins when
-        # the audio task happens to race ahead of the context aggregator commit.
-        elif _pending_latency_ms[0] is not None:
-            meta["latency_ms"] = _pending_latency_ms[0]
-        _pending_latency_ms[0] = None
         if timing:
             meta["timing"] = timing
-        # Observe Prometheus metrics (best-effort — never let this crash the turn)
+        # E2E Prometheus + utterance counter (per-stage metrics observed by _MetricsObserver)
         try:
-            import metrics as _m
+            import metrics as _prom
             _ep = str(getattr(bot_config, "stt_endpointing_ms", 200))
             if meta.get("latency_ms"):
-                _m.e2e_latency.labels(stt_model=bot_config.stt_model, endpointing_ms=_ep).observe(meta["latency_ms"])
-            if timing.get("llm_ttft_ms"):
-                _m.llm_ttft.labels(llm_model=bot_config.llm_model).observe(timing["llm_ttft_ms"])
-            if timing.get("tts_first_ms"):
-                _m.tts_first_chunk.labels(tts_provider=bot_config.tts_provider).observe(timing["tts_first_ms"])
-            _m.utterances_total.labels(stt_model=bot_config.stt_model).inc()
+                _prom.e2e_latency.labels(stt_model=bot_config.stt_model, endpointing_ms=_ep).observe(meta["latency_ms"])
+            _prom.utterances_total.labels(stt_model=bot_config.stt_model).inc()
         except Exception:
             pass
         async with AsyncSessionLocal() as db:
@@ -429,10 +451,6 @@ async def bot(runner_args: LiveKitRunnerArguments):
                 )
                 await _set_root_utterance_if_needed(db, runner_args.session_id, utt_id)
         _last_bot_utt_id[0] = utt_id
-
-    @latency_observer.event_handler("on_latency_measured")
-    async def on_latency_measured(observer, latency_secs: float):
-        _pending_latency_ms[0] = round(latency_secs * 1000, 1)
 
     # --- transport hooks ---
 

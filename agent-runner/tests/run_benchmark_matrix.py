@@ -221,9 +221,20 @@ async def _run_sample(room_name: str) -> Optional[dict]:
     timing = meta.get("timing", {})
     e2e = meta.get("latency_ms")
     llm = timing.get("llm_ttft_ms")
-    tts = timing.get("tts_first_ms")
+    # New format: sentence_agg_ms + tts_ttfb_ms (from Pipecat MetricsFrame)
+    # Old format: tts_first_ms (manual llm_first → tts_audio, kept for backward compat)
+    tts_ttfb = timing.get("tts_ttfb_ms")
+    sentence_agg = timing.get("sentence_agg_ms") or 0
+    tts = (tts_ttfb + sentence_agg) if tts_ttfb is not None else timing.get("tts_first_ms")
     stt = round(e2e - llm - tts, 1) if (e2e and llm and tts) else None
-    return {"stt_ms": stt, "llm_ttft_ms": llm, "tts_first_ms": tts, "e2e_ms": e2e}
+    return {
+        "stt_ms": stt,
+        "llm_ttft_ms": llm,
+        "tts_first_ms": tts,
+        "sentence_agg_ms": timing.get("sentence_agg_ms"),
+        "tts_ttfb_ms": timing.get("tts_ttfb_ms"),
+        "e2e_ms": e2e,
+    }
 
 
 # ── Config run (N samples, parallel) ─────────────────────────────────────────
@@ -255,7 +266,9 @@ async def run_config(cfg: dict, n: int, idx: int = 0, total: int = 0) -> dict:
             if row is None:
                 print(f"  [{i+1}/{n}] timeout (>{RESPONSE_TIMEOUT}s)")
             else:
-                print(f"  [{i+1}/{n}] stt≈{row['stt_ms']}ms  llm={row['llm_ttft_ms']}ms  tts={row['tts_first_ms']}ms  e2e={row['e2e_ms']}ms")
+                agg = f"  agg={row['sentence_agg_ms']:.0f}" if row.get("sentence_agg_ms") else ""
+                ttfb = f"  tts={row['tts_ttfb_ms']:.0f}" if row.get("tts_ttfb_ms") else f"  tts={row['tts_first_ms']}"
+                print(f"  [{i+1}/{n}] llm={row['llm_ttft_ms']}ms{agg}ms{ttfb}ms  e2e={row['e2e_ms']}ms")
         return row
 
     results = await asyncio.gather(*[_run_one(i) for i in range(n)])
@@ -284,7 +297,7 @@ def _pct(vals: list[float], p: float) -> float:
 
 
 def _aggregate(samples: list[dict]) -> dict:
-    keys = ["stt_ms", "llm_ttft_ms", "tts_first_ms", "e2e_ms"]
+    keys = ["stt_ms", "llm_ttft_ms", "sentence_agg_ms", "tts_ttfb_ms", "tts_first_ms", "e2e_ms"]
     out: dict = {}
     for k in keys:
         # Discard negative/zero values — artifact of timing races between turns
@@ -307,12 +320,20 @@ def _print_config_summary(record: dict) -> None:
     n_ok = record["n_collected"]
     n_req = record["n_requested"]
     print(f"\n  Summary ({n_ok}/{n_req} samples):")
-    for key, label in [("stt_ms", "STT"), ("llm_ttft_ms", "LLM TTFT"), ("tts_first_ms", "TTS first"), ("e2e_ms", "E2E")]:
+    stages = [
+        ("stt_ms",        "STT (derived)"),
+        ("llm_ttft_ms",   "LLM TTFB"),
+        ("sentence_agg_ms","Sentence agg"),
+        ("tts_ttfb_ms",   "TTS TTFB"),
+        ("tts_first_ms",  "TTS total"),
+        ("e2e_ms",        "E2E"),
+    ]
+    for key, label in stages:
         v = m.get(key)
         if v:
-            print(f"    {label:<12}  mean={v['mean']:>6.0f}ms  p50={v['p50']:>6.0f}ms  p95={v['p95']:>6.0f}ms")
+            print(f"    {label:<16}  mean={v['mean']:>6.0f}ms  p50={v['p50']:>6.0f}ms  p95={v['p95']:>6.0f}ms")
         else:
-            print(f"    {label:<12}  — all samples timed out")
+            print(f"    {label:<16}  — no data")
 
 
 # ── Results persistence ───────────────────────────────────────────────────────

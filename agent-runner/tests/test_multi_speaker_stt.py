@@ -25,6 +25,8 @@ from pipecat.frames.frames import (
     UserAudioRawFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
+    VADUserStartedSpeakingFrame,
+    VADUserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor, FrameProcessorSetup
 
@@ -150,10 +152,14 @@ class TestFrameCollector(unittest.IsolatedAsyncioTestCase):
         while not q.empty():
             frames.append(q.get_nowait())
 
-        self.assertEqual(len(frames), 3)
-        self.assertIsInstance(frames[0], UserStartedSpeakingFrame)
-        self.assertIsInstance(frames[1], TranscriptionFrame)
-        self.assertIsInstance(frames[2], UserStoppedSpeakingFrame)
+        # VAD frames precede the User* frames so the latency observer clock is set
+        # before the LLM/TTS chain starts (fixes observer race condition).
+        self.assertEqual(len(frames), 5)
+        self.assertIsInstance(frames[0], VADUserStartedSpeakingFrame)
+        self.assertIsInstance(frames[1], VADUserStoppedSpeakingFrame)
+        self.assertIsInstance(frames[2], UserStartedSpeakingFrame)
+        self.assertIsInstance(frames[3], TranscriptionFrame)
+        self.assertIsInstance(frames[4], UserStoppedSpeakingFrame)
 
     async def test_no_vad_wrap_for_interim_transcription(self):
         q: asyncio.Queue = asyncio.Queue()

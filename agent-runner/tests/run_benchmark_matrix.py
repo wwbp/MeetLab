@@ -38,7 +38,8 @@ RESPONSE_TIMEOUT = float(os.getenv("BENCHMARK_TIMEOUT", "25"))
 # Max rooms running simultaneously per config. Keeps LiveKit load manageable.
 PARALLEL_SAMPLES = int(os.getenv("BENCHMARK_PARALLEL", "3"))
 
-WAV_PATH = Path(__file__).parent / "fixtures" / "benchmark_prompt.wav"
+_WAV_ENV = os.getenv("BENCHMARK_WAV")
+WAV_PATH = Path(_WAV_ENV) if _WAV_ENV else Path(__file__).parent / "fixtures" / "benchmark_prompt.wav"
 RESULTS_PATH = Path(__file__).parent / "fixtures" / "benchmark_results.json"
 
 # ── Config matrix ────────────────────────────────────────────────────────────
@@ -65,20 +66,47 @@ _LLM_MODELS = [
 ]
 
 _TTS_OPTIONS = [
-    {"tts_provider": "elevenlabs", "tts_voice": ELEVENLABS_VOICE},
-    {"tts_provider": "openai", "tts_voice": "alloy"},
+    {"tts_provider": "elevenlabs", "tts_voice": ELEVENLABS_VOICE, "tts_aggregation_mode": "sentence"},
+    {"tts_provider": "elevenlabs", "tts_voice": ELEVENLABS_VOICE, "tts_aggregation_mode": "token"},
+    {"tts_provider": "openai", "tts_voice": "alloy", "tts_aggregation_mode": "sentence"},
 ]
+
+# Deepgram endpointing variants. Only applied to nova-3-* STT models; OpenAI STT
+# ignores this field. 200=default, 100=lower latency (Experiment 2).
+_DEEPGRAM_ENDPOINTING_OPTIONS = [200, 100]
+
+def _endpointing_for_stt(stt_model: str, ep: int) -> dict:
+    """Only include stt_endpointing_ms for Deepgram models."""
+    if stt_model.startswith("nova-"):
+        return {"stt_endpointing_ms": ep}
+    return {"stt_endpointing_ms": 200}  # no-op for OpenAI STT
+
+def _ep_label(stt_model: str, ep: int) -> str:
+    if stt_model.startswith("nova-") and ep != 200:
+        return f"[ep={ep}]"
+    return ""
 
 CONFIG_MATRIX = [
     {
-        "label": f"{stt} / {llm} / {tts['tts_provider']}",
+        "label": (
+            f"{stt} / {llm} / {tts['tts_provider']} [{tts['tts_aggregation_mode']}]"
+            + _ep_label(stt, ep)
+        ),
         "stt_model": stt,
         "stt_vad_mode": "local",
         "stt_delay": None,
         "llm_model": llm,
         **tts,
+        **_endpointing_for_stt(stt, ep),
     }
-    for stt, llm, tts in itertools.product(_STT_MODELS, _LLM_MODELS, _TTS_OPTIONS)
+    for stt, llm, tts, ep in itertools.product(
+        _STT_MODELS, _LLM_MODELS, _TTS_OPTIONS,
+        # Only vary endpointing for Deepgram; use 200 for all others (deduped below)
+        _DEEPGRAM_ENDPOINTING_OPTIONS,
+    )
+    # Deduplicate: OpenAI STT doesn't use endpointing, so ep=200 and ep=100 produce
+    # the same config. Keep only ep=200 for non-Deepgram models.
+    if stt.startswith("nova-") or ep == 200
 ]
 
 
@@ -98,6 +126,9 @@ def _set_room_config(room_name: str, config: dict) -> None:
     # Explicitly send stt_delay=null to clear any inherited value
     if "stt_delay" not in payload:
         payload["stt_delay"] = None
+    # Default endpointing to 200 if not specified
+    if "stt_endpointing_ms" not in payload:
+        payload["stt_endpointing_ms"] = 200
     payload["scope"] = room_name
     _request("PUT", "/config", payload)
 
@@ -190,9 +221,20 @@ async def _run_sample(room_name: str) -> Optional[dict]:
     timing = meta.get("timing", {})
     e2e = meta.get("latency_ms")
     llm = timing.get("llm_ttft_ms")
-    tts = timing.get("tts_first_ms")
+    # New format: sentence_agg_ms + tts_ttfb_ms (from Pipecat MetricsFrame)
+    # Old format: tts_first_ms (manual llm_first → tts_audio, kept for backward compat)
+    tts_ttfb = timing.get("tts_ttfb_ms")
+    sentence_agg = timing.get("sentence_agg_ms") or 0
+    tts = (tts_ttfb + sentence_agg) if tts_ttfb is not None else timing.get("tts_first_ms")
     stt = round(e2e - llm - tts, 1) if (e2e and llm and tts) else None
-    return {"stt_ms": stt, "llm_ttft_ms": llm, "tts_first_ms": tts, "e2e_ms": e2e}
+    return {
+        "stt_ms": stt,
+        "llm_ttft_ms": llm,
+        "tts_first_ms": tts,
+        "sentence_agg_ms": timing.get("sentence_agg_ms"),
+        "tts_ttfb_ms": timing.get("tts_ttfb_ms"),
+        "e2e_ms": e2e,
+    }
 
 
 # ── Config run (N samples, parallel) ─────────────────────────────────────────
@@ -202,7 +244,8 @@ async def run_config(cfg: dict, n: int, idx: int = 0, total: int = 0) -> dict:
     progress = f"[{idx}/{total}]" if total else ""
     print(f"\n{'═'*70}")
     print(f"Config {progress}: {label}")
-    print(f"  stt={cfg.get('stt_model')}  llm={cfg.get('llm_model')}  tts={cfg.get('tts_provider')}")
+    ep = cfg.get('stt_endpointing_ms', 200)
+    print(f"  stt={cfg.get('stt_model')}[ep={ep}ms]  llm={cfg.get('llm_model')}  tts={cfg.get('tts_provider')}")
     print(f"  Running {n} samples (parallel={PARALLEL_SAMPLES})...")
     print(f"{'═'*70}")
 
@@ -223,7 +266,9 @@ async def run_config(cfg: dict, n: int, idx: int = 0, total: int = 0) -> dict:
             if row is None:
                 print(f"  [{i+1}/{n}] timeout (>{RESPONSE_TIMEOUT}s)")
             else:
-                print(f"  [{i+1}/{n}] stt≈{row['stt_ms']}ms  llm={row['llm_ttft_ms']}ms  tts={row['tts_first_ms']}ms  e2e={row['e2e_ms']}ms")
+                agg = f"  agg={row['sentence_agg_ms']:.0f}" if row.get("sentence_agg_ms") else ""
+                ttfb = f"  tts={row['tts_ttfb_ms']:.0f}" if row.get("tts_ttfb_ms") else f"  tts={row['tts_first_ms']}"
+                print(f"  [{i+1}/{n}] llm={row['llm_ttft_ms']}ms{agg}ms{ttfb}ms  e2e={row['e2e_ms']}ms")
         return row
 
     results = await asyncio.gather(*[_run_one(i) for i in range(n)])
@@ -252,7 +297,7 @@ def _pct(vals: list[float], p: float) -> float:
 
 
 def _aggregate(samples: list[dict]) -> dict:
-    keys = ["stt_ms", "llm_ttft_ms", "tts_first_ms", "e2e_ms"]
+    keys = ["stt_ms", "llm_ttft_ms", "sentence_agg_ms", "tts_ttfb_ms", "tts_first_ms", "e2e_ms"]
     out: dict = {}
     for k in keys:
         # Discard negative/zero values — artifact of timing races between turns
@@ -275,12 +320,20 @@ def _print_config_summary(record: dict) -> None:
     n_ok = record["n_collected"]
     n_req = record["n_requested"]
     print(f"\n  Summary ({n_ok}/{n_req} samples):")
-    for key, label in [("stt_ms", "STT"), ("llm_ttft_ms", "LLM TTFT"), ("tts_first_ms", "TTS first"), ("e2e_ms", "E2E")]:
+    stages = [
+        ("stt_ms",        "STT (derived)"),
+        ("llm_ttft_ms",   "LLM TTFB"),
+        ("sentence_agg_ms","Sentence agg"),
+        ("tts_ttfb_ms",   "TTS TTFB"),
+        ("tts_first_ms",  "TTS total"),
+        ("e2e_ms",        "E2E"),
+    ]
+    for key, label in stages:
         v = m.get(key)
         if v:
-            print(f"    {label:<12}  mean={v['mean']:>6.0f}ms  p50={v['p50']:>6.0f}ms  p95={v['p95']:>6.0f}ms")
+            print(f"    {label:<16}  mean={v['mean']:>6.0f}ms  p50={v['p50']:>6.0f}ms  p95={v['p95']:>6.0f}ms")
         else:
-            print(f"    {label:<12}  — all samples timed out")
+            print(f"    {label:<16}  — no data")
 
 
 # ── Results persistence ───────────────────────────────────────────────────────

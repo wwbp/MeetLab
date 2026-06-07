@@ -47,6 +47,8 @@ from pipecat.frames.frames import (
     UserAudioRawFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
+    VADUserStartedSpeakingFrame,
+    VADUserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor, FrameProcessorSetup
 
@@ -84,6 +86,13 @@ class _FrameCollector(FrameProcessor):
         if isinstance(frame, (StartFrame, EndFrame, CancelFrame)):
             return
         if self._needs_vad_wrap and isinstance(frame, TranscriptionFrame) and frame.finalized:
+            # VADUser* frames must arrive at the observer BEFORE UserStoppedSpeakingFrame
+            # triggers the context aggregator commit (which starts the LLM/TTS chain).
+            # Placing VADUserStoppedSpeakingFrame here ensures UserBotLatencyObserver
+            # has _user_stopped_time set before BotStartedSpeakingFrame fires.
+            # stop_secs=0.0: clock starts now (post-endpointing), so e2e_ms ≈ LLM+TTS.
+            await self._queue.put(VADUserStartedSpeakingFrame())
+            await self._queue.put(VADUserStoppedSpeakingFrame(stop_secs=0.0))
             await self._queue.put(UserStartedSpeakingFrame())
             await self._queue.put(frame)
             await self._queue.put(UserStoppedSpeakingFrame())

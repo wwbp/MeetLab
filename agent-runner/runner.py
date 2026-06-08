@@ -22,7 +22,7 @@ from sqlalchemy import func, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import selectinload
 
-import metrics  # registers Prometheus histograms at import time
+import metrics
 import storage
 import transcript as transcript_mod
 from config import load_config, require
@@ -57,6 +57,32 @@ if config.enable_tracing:
         console_export=config.otel_console_export,
     )
     logger.info(f"OTel tracing enabled → {config.otlp_endpoint or 'http://jaeger:4318'}")
+
+    from opentelemetry.sdk.metrics import MeterProvider
+    from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
+    from opentelemetry.sdk.metrics.view import ExplicitBucketHistogramAggregation, View
+    from opentelemetry.exporter.otlp.proto.http.metric_exporter import OTLPMetricExporter
+    from opentelemetry import metrics as otel_metrics
+
+    _metric_exporter = OTLPMetricExporter(
+        endpoint=_raw_endpoint + "/v1/metrics",
+        headers=_headers or None,
+    )
+    _metric_reader = PeriodicExportingMetricReader(
+        _metric_exporter, export_interval_millis=15_000
+    )
+    _latency_agg = ExplicitBucketHistogramAggregation(metrics.LATENCY_BOUNDARIES)
+    _meter_provider = MeterProvider(
+        metric_readers=[_metric_reader],
+        views=[
+            View(instrument_name="meetlab.e2e_latency_ms", aggregation=_latency_agg),
+            View(instrument_name="meetlab.llm_ttft_ms", aggregation=_latency_agg),
+            View(instrument_name="meetlab.sentence_agg_ms", aggregation=_latency_agg),
+            View(instrument_name="meetlab.tts_ttfb_ms", aggregation=_latency_agg),
+        ],
+    )
+    otel_metrics.set_meter_provider(_meter_provider)
+    logger.info(f"OTel metrics enabled → {_raw_endpoint}/v1/metrics")
 LIVEKIT_API_KEY = require(config.livekit_api_key, "LIVEKIT_API_KEY")
 BOT_RUNNER_SECRET = os.environ.get("BOT_RUNNER_SECRET")
 LIVEKIT_API_SECRET = require(config.livekit_api_secret, "LIVEKIT_API_SECRET")
@@ -547,15 +573,6 @@ async def update_config(request: Request, _=Depends(verify_api_key)):
         "stt_delay": cfg.stt_delay,
         "stt_endpointing_ms": cfg.stt_endpointing_ms,
     }
-
-
-# ── Prometheus metrics ────────────────────────────────────────────────────────
-
-@app.get("/metrics", include_in_schema=False)
-async def prometheus_metrics():
-    from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
-    from fastapi.responses import Response
-    return Response(content=generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 
 # ── helpers ──────────────────────────────────────────────────────────────────

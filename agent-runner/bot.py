@@ -275,20 +275,19 @@ async def bot(runner_args: LiveKitRunnerArguments):
 
         def _handle(self, m):
             import metrics as _prom
-            ep = str(getattr(bot_config, "stt_endpointing_ms", 200))
             if isinstance(m, TTFBMetricsData):
                 val_ms = m.value * 1000
                 p = m.processor.lower()
                 if "llm" in p or "openai" in p:
                     _metrics_data["llm_ttft_ms"] = val_ms
-                    _prom.llm_ttft.labels(llm_model=bot_config.llm_model).observe(val_ms)
+                    _prom.llm_ttft.record(val_ms, {"llm_model": bot_config.llm_model})
                 elif "elevenlabs" in p or "tts" in p:
                     _metrics_data["tts_ttfb_ms"] = val_ms
-                    _prom.tts_ttfb.labels(tts_provider=bot_config.tts_provider).observe(val_ms)
+                    _prom.tts_ttfb.record(val_ms, {"tts_provider": bot_config.tts_provider})
             elif isinstance(m, TextAggregationMetricsData):
                 val_ms = m.value * 1000
                 _metrics_data["sentence_agg_ms"] = val_ms
-                _prom.sentence_agg.labels(tts_provider=bot_config.tts_provider).observe(val_ms)
+                _prom.sentence_agg.record(val_ms, {"tts_provider": bot_config.tts_provider})
 
     class _SpeakerTracker(FrameProcessor):
         """Records the SID of whoever sent the most recent TranscriptionFrame.
@@ -427,13 +426,13 @@ async def bot(runner_args: LiveKitRunnerArguments):
             meta["latency_ms"] = round((t["tts_first"] - t["stt_done"]) * 1000, 1)
         if timing:
             meta["timing"] = timing
-        # E2E Prometheus + utterance counter (per-stage metrics observed by _MetricsObserver)
+        # E2E latency + utterance counter (per-stage metrics observed by _MetricsObserver)
         try:
             import metrics as _prom
             _ep = str(getattr(bot_config, "stt_endpointing_ms", 200))
             if meta.get("latency_ms"):
-                _prom.e2e_latency.labels(stt_model=bot_config.stt_model, endpointing_ms=_ep).observe(meta["latency_ms"])
-            _prom.utterances_total.labels(stt_model=bot_config.stt_model).inc()
+                _prom.e2e_latency.record(meta["latency_ms"], {"stt_model": bot_config.stt_model, "endpointing_ms": _ep})
+            _prom.utterances_total.add(1, {"stt_model": bot_config.stt_model})
         except Exception:
             pass
         async with AsyncSessionLocal() as db:

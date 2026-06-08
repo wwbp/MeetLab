@@ -65,11 +65,13 @@ export default function ConfigPage() {
         setError((data as unknown as { error?: string }).error ?? 'Failed to load config');
         return;
       }
+      const loadedLlm = data.llm_model ?? 'gpt-5.4-nano';
+      const loadedStt = data.stt_model ?? 'nova-3-general';
       setForm({
         system_prompt: data.system_prompt ?? '',
         greeting: data.greeting ?? '',
-        stt_model: data.stt_model ?? 'nova-3-general',
-        llm_model: data.llm_model ?? 'gpt-5.4-mini',
+        stt_model: STT_MODELS.some((m) => m.value === loadedStt) ? loadedStt : 'nova-3-general',
+        llm_model: LLM_MODELS.includes(loadedLlm) ? loadedLlm : LLM_MODELS[0],
         tts_provider: data.tts_provider ?? 'elevenlabs',
         tts_voice: data.tts_voice ?? '',
         vad_stop_secs: data.vad_stop_secs ?? 0.6,

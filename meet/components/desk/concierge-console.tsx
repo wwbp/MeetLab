@@ -66,7 +66,7 @@ function prettyStatus(value: string): string {
   return value.replace(/_/g, ' ');
 }
 
-export function ConciergeConsole() {
+export function ConciergeConsole({ tracesUrl }: { tracesUrl?: string }) {
   const [rooms, setRooms] = useState<ConciergeRoom[]>([]);
   const [roomHealthByName, setRoomHealthByName] = useState<RoomHealthByName>({});
 
@@ -264,9 +264,9 @@ export function ConciergeConsole() {
                 links, and watch room and bot health.
               </p>
             </div>
-            {process.env.NEXT_PUBLIC_TRACES_URL && (
+            {tracesUrl && (
               <a
-                href={process.env.NEXT_PUBLIC_TRACES_URL}
+                href={tracesUrl}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="border-foreground/20 text-muted-foreground hover:text-foreground shrink-0 border px-3 py-1.5 font-mono text-xs transition-colors"

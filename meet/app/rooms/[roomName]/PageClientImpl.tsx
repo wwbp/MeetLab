@@ -69,6 +69,22 @@ class ConferenceErrorBoundary extends React.Component<
   }
 }
 
+// Returns true when an error message pattern suggests an auth/permission rejection
+// rather than a network connectivity issue. Auth errors won't be fixed by relay.
+function looksLikeAuthError(error: Error): boolean {
+  const msg = error.message.toLowerCase();
+  return (
+    msg.includes('unauthorized') ||
+    msg.includes('not authorized') ||
+    msg.includes('forbidden') ||
+    msg.includes('invalid token') ||
+    msg.includes('token expired') ||
+    msg.includes('permission') ||
+    msg.includes('401') ||
+    msg.includes('403')
+  );
+}
+
 export function PageClientImpl(props: {
   roomName: string;
   region?: string;
@@ -88,6 +104,17 @@ export function PageClientImpl(props: {
   const [connectionDetails, setConnectionDetails] = React.useState<ConnectionDetails | undefined>(
     undefined,
   );
+
+  // When a direct (STUN) connection fails we remount VideoConferenceComponent
+  // with forceRelay=true so LiveKit uses TURN-only ICE candidates.
+  const [forceRelay, setForceRelay] = React.useState(false);
+  const [conferenceKey, setConferenceKey] = React.useState(0);
+
+  const handleConnectivityFailure = React.useCallback(() => {
+    console.warn('[relay] Direct connection failed — retrying via TURN relay');
+    setForceRelay(true);
+    setConferenceKey((k) => k + 1);
+  }, []);
 
   const handlePreJoinSubmit = React.useCallback(async (values: LocalUserChoices) => {
     setPreJoinChoices(values);
@@ -115,9 +142,12 @@ export function PageClientImpl(props: {
         </div>
       ) : (
         <VideoConferenceComponent
+          key={conferenceKey}
           connectionDetails={connectionDetails}
           userChoices={preJoinChoices}
           options={{ codec: props.codec, hq: props.hq }}
+          forceRelay={forceRelay}
+          onConnectivityFailure={!forceRelay ? handleConnectivityFailure : undefined}
         />
       )}
     </main>
@@ -131,6 +161,8 @@ function VideoConferenceComponent(props: {
     hq: boolean;
     codec: VideoCodec;
   };
+  forceRelay?: boolean;
+  onConnectivityFailure?: () => void;
 }) {
   const keyProvider = new ExternalE2EEKeyProvider();
   const { worker, e2eePassphrase } = useSetupE2EE();
@@ -165,8 +197,12 @@ function VideoConferenceComponent(props: {
       dynacast: true,
       e2ee: keyProvider && worker && e2eeEnabled ? { keyProvider, worker } : undefined,
       singlePeerConnection: true,
+      // Force TURN-only relay when direct UDP has been confirmed to fail.
+      // On the first attempt iceTransportPolicy defaults to 'all' so ICE
+      // negotiates the fastest available path; relay is only forced on retry.
+      rtcConfig: props.forceRelay ? { iceTransportPolicy: 'relay' } : undefined,
     };
-  }, [props.userChoices, props.options.hq, props.options.codec]);
+  }, [props.userChoices, props.options.hq, props.options.codec, props.forceRelay]);
 
   const room = React.useMemo(() => new Room(roomOptions), []);
 
@@ -211,7 +247,15 @@ function VideoConferenceComponent(props: {
           connectOptions,
         )
         .catch((error) => {
-          handleError(error);
+          // If this looks like a network/ICE failure (not an auth rejection) and
+          // the caller supports a relay retry, hand control back up rather than
+          // surfacing a raw alert.
+          if (!looksLikeAuthError(error) && props.onConnectivityFailure) {
+            console.warn('[relay] Connection failed, handing off to relay retry:', error.message);
+            props.onConnectivityFailure();
+          } else {
+            handleError(error);
+          }
         });
       if (props.userChoices.videoEnabled) {
         room.localParticipant.setCameraEnabled(true).catch((error) => {
@@ -257,6 +301,27 @@ function VideoConferenceComponent(props: {
 
   return (
     <div className="lk-room-container">
+      {props.forceRelay && (
+        <div
+          style={{
+            position: 'absolute',
+            top: 8,
+            left: '50%',
+            transform: 'translateX(-50%)',
+            zIndex: 10,
+            background: 'rgba(0,0,0,0.55)',
+            color: '#fbbf24',
+            fontSize: '0.75rem',
+            padding: '4px 12px',
+            borderRadius: 4,
+            pointerEvents: 'none',
+            whiteSpace: 'nowrap',
+          }}
+          title="Direct UDP failed — connection is routed through a TURN relay server"
+        >
+          Relay connection active
+        </div>
+      )}
       <RoomContext.Provider value={room}>
         <KeyboardShortcuts />
         <ConferenceErrorBoundary onRecover={handleOnLeave}>

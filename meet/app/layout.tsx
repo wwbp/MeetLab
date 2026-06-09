@@ -4,6 +4,7 @@ import '@livekit/components-styles/prefabs';
 import type { Metadata, Viewport } from 'next';
 import Script from 'next/script';
 import { ClientToaster } from '@/components/client-toaster';
+import { UnsupportedBrowserGate } from '@/components/UnsupportedBrowserGate';
 import { THEME_MEDIA_QUERY, THEME_STORAGE_KEY } from '@/lib/utils';
 
 const THEME_SCRIPT = `
@@ -65,6 +66,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="en" suppressHydrationWarning>
       <body data-lk-theme="default">
         <Script id="theme-script" strategy="beforeInteractive" dangerouslySetInnerHTML={{ __html: THEME_SCRIPT }} />
+        <UnsupportedBrowserGate />
         <ClientToaster />
         {children}
       </body>

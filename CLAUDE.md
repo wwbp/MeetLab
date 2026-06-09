@@ -98,6 +98,41 @@ Key per-service variables:
 - `output: 'standalone'` in `next.config.js` — `meet/Dockerfile` is the single file for dev and prod; stages: `deps → dev → builder → runner`; docker-compose builds the `dev` target (alpine, hot-reload, source bind-mounted); production targets `runner` (non-root `nextjs` user, standalone output)
 - Integration tests use Node's built-in test runner (`node --test`); unit tests use Vitest (`pnpm test`)
 
+## Browser & device support
+
+The app requires WebRTC, `navigator.mediaDevices.getUserMedia`, and WebSockets. The binding constraint is `Cross-Origin-Embedder-Policy: credentialless` (set globally in `next.config.js`), which is required for `SharedArrayBuffer` — used by E2EE and the Krisp noise filter.
+
+### Supported browsers
+
+| Browser | Minimum version | Notes |
+|---------|----------------|-------|
+| Chrome / Chromium | 96 (Nov 2021) | First version with COEP `credentialless` |
+| Edge | 96 (Nov 2021) | Same engine as Chrome |
+| Firefox | 119 (Oct 2023) | First version with COEP `credentialless` |
+| Safari (macOS) | 17 (Sep 2023) | First version with COEP `credentialless` |
+| Safari (iOS) | 17 (Sep 2023) | All iOS browsers use WebKit; iOS 17 required |
+| Chrome for Android | 96+ | Follows desktop Chrome |
+| Samsung Internet | 24+ | Partial; not actively tested |
+
+### Not supported
+
+- Internet Explorer (any version) — no WebRTC
+- Firefox < 119, Chrome < 96, Safari < 17
+- iOS < 17 (all iOS browsers use WKWebView, constrained to OS WebKit version)
+- Opera Mini — no WebRTC
+- UC Browser — no WebRTC
+
+### Feature detection
+
+`meet/lib/browser-support.ts` exports `getBrowserSupport()`, `isCoreSupported()`, and `isEnhancedSupported()`. The root layout renders `UnsupportedBrowserGate` (client-only), which blocks the UI with a full-screen message when core APIs are absent. Unit tests are in `meet/lib/browser-support.test.ts`.
+
+### Device notes
+
+- Camera and microphone permissions are required for video/audio
+- Minimum 4 CPU cores recommended for concurrent encode/decode; `isLowPowerDevice()` in `client-utils.ts` flags `hardwareConcurrency < 6`
+- Responsive layout but optimised for landscape (tablet/desktop); voice agent UI is mobile-friendly
+- No native mobile app; all mobile access is via browser
+
 ## Known constraints
 
 - All concierge state is in-memory: a restart of `meet` resets all room claims, locks, and event history. Sessions in flight are stranded.

@@ -1,5 +1,6 @@
 import { randomString } from '@/lib/client-utils';
 import { getLiveKitURL } from '@/lib/getLiveKitURL';
+import { checkRateLimit, getClientIp } from '@/lib/rate-limit';
 import { ConnectionDetails } from '@/lib/types';
 import { validateLiveKitPublicUrlForRequestHost } from '@/lib/validateLiveKitPublicUrl';
 import { AccessToken, AccessTokenOptions, VideoGrant } from 'livekit-server-sdk';
@@ -8,8 +9,54 @@ import { getServerConfig, requireEnv } from '@/lib/config/server';
 
 const COOKIE_KEY = 'random-participant-postfix';
 
+// 20 token requests per minute per IP — sufficient for legitimate users,
+// blocks automated token farming.
+const RATE_LIMIT_MAX = 20;
+const RATE_LIMIT_WINDOW_MS = 60_000;
+
+/**
+ * Validates that the request's Origin header, when present, matches the
+ * server host. Browsers always set Origin on cross-origin fetches; its
+ * absence on a same-origin fetch is normal and is allowed through.
+ * Mismatches indicate a cross-site or tool-driven request.
+ */
+function isOriginAllowed(request: NextRequest): boolean {
+  const origin = request.headers.get('origin');
+  if (!origin) return true; // absent = same-origin browser fetch or server-side call
+
+  try {
+    const originHost = new URL(origin).host;
+    const requestHost =
+      request.headers.get('x-forwarded-host') ?? request.headers.get('host') ?? '';
+    return originHost === requestHost;
+  } catch {
+    return false;
+  }
+}
+
 export async function GET(request: NextRequest) {
   try {
+    // --- Security: origin check ---
+    if (!isOriginAllowed(request)) {
+      return new NextResponse('Forbidden', { status: 403 });
+    }
+
+    // --- Security: rate limit by IP ---
+    const ip = getClientIp(request);
+    const { allowed, retryAfterMs } = checkRateLimit(
+      `connection-details:${ip}`,
+      RATE_LIMIT_MAX,
+      RATE_LIMIT_WINDOW_MS,
+    );
+    if (!allowed) {
+      return new NextResponse('Too Many Requests', {
+        status: 429,
+        headers: {
+          'Retry-After': String(Math.ceil(retryAfterMs / 1000)),
+        },
+      });
+    }
+
     const config = getServerConfig();
     const livekitUrlPublic = requireEnv(config.livekitUrl, 'LIVEKIT_URL_PUBLIC');
     const apiKey = requireEnv(config.livekitApiKey, 'LIVEKIT_API_KEY');

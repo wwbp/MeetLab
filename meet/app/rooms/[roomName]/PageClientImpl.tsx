@@ -197,12 +197,8 @@ function VideoConferenceComponent(props: {
       dynacast: true,
       e2ee: keyProvider && worker && e2eeEnabled ? { keyProvider, worker } : undefined,
       singlePeerConnection: true,
-      // Force TURN-only relay when direct UDP has been confirmed to fail.
-      // On the first attempt iceTransportPolicy defaults to 'all' so ICE
-      // negotiates the fastest available path; relay is only forced on retry.
-      rtcConfig: props.forceRelay ? { iceTransportPolicy: 'relay' } : undefined,
     };
-  }, [props.userChoices, props.options.hq, props.options.codec, props.forceRelay]);
+  }, [props.userChoices, props.options.hq, props.options.codec]);
 
   const room = React.useMemo(() => new Room(roomOptions), []);
 
@@ -231,8 +227,12 @@ function VideoConferenceComponent(props: {
   const connectOptions = React.useMemo((): RoomConnectOptions => {
     return {
       autoSubscribe: true,
+      // rtcConfig lives on RoomConnectOptions (not RoomOptions).
+      // Force TURN-only relay when direct UDP has been confirmed to fail;
+      // on the first attempt 'all' lets ICE negotiate the fastest path.
+      rtcConfig: props.forceRelay ? { iceTransportPolicy: 'relay' } : { iceTransportPolicy: 'all' },
     };
-  }, []);
+  }, [props.forceRelay]);
 
   React.useEffect(() => {
     room.on(RoomEvent.Disconnected, handleOnLeave);

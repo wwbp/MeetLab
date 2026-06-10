@@ -3,15 +3,24 @@
 Step-by-step log of latency optimization experiments. Each experiment records the hypothesis,
 the code change, the benchmark commands, and the measured result.
 
-Key metric: **E2E P50** (`stt_done → first TTS audio chunk`), measured inline in
-`on_assistant_turn_stopped` from existing monotonic timers.
-Supporting metrics stored in `Utterance.meta["timing"]`: `llm_ttft_ms`, `tts_first_ms`.
-Derived: `stt_ms = e2e_ms - llm_ttft_ms - tts_first_ms` (≈ 0ms with current E2E definition,
-since E2E is post-transcript only — does NOT include Deepgram endpointing or STT round-trip).
+Key metric (since Experiment 4): **Total latency P50** (`total_latency_ms` = `stt_ms` + post-STT
+E2E) — the true user-perceived gap from the last audio packet of the user's speech to the first
+TTS audio chunk from the bot.
 
-> **E2E definition note:** `stt_done` is set when the transcript is committed to the LLM context
-> (inside `on_user_turn_stopped`). So E2E = LLM TTFT + TTS TTFB. True end-to-end from user
-> silence would need to add Deepgram endpointing (~200ms) + STT round-trip (~500ms) on top.
+Stage metrics stored in `Utterance.meta["timing"]`:
+
+| Metric | Measures | Source |
+|--------|----------|--------|
+| `stt_ms` | last user audio frame → transcript committed (endpointing wait + transcription + network) | direct, `_AudioTimestampRecorder` + `on_user_turn_stopped` |
+| `llm_ttft_ms` | transcript committed → first LLM token | Pipecat MetricsFrame |
+| `sentence_agg_ms` | LLM token buffering until sentence boundary | Pipecat MetricsFrame |
+| `tts_ttfb_ms` | sentence sent to TTS → first audio chunk | Pipecat MetricsFrame |
+| `latency_ms` (post-STT E2E) | transcript committed → first TTS audio chunk | monotonic timers |
+| `total_latency_ms` | `stt_ms` + `latency_ms` | derived sum |
+
+> **History:** before Experiment 4, `stt_ms` was a *derived residual* (`e2e − llm − tts`) and the
+> headline metric was post-STT E2E only. Results recorded before 2026-06-10 use the old
+> definitions — do not compare their `stt_ms`/`e2e_ms` directly against newer runs.
 
 Benchmark data lives in `agent-runner/tests/fixtures/benchmark_results.json`.
 Run commands are in `Makefile`; always use `BENCHMARK_SAMPLES=10` for meaningful percentiles
@@ -269,6 +278,24 @@ endpointing puts true user-perceived E2E at ~630ms.
 2. AWS GPU benchmark — same `make benchmark-exp2` against deployed stack for true
    comparison at lower overall latency baseline.
 
+### Addendum 2026-06-10 — direct measurement REFUTES the −91ms estimate
+
+Experiment 4's direct `stt_ms` (last audio frame → transcript committed, which *includes*
+the endpointing wait) shows **no difference** between ep=200 and ep=100:
+
+| | ep=200 | ep=100 |
+|---|---|---|
+| `stt_ms` P50 (10 samples) | 395ms | 391ms |
+| `stt_ms` P95 | 418ms | 567ms |
+
+If the endpointing wait were the dominant fixed cost, ep=100 should cut ~100ms here. It
+doesn't. The "True E2E (est.)" row in the table above — which simply *assumed* the saving —
+is wrong. Hypotheses for why (unverified): Deepgram may enforce a minimum endpointing
+window; the final-transcript flush may be gated on something other than the endpointing
+timer; or the benchmark WAV's trailing silence interacts with VAD timing. Until one of
+these is confirmed, **treat `stt_endpointing_ms` as a no-op for latency** and leave it
+at 200ms (lower values still raise the false-termination risk for no measured gain).
+
 ---
 
 ## Production Grafana setup
@@ -332,37 +359,157 @@ rate(meetlab_utterances_total[1m]) * 60
 
 ## Experiment 3 — Jaeger profiling baseline
 
-**Status:** 📋 Planned
+**Status:** ✅ Complete (2026-06-10)
 
 **Goal:** Use the existing OTLP→Jaeger traces to see per-service TTFB breakdowns that the
 `Utterance.meta` timing cannot show (e.g., time inside the Pipecat STT service vs. network).
 
-**Setup:**
-1. Confirm Jaeger is in docker-compose (check `.devcontainer/docker-compose.yml`)
-2. Set `ENABLE_TRACING=1` in `agent-runner/.env.runner.local`
-3. Run a live conversation
-4. Open `http://localhost:16686` → find `meetlab-agent-runner` service
-5. Inspect `turn → stt_DeepgramSTTService` span's `metrics.ttfb` vs pipeline overhead
+**Setup used:** `ENABLE_TRACING=true` + `OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4318`
+in `agent-runner/.env.runner`; spans inspected via `http://localhost:16686` (UI) and
+`http://localhost:16686/api/traces?service=meetlab-agent-runner` (API) during a
+10-sample benchmark run.
 
-**What Pipecat traces emit per turn:**
-```
-conversation (root)
-└── turn
-    ├── stt_DeepgramSTTService   → metrics.ttfb (time from first audio to final transcript)
-    ├── llm_OpenAILLMService     → metrics.ttfb (time to first token), input_tokens, output_tokens
-    └── tts_ElevenLabsTTSService → metrics.ttfb (time to first audio chunk), character_count
-```
+**What the traces actually contain** (20 traces, 2026-06-10 benchmark):
 
-This will reveal whether `stt_ms ≈ 700ms` is network-dominated or queue-dominated.
+| Span | n | duration P50 | `metrics.ttfb` P50 |
+|------|---|-------------|--------------------|
+| `conversation` (root) | 20 | 9,078ms | — |
+| `turn` | 40 | 3,423ms | — |
+| `llm` | 20 | 442ms | **381ms** |
+| `tts` | 40 | 175ms | **160ms** |
+
+**Finding 1 — there are NO `stt` spans.** Pipecat's turn tracing only instruments services
+that live inside the `Pipeline` object. Our per-participant STT instances are created
+dynamically inside `MultiSpeakerSTT` (outside the pipeline), so the tracer never sees them.
+The custom `stt_ms` metric from Experiment 4 is therefore the *only* STT latency visibility
+we have — Jaeger cannot answer "is STT network- or queue-dominated" with the current
+architecture.
+
+**Finding 2 — Jaeger cross-validates the benchmark numbers.** Trace-level `llm` ttfb P50
+(381ms) and `tts` ttfb P50 (160ms) match the same run's MetricsFrame-based benchmark
+values (llm_ttft 398ms, tts_ttfb 157ms) within noise. The two measurement paths agree,
+so we can trust either.
+
+**Use Jaeger for:** per-turn flame views during live debugging (`turn` span shows the full
+sequence), token counts on `llm` spans, spotting outlier turns visually.
+**Don't use it for:** STT latency (absent), aggregate percentiles (use the benchmark or
+Grafana histograms instead).
+
+---
+
+## Experiment 4 — Direct STT measurement + total user-perceived latency
+
+**Status:** ✅ Complete (2026-06-10)
+
+**Problem:** `stt_ms` was a derived residual (`e2e − llm_ttft − tts_first`) computed from
+metrics with *different clock anchors*, so it absorbed every timing race in the pipeline —
+the baseline's "STT ≈ 694ms" was an artifact, not a measurement. And the headline E2E
+started only *after* the transcript was committed, hiding the entire STT cost from the
+number we optimized.
+
+**Change** (`bot.py`):
+- `_AudioTimestampRecorder` (new `FrameProcessor` before `multi_stt`) records the monotonic
+  time of each participant's last `UserAudioRawFrame`.
+- `on_user_turn_stopped` computes `stt_ms = transcript-committed − last-audio-frame`,
+  covering endpointing wait + transcription + network round-trip.
+- `total_latency_ms = stt_ms + post-STT E2E` is the new headline metric; benchmark reports
+  sort by it.
+- New OTLP histogram `meetlab.stt_latency_ms` (labels: `stt_model`, `endpointing_ms`)
+  alongside the renamed-in-description `meetlab.e2e_latency_ms` (now explicitly "post-STT").
+
+**Result** (nova-3-general / gpt-5.4-nano / elevenlabs [sentence], 10 samples, 2026-06-10):
+
+| Stage | P50 | P95 |
+|-------|-----|-----|
+| STT (direct) | **395ms** | 418ms |
+| LLM TTFB | 398ms | 850ms |
+| Sentence agg | 46ms | 54ms |
+| TTS TTFB | 157ms | 171ms |
+| Post-STT E2E | 623ms | 1,044ms |
+| **Total (user-perceived)** | **1,010ms** | 1,491ms |
+
+**Conclusions:**
+- Real STT cost is ~395ms — a stable, tight distribution (P95 within 25ms of P50). The old
+  derived ~694ms overstated it by ~75%.
+- STT and LLM are now co-equal latency drivers (~400ms each); TTS is a minor cost (~160ms).
+- The user hears the bot ~1.0s after they stop speaking (local Docker, cloud STT/LLM/TTS).
+- See Experiment 2 addendum: the direct measurement also revealed that `stt_endpointing_ms`
+  has no measurable effect.
+
+---
+
+## Experiment 5 — Local faster-whisper STT (whisper-turbo)
+
+**Status:** ✅ Complete (2026-06-10) — **rejected for CPU; code path kept for future GPU hosts**
+
+**Hypothesis:** A local `WhisperSTTService` (faster-whisper large-v3-turbo) eliminates the
+cloud round-trip portion of `stt_ms`. On CPU the transcription itself may eat the savings;
+this experiment measures where the break-even sits. (GPU would change the picture entirely
+— the Docker container currently has no GPU access.)
+
+**Change** (`bot.py`, `multi_speaker_stt.py`):
+- `whisper-*` STT models build a per-participant chain `VADProcessor(SileroVADAnalyzer) →
+  WhisperSTTService` (`_build_whisper_chain`). Whisper is a `SegmentedSTTService` — it only
+  transcribes the audio between VAD start/stop events, and per-participant audio routed by
+  `MultiSpeakerSTT` never passes the transport's VAD, so each chain carries its own.
+- `MultiSpeakerSTT._ensure_stt` accepts `(head, tail)` chain factories; `_FrameCollector`
+  drops the chain's raw VAD frames so they don't double-fire the latency observer
+  (the synthetic VAD sandwich around the finalized transcript remains the single source
+  of VAD events for the main pipeline).
+- VAD `stop_secs` mirrors `stt_endpointing_ms` (default 200ms) for comparable `stt_ms`.
+- Unit tests: `tests/test_bot.py::TestBuildSttWhisperChain`,
+  `tests/test_multi_speaker_stt.py::TestMultiSpeakerSTTChainFactory` (TDD;
+  `WhisperSTTService._load` patched out — the constructor eagerly downloads ~1.6GB).
+
+**Results (2026-06-10, Docker on Apple Silicon, CPU only):**
+
+End-to-end sample through the real pipeline (whisper-turbo / gpt-5.4-nano / elevenlabs):
+
+| Stage | whisper-turbo (1 sample) | nova-3 Deepgram (P50, n=10) |
+|-------|--------------------------|------------------------------|
+| STT | **9,684ms** | 395ms |
+| LLM TTFT | 1,088ms¹ | 398ms |
+| TTS TTFB | 170ms | 157ms |
+| **Total** | **10,994ms** | 1,010ms |
+
+¹ LLM inflated by CPU contention from Whisper inference in the same container.
+
+Synthetic CPU timings (warm model, 2s of audio — `faster_whisper.WhisperModel.transcribe`):
+
+| Model | compute | transcribe 2s audio |
+|-------|---------|---------------------|
+| turbo (809M) | float32 (auto fallback — no efficient fp16 on this CPU) | 16.4s |
+| turbo | int8 | ~9s |
+| small | default | 3.25s |
+| base (39M) | default | 2.85s |
+
+**Verdict: rejected on CPU.** Even the smallest model is slower than realtime; turbo costs
+~25× Deepgram's full STT round-trip. Two operational hazards on top of latency:
+
+1. **Memory:** each per-participant chain loads its own ~3.2GB float32 model. Two
+   concurrent (or even back-to-back, overlapping-teardown) whisper bots OOM-killed the
+   agent-runner in the 7.75GiB Docker VM — this is why `whisper-turbo` is commented out
+   of the default benchmark matrix (`run_benchmark_matrix.py`).
+2. **Eager load:** `WhisperSTTService.__init__` downloads (~1.6GB, first time) and loads
+   (~4s) the model synchronously inside the event loop, on the first audio frame from a
+   new participant.
+
+**What was validated and kept:** the `VADProcessor → WhisperSTTService` per-participant
+chain works correctly end-to-end (live transcript "What is the capital of France?" through
+the full pipeline, correct speaker attribution, VAD sandwich timing intact). The code path
+and its unit tests stay; revisit on a GPU host (`--gpus all` + `device="cuda"`), where
+turbo transcribes 2s of audio in ~100-200ms and would plausibly beat Deepgram's 395ms.
+
+**Config:** `/config` accepts `whisper-turbo`, `whisper-base`, `whisper-small`
+(`runner.py` allowlist + admin UI choices).
 
 ---
 
 ## Future ideas (not yet planned)
 
-- **Local faster-whisper STT** (`WhisperSTTService`, distil-large-v3 int8): only viable with
-  GPU (`--gpus all` in docker-compose). On CPU it would be 500–800ms vs Deepgram's 200ms
-  endpointing wait. Check: does the container have GPU access?
 - **SmartTurn analyzer**: `LocalSmartTurnAnalyzerV3` can trigger LLM before the full VAD
   silence timeout when turn confidence is high. Complex to wire into per-participant path.
 - **LLM streaming to TTS without sentence boundary**: already handled by aggregation mode,
   but could also investigate `split_secs` parameter if available in ElevenLabs service.
+- **Why is `stt_endpointing_ms` a no-op?** (from Experiment 2 addendum) — capture Deepgram
+  websocket timing to see when the final transcript actually arrives relative to last audio.

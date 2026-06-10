@@ -43,7 +43,18 @@ docker compose -f .devcontainer/docker-compose.yml exec -T meet \
 make setup-livekit-cloud LIVEKIT_CLOUD_URL=wss://... LIVEKIT_API_KEY=... LIVEKIT_API_SECRET=...
 make revert-livekit-local
 make test-livekit-tooling   # tests the switch script itself
+
+# Latency benchmarks (always BENCHMARK_SAMPLES=10 minimum — see docs/performance-tests.md)
+make benchmark BENCHMARK_SAMPLES=10                    # default config
+make benchmark-full BENCHMARK_SAMPLES=10 BENCHMARK_CONFIGS="<label>,<label>"  # specific configs
+make benchmark-report                                  # re-print table from stored results
 ```
+
+Latency docs: `docs/performance-tests.md` (how to run/read, team-facing),
+`docs/latency-experiments.md` (experiment log with metric definitions and history).
+Local tracing: Jaeger at `http://localhost:16686` (`ENABLE_TRACING=true` in `.env.runner`).
+Note: agent-runner has no hot reload — `docker compose restart agent-runner` after editing
+`bot.py`/`multi_speaker_stt.py`/`runner.py`.
 
 ## Environment setup
 

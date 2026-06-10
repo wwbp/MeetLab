@@ -41,10 +41,12 @@ from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
     Frame,
+    SpeechControlParamsFrame,
     StartFrame,
     SystemFrame,
     TranscriptionFrame,
     UserAudioRawFrame,
+    UserSpeakingFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
     VADUserStartedSpeakingFrame,
@@ -84,6 +86,15 @@ class _FrameCollector(FrameProcessor):
         if direction != FrameDirection.DOWNSTREAM:
             return
         if isinstance(frame, (StartFrame, EndFrame, CancelFrame)):
+            return
+        if self._needs_vad_wrap and isinstance(
+            frame,
+            (VADUserStartedSpeakingFrame, VADUserStoppedSpeakingFrame, UserSpeakingFrame, SpeechControlParamsFrame),
+        ):
+            # Raw VAD frames from an in-chain VADProcessor (local Whisper path).
+            # The synthetic sandwich below is the single source of VAD events for
+            # the main pipeline — letting these through would double-fire the
+            # latency observer and reconfigure the aggregator's speech params.
             return
         if self._needs_vad_wrap and isinstance(frame, TranscriptionFrame) and frame.finalized:
             # VADUser* frames must arrive at the observer BEFORE UserStoppedSpeakingFrame
@@ -173,18 +184,27 @@ class MultiSpeakerSTT(FrameProcessor):
     # ── internal ────────────────────────────────────────────────────────────
 
     async def _ensure_stt(self, sid: str) -> FrameProcessor:
-        """Return the per-participant STT for sid, creating it if needed."""
+        """Return the per-participant STT entry point for sid, creating it if needed.
+
+        The factory may return a single processor or a (head, tail) chain
+        (e.g. VADProcessor → WhisperSTTService). Frames enter at the head;
+        the collector is linked after the tail; lifecycle frames sent to the
+        head propagate through the chain via the normal push machinery.
+        """
         if sid not in self._stts:
-            stt = self._stt_factory()
-            needs_vad_wrap = not _stt_emits_vad_frames(stt)
+            chain = self._stt_factory()
+            head, tail = chain if isinstance(chain, tuple) else (chain, chain)
+            needs_vad_wrap = not _stt_emits_vad_frames(tail)
             collector = _FrameCollector(self._output_queue, needs_vad_wrap=needs_vad_wrap)
-            stt.link(collector)
+            tail.link(collector)
             if self._setup_params is not None:
-                await stt.setup(self._setup_params)
+                await head.setup(self._setup_params)
+                if tail is not head:
+                    await tail.setup(self._setup_params)
                 await collector.setup(self._setup_params)
             if self._start_frame is not None:
-                await stt.process_frame(self._start_frame, FrameDirection.DOWNSTREAM)
-            self._stts[sid] = stt
+                await head.process_frame(self._start_frame, FrameDirection.DOWNSTREAM)
+            self._stts[sid] = head
             logger.info(f"MultiSpeakerSTT: created STT for participant {sid} (vad_wrap={needs_vad_wrap})")
         return self._stts[sid]
 

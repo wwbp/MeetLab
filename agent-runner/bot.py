@@ -17,6 +17,7 @@ from pipecat.frames.frames import (
     TranscriptionFrame,
     TTSAudioRawFrame,
     TTSSpeakFrame,
+    UserAudioRawFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
 )
@@ -100,11 +101,40 @@ class _OpenAIRealtimeSTT(OpenAIRealtimeSTTService):
         })
 
 
+def _build_whisper_chain(bot_config):
+    """Local Whisper STT chain: (VADProcessor, WhisperSTTService) head/tail pair.
+
+    WhisperSTTService is a SegmentedSTTService — it transcribes only the audio
+    between VADUserStarted/StoppedSpeakingFrames and emits nothing without them.
+    MultiSpeakerSTT routes raw per-participant audio straight into each STT
+    (the transport's VAD never sees that path), so the chain carries its own
+    VADProcessor. stop_secs mirrors Deepgram's endpointing_ms so stt_ms numbers
+    stay comparable across providers.
+
+    Note: WhisperSTTService.__init__ loads the model eagerly (downloads on first
+    use) — the first participant's chain creation blocks until the model is warm.
+    """
+    from pipecat.audio.vad.silero import SileroVADAnalyzer
+    from pipecat.audio.vad.vad_analyzer import VADParams
+    from pipecat.processors.audio.vad_processor import VADProcessor
+    from pipecat.services.whisper.stt import WhisperSTTService
+
+    model_name = bot_config.stt_model[len("whisper-"):]
+    endpointing_ms = getattr(bot_config, "stt_endpointing_ms", 200) or 200
+    vad = VADProcessor(
+        vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=endpointing_ms / 1000))
+    )
+    stt = WhisperSTTService(settings=WhisperSTTService.Settings(model=model_name))
+    vad.link(stt)
+    return (vad, stt)
+
+
 def _build_stt(bot_config, openai_api_key: str, deepgram_api_key: str | None):
     """Instantiate the STT service based on stt_model prefix.
 
-    Models starting with 'gpt-' use OpenAI Realtime STT; everything else
-    (nova-*, enhanced-*, etc.) uses Deepgram.
+    Models starting with 'gpt-' use OpenAI Realtime STT; 'whisper-' returns a
+    local (VADProcessor, WhisperSTTService) chain — see _build_whisper_chain;
+    everything else (nova-*, etc.) uses Deepgram.
     """
     if bot_config.stt_model.startswith("gpt-"):
         return _OpenAIRealtimeSTT(
@@ -116,6 +146,8 @@ def _build_stt(bot_config, openai_api_key: str, deepgram_api_key: str | None):
                 noise_reduction="near_field",
             ),
         )
+    if bot_config.stt_model.startswith("whisper-"):
+        return _build_whisper_chain(bot_config)
     # Deepgram path — disable server endpointing so local Silero VAD drives commits
     if not deepgram_api_key:
         raise ValueError("DEEPGRAM_API_KEY is required for Deepgram STT models")
@@ -248,6 +280,10 @@ async def bot(runner_args: LiveKitRunnerArguments):
     # Pipecat's MetricsFrame via _MetricsObserver and is stored in _metrics_data.
     _turn_timing: dict[str, float] = {}
     _metrics_data: dict[str, float] = {}
+    # Monotonic timestamp of the last UserAudioRawFrame received per participant SID.
+    # Used to compute real STT latency: last audio frame → transcript committed.
+    # Covers endpointing silence wait + transcription + network roundtrip.
+    _last_audio_times: dict[str, float] = {}
 
     class _MetricsObserver(BaseObserver):
         """Intercepts Pipecat MetricsFrame to capture per-stage TTFB values.
@@ -289,6 +325,21 @@ async def bot(runner_args: LiveKitRunnerArguments):
                 _metrics_data["sentence_agg_ms"] = val_ms
                 _prom.sentence_agg.record(val_ms, {"tts_provider": bot_config.tts_provider})
 
+    class _AudioTimestampRecorder(FrameProcessor):
+        """Records the monotonic time of each participant's last audio frame.
+
+        Must sit before multi_stt in the pipeline — multi_stt consumes
+        UserAudioRawFrame and does not re-emit it downstream.
+        The timestamp is later read by _SpeakerTracker to compute stt_ms.
+        """
+
+        async def process_frame(self, frame, direction):
+            await super().process_frame(frame, direction)
+            if direction == FrameDirection.DOWNSTREAM and isinstance(frame, UserAudioRawFrame):
+                if frame.user_id:
+                    _last_audio_times[frame.user_id] = time.monotonic()
+            await self.push_frame(frame, direction)
+
     class _SpeakerTracker(FrameProcessor):
         """Records the SID of whoever sent the most recent TranscriptionFrame.
 
@@ -310,6 +361,11 @@ async def bot(runner_args: LiveKitRunnerArguments):
                     _current_speaker_sid[0] = frame.user_id
                     identity = _sid_to_identity.get(frame.user_id, frame.user_id)
                     logger.debug("SpeakerTracker: {} → {}", identity, frame.text[:60])
+                    # Latch the last-audio timestamp for this speaker so stt_ms
+                    # measures: last audio frame → transcript committed.
+                    last_ts = _last_audio_times.get(frame.user_id)
+                    if last_ts is not None:
+                        _turn_timing["last_audio_ts"] = last_ts
             await self.push_frame(frame, direction)
 
     class _TTSFirstTimer(FrameProcessor):
@@ -324,6 +380,7 @@ async def bot(runner_args: LiveKitRunnerArguments):
     pipeline = Pipeline(
         [
             transport.input(),
+            _AudioTimestampRecorder(),
             multi_stt,
             _SpeakerTracker(),
             SpeakerLabelInjector(_sid_to_identity, _sid_to_name),
@@ -360,9 +417,15 @@ async def bot(runner_args: LiveKitRunnerArguments):
     async def on_user_turn_stopped(aggregator, strategy, message):
         # Anchor for E2E: moment the transcript is committed to the LLM context.
         # Per-stage breakdown (llm_ttft, sentence_agg, tts_ttfb) comes from MetricsFrame.
-        _turn_timing["stt_done"] = time.monotonic()
+        stt_done_time = time.monotonic()
+        _turn_timing["stt_done"] = stt_done_time
         _turn_timing.pop("tts_first", None)
         _metrics_data.clear()
+        # Real STT latency: last audio packet → transcript committed.
+        # Covers endpointing silence wait + transcription + network roundtrip.
+        last_audio_ts = _turn_timing.pop("last_audio_ts", None)
+        if last_audio_ts is not None:
+            _turn_timing["stt_ms"] = (stt_done_time - last_audio_ts) * 1000
         if not message.content:
             return
         # Resolution order for speaker identity:
@@ -418,12 +481,18 @@ async def bot(runner_args: LiveKitRunnerArguments):
         # Don't clear _metrics_data here — MetricsFrames for TTS may still be in flight.
         # _MetricsObserver already observed Prometheus; we just read for DB storage.
         timing: dict = {}
+        # stt_ms from _turn_timing (real measurement: last audio → transcript committed)
+        if "stt_ms" in t:
+            timing["stt_ms"] = round(t["stt_ms"], 1)
         for key in ("llm_ttft_ms", "sentence_agg_ms", "tts_ttfb_ms"):
             if key in m:
                 timing[key] = round(m[key], 1)
-        # E2E: stt_done → tts_first (transcript committed → first TTS audio chunk).
+        # Post-STT E2E: stt_done → tts_first (transcript committed → first TTS audio chunk).
         if "stt_done" in t and "tts_first" in t:
             meta["latency_ms"] = round((t["tts_first"] - t["stt_done"]) * 1000, 1)
+        # Total user-perceived latency: last audio → first TTS audio chunk.
+        if "stt_ms" in timing and meta.get("latency_ms") is not None:
+            meta["total_latency_ms"] = round(timing["stt_ms"] + meta["latency_ms"], 1)
         if timing:
             meta["timing"] = timing
         # E2E latency + utterance counter (per-stage metrics observed by _MetricsObserver)
@@ -432,6 +501,8 @@ async def bot(runner_args: LiveKitRunnerArguments):
             _ep = str(getattr(bot_config, "stt_endpointing_ms", 200))
             if meta.get("latency_ms"):
                 _prom.e2e_latency.record(meta["latency_ms"], {"stt_model": bot_config.stt_model, "endpointing_ms": _ep})
+            if timing.get("stt_ms"):
+                _prom.stt_latency.record(timing["stt_ms"], {"stt_model": bot_config.stt_model, "endpointing_ms": _ep})
             _prom.utterances_total.add(1, {"stt_model": bot_config.stt_model})
         except Exception:
             pass
@@ -588,6 +659,11 @@ def _build_stt_for_multi_speaker(bot_config, openai_api_key: str, deepgram_api_k
     Deepgram: endpointing driven by bot_config.stt_endpointing_ms (default 200ms,
     reducible to 100ms for lower latency). _FrameCollector wraps final transcripts
     in VAD frame sandwiches for the context aggregator.
+
+    Local Whisper: each participant gets a (VADProcessor, WhisperSTTService)
+    chain — see _build_whisper_chain. _FrameCollector wraps TranscriptionFrames
+    in VAD sandwiches (needs_vad_wrap=True) the same way it does for Deepgram,
+    and drops the chain's raw VAD frames so they don't double-fire the observer.
     """
     if bot_config.stt_model.startswith("gpt-"):
         return _OpenAIRealtimeSTT(
@@ -599,6 +675,8 @@ def _build_stt_for_multi_speaker(bot_config, openai_api_key: str, deepgram_api_k
                 noise_reduction="near_field",
             ),
         )
+    if bot_config.stt_model.startswith("whisper-"):
+        return _build_whisper_chain(bot_config)
     if not deepgram_api_key:
         raise ValueError("DEEPGRAM_API_KEY is required for Deepgram STT models")
     endpointing_ms = getattr(bot_config, "stt_endpointing_ms", 200)

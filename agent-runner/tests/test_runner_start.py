@@ -281,10 +281,19 @@ class RunnerStartApiTests(unittest.TestCase):
     def test_config_put_invalid_stt_model_returns_400(self):
         response = self.client.put(
             "/config",
-            json={"scope": "test-runner-scope", "stt_model": "whisper-turbo"},
+            json={"scope": "test-runner-scope", "stt_model": "not-a-model"},
         )
         self.assertEqual(response.status_code, 400)
         self.assertIn("stt_model", response.json().get("error", ""))
+
+    def test_config_put_local_whisper_stt_model_accepted(self):
+        # whisper-* models run local faster-whisper (Experiment 5)
+        response = self.client.put(
+            "/config",
+            json={"scope": "test-runner-scope", "stt_model": "whisper-turbo"},
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json().get("stt_model"), "whisper-turbo")
 
     def test_config_put_invalid_tts_provider_returns_400(self):
         response = self.client.put(

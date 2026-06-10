@@ -114,10 +114,17 @@ CONFIG_MATRIX = [
 
 # ── HTTP helpers ──────────────────────────────────────────────────────────────
 
+# Required when the target runner enforces auth (production). Local dev compose
+# overrides BOT_RUNNER_SECRET to "" so the header is omitted there.
+BOT_RUNNER_SECRET = os.getenv("BOT_RUNNER_SECRET", "")
+
+
 def _request(method: str, path: str, body: Optional[dict] = None) -> dict:
     url = f"{RUNNER_URL}{path}"
     data = json.dumps(body).encode() if body else None
     headers = {"Content-Type": "application/json"} if body else {}
+    if BOT_RUNNER_SECRET:
+        headers["Authorization"] = f"Bearer {BOT_RUNNER_SECRET}"
     req = urllib.request.Request(url, data=data, method=method, headers=headers)
     with urllib.request.urlopen(req, timeout=10) as resp:
         return json.loads(resp.read())

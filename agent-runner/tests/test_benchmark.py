@@ -2,10 +2,12 @@
 
 Measures per-stage latencies stored in Utterance.meta["timing"] by the
 instrumented bot pipeline:
-  - llm_ttft_ms   : transcript-committed → LLM first token
-  - tts_first_ms  : LLM first token → TTS first audio chunk
-  - e2e_ms        : VAD stop → first bot audio (from UserBotLatencyObserver)
-  - stt_ms        : e2e − (llm_ttft + tts_first)  [derived residual]
+  - stt_ms            : last audio frame → transcript committed
+                        (endpointing wait + transcription + network roundtrip)
+  - llm_ttft_ms       : transcript committed → LLM first token
+  - tts_first_ms      : LLM first token → TTS first audio chunk
+  - e2e_ms (latency_ms): post-STT pipeline (transcript committed → first TTS audio)
+  - total_latency_ms  : stt_ms + e2e_ms (true user-perceived latency)
 
 Run via:
     make benchmark
@@ -175,12 +177,13 @@ class TestPipelineBenchmark(unittest.IsolatedAsyncioTestCase):
             e2e = meta.get("latency_ms")
             llm = timing.get("llm_ttft_ms")
             tts = timing.get("tts_first_ms")
-            stt = round(e2e - llm - tts, 1) if (e2e and llm and tts) else None
+            stt = timing.get("stt_ms")
+            total = meta.get("total_latency_ms")
 
-            row = {"llm_ttft_ms": llm, "tts_first_ms": tts, "e2e_ms": e2e, "stt_ms": stt}
+            row = {"stt_ms": stt, "llm_ttft_ms": llm, "tts_first_ms": tts, "e2e_ms": e2e, "total_latency_ms": total}
             results.append(row)
             print(
-                f"  stt≈{stt}ms  llm_ttft={llm}ms  tts_first={tts}ms  e2e={e2e}ms",
+                f"  stt={stt}ms  llm_ttft={llm}ms  tts_first={tts}ms  e2e={e2e}ms  total={total}ms",
                 flush=True,
             )
 
@@ -207,10 +210,11 @@ def _print_stats(results: list[dict], total_samples: int) -> None:
         return
 
     rows = [
-        ("STT processing (derived)", "stt_ms"),
+        ("STT (last audio → transcript)", "stt_ms"),
         ("LLM TTFT", "llm_ttft_ms"),
         ("TTS first chunk", "tts_first_ms"),
-        ("E2E (vad_stop → bot audio)", "e2e_ms"),
+        ("Post-STT E2E", "e2e_ms"),
+        ("Total (stt + post-stt e2e)", "total_latency_ms"),
     ]
     header = f"{'Stage':<30}  {'N':>3}  {'Mean':>7}  {'P50':>7}  {'P95':>7}  {'Min':>7}"
     print(header)

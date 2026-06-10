@@ -7,10 +7,15 @@ LATENCY_BOUNDARIES = [
     600, 700, 800, 900, 1000, 1250, 1500, 2000, 3000, 5000,
 ]
 
+stt_latency = _meter.create_histogram(
+    "meetlab.stt_latency_ms",
+    unit="ms",
+    description="STT latency: last audio frame → transcript committed (endpointing + transcription + network)",
+)
 e2e_latency = _meter.create_histogram(
     "meetlab.e2e_latency_ms",
     unit="ms",
-    description="E2E latency: STT done → first TTS audio chunk",
+    description="Post-STT E2E latency: transcript committed → first TTS audio chunk",
 )
 llm_ttft = _meter.create_histogram(
     "meetlab.llm_ttft_ms",

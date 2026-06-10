@@ -222,6 +222,9 @@ _STT_MODEL_CHOICES = [
     ("gpt-realtime-whisper", "gpt-realtime-whisper (OpenAI)"),
     ("gpt-4o-transcribe", "gpt-4o-transcribe (OpenAI)"),
     ("gpt-4o-mini-transcribe", "gpt-4o-mini-transcribe (OpenAI)"),
+    ("whisper-turbo", "whisper-turbo (local faster-whisper, CPU)"),
+    ("whisper-base", "whisper-base (local faster-whisper, CPU)"),
+    ("whisper-small", "whisper-small (local faster-whisper, CPU)"),
 ]
 
 
@@ -524,7 +527,11 @@ async def update_config(request: Request, _=Depends(verify_api_key)):
             return JSONResponse({"error": "tts_provider must be 'elevenlabs' or 'openai'"}, status_code=400)
         fields["tts_provider"] = body["tts_provider"]
     if "stt_model" in body:
-        _valid_stt = {"nova-3-general", "gpt-realtime-whisper", "gpt-4o-transcribe", "gpt-4o-mini-transcribe"}
+        _valid_stt = {
+            "nova-3-general", "gpt-realtime-whisper", "gpt-4o-transcribe", "gpt-4o-mini-transcribe",
+            # local faster-whisper (whisper-<model_size>); CPU-only — see Experiment 5
+            "whisper-turbo", "whisper-base", "whisper-small",
+        }
         if body["stt_model"] not in _valid_stt:
             return JSONResponse({"error": f"stt_model must be one of: {', '.join(sorted(_valid_stt))}"}, status_code=400)
         fields["stt_model"] = body["stt_model"]

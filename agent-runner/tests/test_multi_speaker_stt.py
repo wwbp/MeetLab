@@ -23,6 +23,7 @@ from pipecat.frames.frames import (
     StartFrame,
     TranscriptionFrame,
     UserAudioRawFrame,
+    UserSpeakingFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
     VADUserStartedSpeakingFrame,
@@ -86,6 +87,23 @@ class _Sink(FrameProcessor):
     async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
         await super().process_frame(frame, direction)
         self.received.append(frame)
+
+
+class _PassthroughHead(FrameProcessor):
+    """Fake chain head (stands in for VADProcessor): forwards every frame to _next.
+
+    Records received frames so tests can assert audio was routed into the chain
+    entry rather than directly into the STT tail.
+    """
+
+    def __init__(self):
+        super().__init__()
+        self.received: list[Frame] = []
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
+        await super().process_frame(frame, direction)
+        self.received.append(frame)
+        await self.push_frame(frame, direction)
 
 
 class _ImmediateSTT(FrameProcessor):
@@ -213,6 +231,113 @@ class TestFrameCollector(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(len(frames), 1)
         self.assertIsInstance(frames[0], UserStartedSpeakingFrame)
+
+    async def test_vad_wrap_drops_internal_vad_frames(self):
+        """needs_vad_wrap=True: raw VAD frames from an in-chain VADProcessor are dropped.
+
+        Whisper chains run a per-participant VADProcessor whose VADUser*/UserSpeaking
+        frames would double-fire the latency observer on top of the synthetic sandwich.
+        Only the sandwich (emitted around the finalized TranscriptionFrame) may pass.
+        """
+        q: asyncio.Queue = asyncio.Queue()
+        collector = _FrameCollector(q, needs_vad_wrap=True)
+
+        for frame in [
+            VADUserStartedSpeakingFrame(),
+            VADUserStoppedSpeakingFrame(stop_secs=0.2),
+            UserSpeakingFrame(),
+        ]:
+            await collector.queue_frame(frame, FrameDirection.DOWNSTREAM)
+
+        self.assertTrue(q.empty(), "raw VAD frames must not leak past the collector when vad_wrap is on")
+
+    async def test_raw_vad_frames_pass_when_vad_wrap_disabled(self):
+        """needs_vad_wrap=False (server-side VAD STT): VAD frames pass through untouched."""
+        q: asyncio.Queue = asyncio.Queue()
+        collector = _FrameCollector(q, needs_vad_wrap=False)
+
+        await collector.queue_frame(VADUserStartedSpeakingFrame(), FrameDirection.DOWNSTREAM)
+        await collector.queue_frame(VADUserStoppedSpeakingFrame(stop_secs=0.2), FrameDirection.DOWNSTREAM)
+
+        frames = []
+        while not q.empty():
+            frames.append(q.get_nowait())
+        self.assertEqual([type(f) for f in frames], [VADUserStartedSpeakingFrame, VADUserStoppedSpeakingFrame])
+
+
+# ── MultiSpeakerSTT chain factories ──────────────────────────────────────────
+
+class TestMultiSpeakerSTTChainFactory(unittest.IsolatedAsyncioTestCase):
+    """stt_factory may return a (head, tail) chain instead of a single processor.
+
+    Used by local-Whisper STT: head is a per-participant VADProcessor, tail is the
+    WhisperSTTService. Audio must enter at the head; transcripts are collected from
+    the tail; vad_wrap is decided by the tail's type.
+    """
+
+    async def asyncSetUp(self):
+        self.setup_params = _make_setup()
+        self.heads: list[_PassthroughHead] = []
+        self.tails: list[_ImmediateSTT] = []
+
+        def chain_factory():
+            head = _PassthroughHead()
+            tail = _ImmediateSTT()
+            head.link(tail)
+            self.heads.append(head)
+            self.tails.append(tail)
+            return (head, tail)
+
+        self.multi_stt = MultiSpeakerSTT(chain_factory)
+        await self.multi_stt.setup(self.setup_params)
+        self.sink = _Sink()
+        self.multi_stt.link(self.sink)
+        await self.multi_stt.process_frame(StartFrame(), FrameDirection.DOWNSTREAM)
+        await asyncio.sleep(0.05)
+
+    async def asyncTearDown(self):
+        try:
+            await self.multi_stt.process_frame(CancelFrame(), FrameDirection.DOWNSTREAM)
+        except Exception:
+            pass
+        from db.engine import engine
+        await engine.dispose()
+
+    async def test_audio_routed_to_chain_head(self):
+        await self.multi_stt.process_frame(_make_audio_frame("alice_sid"), FrameDirection.DOWNSTREAM)
+        await asyncio.sleep(0.05)
+
+        self.assertEqual(len(self.heads), 1)
+        audio_at_head = [f for f in self.heads[0].received if isinstance(f, UserAudioRawFrame)]
+        self.assertEqual(len(audio_at_head), 1, "audio must enter the chain at the head")
+
+    async def test_tail_output_reaches_downstream(self):
+        await self.multi_stt.process_frame(_make_audio_frame("alice_sid"), FrameDirection.DOWNSTREAM)
+        await asyncio.sleep(0.1)
+
+        transcripts = [f for f in self.sink.received if isinstance(f, TranscriptionFrame)]
+        self.assertTrue(len(transcripts) >= 1, f"tail transcript should reach the pipeline, got: {self.sink.received}")
+        self.assertEqual(transcripts[0].user_id, "alice_sid")
+
+    async def test_vad_wrap_decided_by_tail(self):
+        """_ImmediateSTT is not an OpenAI Realtime STT, so the tail's collector wraps."""
+        await self.multi_stt.process_frame(_make_audio_frame("alice_sid"), FrameDirection.DOWNSTREAM)
+        await asyncio.sleep(0.05)
+
+        collector = self.tails[0]._next
+        self.assertIsInstance(collector, _FrameCollector)
+        self.assertTrue(collector._needs_vad_wrap)
+
+    async def test_remove_participant_tears_down_chain(self):
+        await self.multi_stt.process_frame(_make_audio_frame("alice_sid"), FrameDirection.DOWNSTREAM)
+        await asyncio.sleep(0.05)
+        self.assertIn("alice_sid", self.multi_stt._stts)
+
+        await self.multi_stt.remove_participant("alice_sid")
+
+        self.assertNotIn("alice_sid", self.multi_stt._stts)
+        end_frames_at_head = [f for f in self.heads[0].received if isinstance(f, EndFrame)]
+        self.assertEqual(len(end_frames_at_head), 1, "EndFrame must be delivered to the chain head on teardown")
 
 
 # ── MultiSpeakerSTT routing ───────────────────────────────────────────────────

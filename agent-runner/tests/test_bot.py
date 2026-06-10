@@ -3,7 +3,7 @@ import os
 import sys
 import unittest
 from dataclasses import dataclass
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 os.environ.setdefault("DATABASE_URL", "postgresql+asyncpg://user:pass@localhost/db")
 os.environ.setdefault("OPENAI_API_KEY", "test-key")
@@ -13,9 +13,17 @@ os.environ.setdefault("LIVEKIT_URL", "ws://localhost:7880")
 os.environ.setdefault("DEEPGRAM_API_KEY", "test-deepgram-key")
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
-from bot import _find_participant_by_sid, _turn_detection_for_vad_mode, _build_stt, _OpenAIRealtimeSTT
+from bot import (
+    _build_stt,
+    _build_stt_for_multi_speaker,
+    _find_participant_by_sid,
+    _turn_detection_for_vad_mode,
+    _OpenAIRealtimeSTT,
+)
+from pipecat.processors.audio.vad_processor import VADProcessor
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.openai.stt import OpenAIRealtimeSTTService
+from pipecat.services.whisper.stt import WhisperSTTService
 
 
 @dataclass
@@ -23,6 +31,7 @@ class _FakeBotConfig:
     stt_model: str
     stt_vad_mode: str = "local"
     stt_delay: str | None = None
+    stt_endpointing_ms: int = 200
 
 
 def _fake_participant(identity: str, sid: str) -> MagicMock:
@@ -114,6 +123,59 @@ class TestBuildStt(unittest.TestCase):
         cfg = _FakeBotConfig(stt_model="nova-3-general")
         svc = _build_stt(cfg, "openai-key", "deepgram-key")
         self.assertIsInstance(svc, DeepgramSTTService)
+
+
+class TestBuildSttWhisperChain(unittest.TestCase):
+    """whisper-* models build a local VADProcessor → WhisperSTTService chain.
+
+    WhisperSTTService is a SegmentedSTTService: it only transcribes after
+    VADUserStarted/StoppedSpeakingFrames tell it where the speech segment is.
+    Per-participant audio routed by MultiSpeakerSTT never passes through the
+    transport's VAD, so each chain must carry its own VADProcessor to generate
+    those frames. Both builders return (head, tail) = (VADProcessor, Whisper).
+
+    WhisperSTTService._load is patched out — the real constructor eagerly
+    downloads the model (~1.6 GB for turbo), which unit tests must not do.
+    """
+
+    def setUp(self):
+        patcher = patch.object(WhisperSTTService, "_load", autospec=True)
+        self.addCleanup(patcher.stop)
+        patcher.start()
+
+    def test_whisper_returns_vad_to_stt_chain(self):
+        cfg = _FakeBotConfig(stt_model="whisper-turbo")
+        head, tail = _build_stt(cfg, "openai-key", None)
+        self.assertIsInstance(head, VADProcessor)
+        self.assertIsInstance(tail, WhisperSTTService)
+
+    def test_whisper_multi_speaker_chain_is_linked(self):
+        cfg = _FakeBotConfig(stt_model="whisper-turbo")
+        head, tail = _build_stt_for_multi_speaker(cfg, "openai-key", None)
+        self.assertIsInstance(head, VADProcessor)
+        self.assertIsInstance(tail, WhisperSTTService)
+        self.assertIs(head._next, tail, "audio must flow head (VAD) → tail (Whisper)")
+
+    def test_whisper_model_prefix_stripped(self):
+        cfg = _FakeBotConfig(stt_model="whisper-turbo")
+        _, tail = _build_stt(cfg, "openai-key", None)
+        self.assertEqual(tail._settings.model, "turbo")
+
+    def test_whisper_does_not_require_deepgram_key(self):
+        cfg = _FakeBotConfig(stt_model="whisper-base")
+        head, tail = _build_stt(cfg, "openai-key", None)  # must not raise
+        self.assertIsInstance(head, VADProcessor)
+        self.assertEqual(tail._settings.model, "base")
+
+    def test_whisper_endpointing_default_200ms(self):
+        cfg = _FakeBotConfig(stt_model="whisper-turbo")
+        head, _ = _build_stt(cfg, "openai-key", None)
+        self.assertAlmostEqual(head._vad_controller._vad_analyzer.params.stop_secs, 0.2)
+
+    def test_whisper_endpointing_respects_config(self):
+        cfg = _FakeBotConfig(stt_model="whisper-turbo", stt_endpointing_ms=100)
+        head, _ = _build_stt(cfg, "openai-key", None)
+        self.assertAlmostEqual(head._vad_controller._vad_analyzer.params.stop_secs, 0.1)
 
 
 class TestOnUserTurnStoppedGuards(unittest.TestCase):

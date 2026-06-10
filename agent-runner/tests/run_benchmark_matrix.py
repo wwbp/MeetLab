@@ -55,6 +55,8 @@ _STT_MODELS = [
     "gpt-realtime-whisper",
     "gpt-4o-transcribe",
     "gpt-4o-mini-transcribe",
+    # "whisper-turbo",  # local faster-whisper — GPU only. On CPU: stt_ms ≈ 9.7s and the
+    # 3.2GB-per-bot model OOMs the dev Docker VM (Experiment 5). Uncomment on a GPU host.
 ]
 
 _LLM_MODELS = [
@@ -221,12 +223,14 @@ async def _run_sample(room_name: str) -> Optional[dict]:
     timing = meta.get("timing", {})
     e2e = meta.get("latency_ms")
     llm = timing.get("llm_ttft_ms")
-    # New format: sentence_agg_ms + tts_ttfb_ms (from Pipecat MetricsFrame)
-    # Old format: tts_first_ms (manual llm_first → tts_audio, kept for backward compat)
     tts_ttfb = timing.get("tts_ttfb_ms")
     sentence_agg = timing.get("sentence_agg_ms") or 0
     tts = (tts_ttfb + sentence_agg) if tts_ttfb is not None else timing.get("tts_first_ms")
-    stt = round(e2e - llm - tts, 1) if (e2e and llm and tts) else None
+    # stt_ms is now a direct measurement (last audio frame → transcript committed),
+    # not a derived residual. Falls back to None if the new instrumentation isn't
+    # present (e.g. old runs in benchmark_results.json).
+    stt = timing.get("stt_ms")
+    total_latency = meta.get("total_latency_ms")
     return {
         "stt_ms": stt,
         "llm_ttft_ms": llm,
@@ -234,6 +238,7 @@ async def _run_sample(room_name: str) -> Optional[dict]:
         "sentence_agg_ms": timing.get("sentence_agg_ms"),
         "tts_ttfb_ms": timing.get("tts_ttfb_ms"),
         "e2e_ms": e2e,
+        "total_latency_ms": total_latency,
     }
 
 
@@ -297,7 +302,7 @@ def _pct(vals: list[float], p: float) -> float:
 
 
 def _aggregate(samples: list[dict]) -> dict:
-    keys = ["stt_ms", "llm_ttft_ms", "sentence_agg_ms", "tts_ttfb_ms", "tts_first_ms", "e2e_ms"]
+    keys = ["stt_ms", "llm_ttft_ms", "sentence_agg_ms", "tts_ttfb_ms", "tts_first_ms", "e2e_ms", "total_latency_ms"]
     out: dict = {}
     for k in keys:
         # Discard negative/zero values — artifact of timing races between turns
@@ -321,12 +326,13 @@ def _print_config_summary(record: dict) -> None:
     n_req = record["n_requested"]
     print(f"\n  Summary ({n_ok}/{n_req} samples):")
     stages = [
-        ("stt_ms",        "STT (derived)"),
-        ("llm_ttft_ms",   "LLM TTFB"),
-        ("sentence_agg_ms","Sentence agg"),
-        ("tts_ttfb_ms",   "TTS TTFB"),
-        ("tts_first_ms",  "TTS total"),
-        ("e2e_ms",        "E2E"),
+        ("stt_ms",           "STT"),
+        ("llm_ttft_ms",      "LLM TTFB"),
+        ("sentence_agg_ms",  "Sentence agg"),
+        ("tts_ttfb_ms",      "TTS TTFB"),
+        ("tts_first_ms",     "TTS total"),
+        ("e2e_ms",           "Post-STT E2E"),
+        ("total_latency_ms", "Total (stt+e2e)"),
     ]
     for key, label in stages:
         v = m.get(key)
@@ -365,15 +371,18 @@ def print_report(results: Optional[list[dict]] = None, top_n: int = 0) -> None:
         print("No benchmark results found. Run: make benchmark-full")
         return
 
-    keys = ["stt_ms", "llm_ttft_ms", "tts_first_ms", "e2e_ms"]
-    labels = {"stt_ms": "STT", "llm_ttft_ms": "LLM TTFT", "tts_first_ms": "TTS first", "e2e_ms": "E2E"}
+    keys = ["stt_ms", "llm_ttft_ms", "tts_first_ms", "e2e_ms", "total_latency_ms"]
+    labels = {"stt_ms": "STT", "llm_ttft_ms": "LLM TTFT", "tts_first_ms": "TTS first", "e2e_ms": "Post-STT E2E", "total_latency_ms": "Total"}
 
-    # Sort by E2E P50 ascending; configs with no data (timeout) go last
-    def _e2e_p50(r: dict) -> float:
-        m = r["metrics"].get("e2e_ms")
-        return m["p50"] if m else float("inf")
+    # Sort by total_latency_ms P50 (stt + post-stt e2e) when available, else e2e_ms
+    def _sort_key(r: dict) -> float:
+        total = r["metrics"].get("total_latency_ms")
+        if total:
+            return total["p50"]
+        e2e = r["metrics"].get("e2e_ms")
+        return e2e["p50"] if e2e else float("inf")
 
-    sorted_results = sorted(results, key=_e2e_p50)
+    sorted_results = sorted(results, key=_sort_key)
     if top_n:
         display = sorted_results[:top_n]
     else:
@@ -428,10 +437,16 @@ def print_report(results: Optional[list[dict]] = None, top_n: int = 0) -> None:
     print(f"{'─'*total_w}")
     print("* = best P50 for that stage  |  (ok/total) = samples collected\n")
 
-    # Top 5 by E2E P50
-    top5 = [(r["metrics"]["e2e_ms"]["p50"], r["label"]) for r in sorted_results if r["metrics"].get("e2e_ms")]
+    # Top 5 by total latency (stt + post-stt e2e) when available, else post-stt e2e
+    def _top5_val(r: dict) -> tuple:
+        total = r["metrics"].get("total_latency_ms")
+        if total:
+            return (total["p50"], r["label"])
+        e2e = r["metrics"].get("e2e_ms")
+        return (e2e["p50"], r["label"]) if e2e else None
+    top5 = [v for r in sorted_results if (v := _top5_val(r))]
     if top5:
-        print("── Top 5 by E2E P50 ──────────────────────────────────────────────────────")
+        print("── Top 5 by Total Latency P50 (stt + post-stt e2e) ──────────────────────")
         for rank, (p50, lbl) in enumerate(top5[:5], 1):
             print(f"  #{rank}  {p50:>6.0f}ms  {lbl}")
         print()

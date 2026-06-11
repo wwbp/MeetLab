@@ -57,13 +57,53 @@ ElevenLabs (TTS), 10 samples.
 What this says: STT and the LLM each cost ~0.4s and together are ~80% of the total.
 TTS is cheap. If we want to get under a second reliably, those two are the targets.
 
-Things we have already ruled out (details in the experiment log): running speech
-recognition locally instead of in the cloud — ~25× slower on our current hardware
-(Experiment 5) — and shortening the end-of-speech wait setting, which measurably
-changed nothing (Experiment 2 addendum).
+Things we have already ruled out (details in the experiment log): running *Whisper*
+speech recognition on CPU — ~25× slower than the vendor (Experiment 5) — and
+shortening Deepgram's end-of-speech wait setting, which measurably changed nothing
+(Experiment 2 addendum).
 
 The full experiment history (what we tried, what worked, what didn't) lives in
 [latency-experiments.md](latency-experiments.md).
+
+## Self-hosted speech recognition (Parakeet) — available since 2026-06-11
+
+We can run speech recognition on our own server instead of sending audio to Deepgram.
+It uses NVIDIA's open-source **Parakeet-TDT 0.6B v2** model, served by a small web
+service (`stt-nemotron`) that runs on CPU on dev laptops and on a GPU server in AWS.
+
+**Measured in production** (10 live conversations per row, same prompt, same hour):
+
+| STT configuration | Typical (P50) | Slow cases (P95) | Transcripts |
+|---|---|---|---|
+| Deepgram nova-3 (default) | 375ms | 488ms | word-perfect |
+| Parakeet on our GPU, 200ms pause | 358ms | 486ms | word-perfect |
+| Parakeet on our GPU, 100ms pause | **334ms** | 483ms | word-perfect |
+
+Key facts:
+
+- The model itself transcribes in under 0.1s on the GPU; most of the remaining time
+  is the deliberate "are you done talking?" pause plus network travel. Unlike
+  Deepgram's, **our pause length is tunable** (`stt_endpointing_ms`).
+- The P95 numbers are nearly identical everywhere — those slow cases come from
+  audio delivery over the internet, not from either recognizer.
+- One GPU server (AWS g4dn.xlarge, ~$0.53/hour) handled 8 simultaneous
+  conversations at 15% load. It is not free: ~$380/month if left on 24/7, so it
+  runs only when needed. Deepgram remains the default.
+
+**How to use it (new team members start here):**
+
+1. *Switch any room*: Console (`/desk` on the meet host) → Config → pick
+   `parakeet-tdt-0.6b-v2 (self-hosted GPU)` as the STT model for that room's scope.
+   Or via API: `PUT /config {"scope": "<room>", "stt_model": "parakeet-tdt-0.6b-v2"}`.
+2. *Locally*: `make start` brings up the `stt-nemotron` container automatically
+   (first start downloads a 2.4GB model). Benchmark it:
+   `make benchmark-full BENCHMARK_SAMPLES=10 BENCHMARK_CONFIGS="parakeet-tdt-0.6b-v2 / gpt-5.4-nano / elevenlabs [sentence]"`
+3. *In production*: the GPU server must be running (EC2 `meetlab-stt-gpu`,
+   private address set via `NEMOTRON_STT_URL` on the agent-runner environment).
+   If a parakeet room's bot joins but never responds, that server is the first
+   thing to check.
+
+Full detail, decisions, and dead ends: [experiment-6-gpu-stt.md](experiment-6-gpu-stt.md).
 
 ## Running the tests
 

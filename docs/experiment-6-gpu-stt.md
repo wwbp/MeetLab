@@ -124,6 +124,57 @@ concurrency and longer utterances, plus tighter tails — and removes the CPU-co
 risk under multi-bot load. The remaining open questions for AWS are concurrency and
 quality-at-scale (Stages 3–4), not raw latency.
 
+### Prod dark-launch results (2026-06-11, T4 sidecar in vivaprox VPC)
+
+Setup: g4dn.xlarge (`i-0f045aa6c337b55ab`, private 10.0.5.115, SG allows :8000 from EB
+only), upstream GPU image (fp16). Prod EB env got `NEMOTRON_STT_URL`; bench rooms
+flipped per-room via /config; default stayed nova-3 throughout.
+
+**Raw sidecar (curl on-box):** 1.7s utterance **96ms**, 8s utterance **115ms**, both
+word-perfect. Concurrency (single T4, serialized decoding): 4-way p50 290ms,
+8-way 475ms, 16-way 842ms — GPU at 15% util / 1.5GB VRAM, so the ceiling is the
+server's serialization, not hardware.
+
+**In prod pipeline (10 sessions each, via Grafana `stt_model` split):**
+
+| stt_ms | nova-3 | parakeet T4 (ep=200) |
+|---|---|---|
+| P50 | 375ms | **358ms** |
+| P95 | 488ms | 486ms |
+
+Near-tie — and the decomposition says why: in the real WebRTC path both stacks are
+**endpointing-dominated** (~200ms silence wait each; parakeet then pays ~100ms GPU+VPC
+vs Deepgram's ~175ms finalize). The local 134ms number benefited from anchor overlap
+with the audio tail; prod streaming cadence doesn't give that gift.
+
+**The actual lever: our VAD wait is tunable, Deepgram's isn't** (Experiment 2 addendum
+proved their knob is a no-op). Matrix now generates `[ep=100]` variants for
+whisper-/parakeet- chains too.
+
+**ep=100 prod result (10 sessions):** stt_ms **334ms P50 / 483ms P95** — transcripts
+still word-perfect. Full prod ladder:
+
+| Prod stt_ms | P50 | P95 |
+|---|---|---|
+| Deepgram nova-3 | 375ms | 488ms |
+| Parakeet T4, ep=200 | 358ms | 486ms |
+| **Parakeet T4, ep=100** | **334ms** | 483ms |
+
+**Honest read:** the prod win is ~40ms P50 (~11%), not the ~100ms the decomposition
+predicted — halving the VAD wait only bought 24ms, which means the residual lives in
+WebRTC audio delivery (jitter buffer, packet cadence) and VAD detection mechanics that
+neither provider can dodge. P95 is delivery-bound and identical everywhere.
+
+**What GPU self-hosting actually buys, measured:** (a) ~40ms P50 today with a knob we
+control and room to push (ep=50, SmartTurn-style early commit); (b) freedom from the
+vendor latency floor and per-minute STT pricing; (c) word-perfect punctuated transcripts
+on par with nova-3 (formal WER pass still open, Stage 3); (d) the P95 problem is now
+OURS to fix (delivery/VAD) instead of opaque vendor behavior.
+
+**Cost reality:** T4 24/7 ≈ $380/mo on-demand vs Deepgram per-minute at research-scale
+usage — for current volume Deepgram is likely cheaper; the flip-switch (`stt_model`
+per-room) means we can run either at any time. Decision recorded in the log below.
+
 ## Stage 3 — Quality at speed (~$2–4, ~half day)
 
 "Beats Deepgram" must hold at equal accuracy, measured two ways:

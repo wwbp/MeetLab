@@ -75,18 +75,22 @@ _TTS_OPTIONS = [
     {"tts_provider": "openai", "tts_voice": "alloy", "tts_aggregation_mode": "sentence"},
 ]
 
-# Deepgram endpointing variants. Only applied to nova-3-* STT models; OpenAI STT
-# ignores this field. 200=default, 100=lower latency (Experiment 2).
+# Endpointing variants. Deepgram: server-side endpointing (measured no-op,
+# Experiment 2 addendum). whisper-/parakeet- chains: local Silero VAD stop_secs —
+# genuinely tunable (Experiment 6). OpenAI STT ignores this field.
 _DEEPGRAM_ENDPOINTING_OPTIONS = [200, 100]
 
+# Models whose configs honor stt_endpointing_ms (get ep variants in the matrix)
+_EP_TUNABLE_PREFIXES = ("nova-", "whisper-", "parakeet-")
+
 def _endpointing_for_stt(stt_model: str, ep: int) -> dict:
-    """Only include stt_endpointing_ms for Deepgram models."""
-    if stt_model.startswith("nova-"):
+    """Include stt_endpointing_ms for models that honor it."""
+    if stt_model.startswith(_EP_TUNABLE_PREFIXES):
         return {"stt_endpointing_ms": ep}
     return {"stt_endpointing_ms": 200}  # no-op for OpenAI STT
 
 def _ep_label(stt_model: str, ep: int) -> str:
-    if stt_model.startswith("nova-") and ep != 200:
+    if stt_model.startswith(_EP_TUNABLE_PREFIXES) and ep != 200:
         return f"[ep={ep}]"
     return ""
 
@@ -109,8 +113,8 @@ CONFIG_MATRIX = [
         _DEEPGRAM_ENDPOINTING_OPTIONS,
     )
     # Deduplicate: OpenAI STT doesn't use endpointing, so ep=200 and ep=100 produce
-    # the same config. Keep only ep=200 for non-Deepgram models.
-    if stt.startswith("nova-") or ep == 200
+    # the same config. Keep ep variants only for models that honor the knob.
+    if stt.startswith(_EP_TUNABLE_PREFIXES) or ep == 200
 ]
 
 

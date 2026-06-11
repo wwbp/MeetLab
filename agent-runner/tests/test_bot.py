@@ -178,6 +178,47 @@ class TestBuildSttWhisperChain(unittest.TestCase):
         self.assertAlmostEqual(head._vad_controller._vad_analyzer.params.stop_secs, 0.1)
 
 
+class TestBuildSttParakeetChain(unittest.TestCase):
+    """parakeet-* models build a VADProcessor → NemotronHTTPSTTService chain.
+
+    Same segmented-chain shape as the whisper path; the tail POSTs each VAD-cut
+    segment (WAV bytes) to the stt-nemotron sidecar's /transcribe endpoint.
+    Experiment log: docs/experiment-6-gpu-stt.md
+    """
+
+    def test_parakeet_returns_vad_to_http_chain(self):
+        from nemotron_stt import NemotronHTTPSTTService
+        cfg = _FakeBotConfig(stt_model="parakeet-tdt-0.6b-v2")
+        head, tail = _build_stt(cfg, "openai-key", None)  # no Deepgram key needed
+        self.assertIsInstance(head, VADProcessor)
+        self.assertIsInstance(tail, NemotronHTTPSTTService)
+
+    def test_parakeet_multi_speaker_chain_is_linked(self):
+        from nemotron_stt import NemotronHTTPSTTService
+        cfg = _FakeBotConfig(stt_model="parakeet-tdt-0.6b-v2")
+        head, tail = _build_stt_for_multi_speaker(cfg, "openai-key", None)
+        self.assertIsInstance(head, VADProcessor)
+        self.assertIsInstance(tail, NemotronHTTPSTTService)
+        self.assertIs(head._next, tail)
+
+    def test_parakeet_url_from_env(self):
+        from nemotron_stt import NemotronHTTPSTTService
+        cfg = _FakeBotConfig(stt_model="parakeet-tdt-0.6b-v2")
+        with patch.dict(os.environ, {"NEMOTRON_STT_URL": "http://elsewhere:9000/"}):
+            _, tail = _build_stt(cfg, "openai-key", None)
+        self.assertEqual(tail.base_url, "http://elsewhere:9000")
+
+    def test_parakeet_endpointing_respects_config(self):
+        cfg = _FakeBotConfig(stt_model="parakeet-tdt-0.6b-v2", stt_endpointing_ms=100)
+        head, _ = _build_stt(cfg, "openai-key", None)
+        self.assertAlmostEqual(head._vad_controller._vad_analyzer.params.stop_secs, 0.1)
+
+    def test_parakeet_model_name_recorded(self):
+        cfg = _FakeBotConfig(stt_model="parakeet-tdt-0.6b-v2")
+        _, tail = _build_stt(cfg, "openai-key", None)
+        self.assertEqual(tail.model_name, "parakeet-tdt-0.6b-v2")
+
+
 class TestOnUserTurnStoppedGuards(unittest.TestCase):
     """Guard conditions for on_user_turn_stopped mirror the bot handler logic.
 

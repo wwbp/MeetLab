@@ -133,6 +133,10 @@ for prod TURN negotiation. Locally the full sentence transcribes.
 
 ## Phase 5 — Experiment 6: GPU-enabled local STT vs Deepgram (planned)
 
+> **Superseded by the stage-gated plan in `docs/experiment-6-gpu-stt.md`** — that doc
+> is the live collaboration surface for this experiment. The notes below are the
+> original sketch, kept for context.
+
 **Goal:** beat Deepgram's `stt_ms` floor of ~395ms P50 (its endpointing knob is a
 measured no-op — Experiment 2 addendum) with GPU faster-whisper, where our local
 Silero VAD wait *is* tunable.

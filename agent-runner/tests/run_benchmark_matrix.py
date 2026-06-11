@@ -57,6 +57,8 @@ _STT_MODELS = [
     "gpt-4o-mini-transcribe",
     # "whisper-turbo",  # local faster-whisper — GPU only. On CPU: stt_ms ≈ 9.7s and the
     # 3.2GB-per-bot model OOMs the dev Docker VM (Experiment 5). Uncomment on a GPU host.
+    # stt-nemotron sidecar (Parakeet-TDT 0.6B, NeMo) — CPU locally, GPU in cloud (Experiment 6)
+    "parakeet-tdt-0.6b-v2",
 ]
 
 _LLM_MODELS = [
@@ -114,10 +116,17 @@ CONFIG_MATRIX = [
 
 # ── HTTP helpers ──────────────────────────────────────────────────────────────
 
+# Required when the target runner enforces auth (production). Local dev compose
+# overrides BOT_RUNNER_SECRET to "" so the header is omitted there.
+BOT_RUNNER_SECRET = os.getenv("BOT_RUNNER_SECRET", "")
+
+
 def _request(method: str, path: str, body: Optional[dict] = None) -> dict:
     url = f"{RUNNER_URL}{path}"
     data = json.dumps(body).encode() if body else None
     headers = {"Content-Type": "application/json"} if body else {}
+    if BOT_RUNNER_SECRET:
+        headers["Authorization"] = f"Bearer {BOT_RUNNER_SECRET}"
     req = urllib.request.Request(url, data=data, method=method, headers=headers)
     with urllib.request.urlopen(req, timeout=10) as resp:
         return json.loads(resp.read())

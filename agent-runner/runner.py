@@ -225,6 +225,7 @@ _STT_MODEL_CHOICES = [
     ("whisper-turbo", "whisper-turbo (local faster-whisper, CPU)"),
     ("whisper-base", "whisper-base (local faster-whisper, CPU)"),
     ("whisper-small", "whisper-small (local faster-whisper, CPU)"),
+    ("parakeet-tdt-0.6b-v2", "parakeet-tdt-0.6b-v2 (stt-nemotron sidecar)"),
 ]
 
 
@@ -531,6 +532,8 @@ async def update_config(request: Request, _=Depends(verify_api_key)):
             "nova-3-general", "gpt-realtime-whisper", "gpt-4o-transcribe", "gpt-4o-mini-transcribe",
             # local faster-whisper (whisper-<model_size>); CPU-only — see Experiment 5
             "whisper-turbo", "whisper-base", "whisper-small",
+            # stt-nemotron sidecar (Parakeet-TDT) — see Experiment 6
+            "parakeet-tdt-0.6b-v2",
         }
         if body["stt_model"] not in _valid_stt:
             return JSONResponse({"error": f"stt_model must be one of: {', '.join(sorted(_valid_stt))}"}, status_code=400)

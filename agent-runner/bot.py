@@ -101,6 +101,22 @@ class _OpenAIRealtimeSTT(OpenAIRealtimeSTTService):
         })
 
 
+def _build_vad_processor(bot_config):
+    """Per-participant Silero VADProcessor for segmented STT chains.
+
+    stop_secs mirrors Deepgram's endpointing_ms so stt_ms numbers stay
+    comparable across providers.
+    """
+    from pipecat.audio.vad.silero import SileroVADAnalyzer
+    from pipecat.audio.vad.vad_analyzer import VADParams
+    from pipecat.processors.audio.vad_processor import VADProcessor
+
+    endpointing_ms = getattr(bot_config, "stt_endpointing_ms", 200) or 200
+    return VADProcessor(
+        vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=endpointing_ms / 1000))
+    )
+
+
 def _build_whisper_chain(bot_config):
     """Local Whisper STT chain: (VADProcessor, WhisperSTTService) head/tail pair.
 
@@ -108,23 +124,31 @@ def _build_whisper_chain(bot_config):
     between VADUserStarted/StoppedSpeakingFrames and emits nothing without them.
     MultiSpeakerSTT routes raw per-participant audio straight into each STT
     (the transport's VAD never sees that path), so the chain carries its own
-    VADProcessor. stop_secs mirrors Deepgram's endpointing_ms so stt_ms numbers
-    stay comparable across providers.
+    VADProcessor.
 
     Note: WhisperSTTService.__init__ loads the model eagerly (downloads on first
     use) — the first participant's chain creation blocks until the model is warm.
     """
-    from pipecat.audio.vad.silero import SileroVADAnalyzer
-    from pipecat.audio.vad.vad_analyzer import VADParams
-    from pipecat.processors.audio.vad_processor import VADProcessor
     from pipecat.services.whisper.stt import WhisperSTTService
 
     model_name = bot_config.stt_model[len("whisper-"):]
-    endpointing_ms = getattr(bot_config, "stt_endpointing_ms", 200) or 200
-    vad = VADProcessor(
-        vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=endpointing_ms / 1000))
-    )
+    vad = _build_vad_processor(bot_config)
     stt = WhisperSTTService(settings=WhisperSTTService.Settings(model=model_name))
+    vad.link(stt)
+    return (vad, stt)
+
+
+def _build_parakeet_chain(bot_config):
+    """Parakeet/Nemotron sidecar chain: (VADProcessor, NemotronHTTPSTTService).
+
+    Same segmented shape as the whisper chain; the tail POSTs each segment to the
+    stt-nemotron service (CPU locally, GPU in cloud — same HTTP API).
+    Experiment log: docs/experiment-6-gpu-stt.md
+    """
+    from nemotron_stt import NemotronHTTPSTTService, nemotron_stt_url
+
+    vad = _build_vad_processor(bot_config)
+    stt = NemotronHTTPSTTService(base_url=nemotron_stt_url(), model=bot_config.stt_model)
     vad.link(stt)
     return (vad, stt)
 
@@ -148,6 +172,8 @@ def _build_stt(bot_config, openai_api_key: str, deepgram_api_key: str | None):
         )
     if bot_config.stt_model.startswith("whisper-"):
         return _build_whisper_chain(bot_config)
+    if bot_config.stt_model.startswith("parakeet-"):
+        return _build_parakeet_chain(bot_config)
     # Deepgram path — disable server endpointing so local Silero VAD drives commits
     if not deepgram_api_key:
         raise ValueError("DEEPGRAM_API_KEY is required for Deepgram STT models")
@@ -677,6 +703,8 @@ def _build_stt_for_multi_speaker(bot_config, openai_api_key: str, deepgram_api_k
         )
     if bot_config.stt_model.startswith("whisper-"):
         return _build_whisper_chain(bot_config)
+    if bot_config.stt_model.startswith("parakeet-"):
+        return _build_parakeet_chain(bot_config)
     if not deepgram_api_key:
         raise ValueError("DEEPGRAM_API_KEY is required for Deepgram STT models")
     endpointing_ms = getattr(bot_config, "stt_endpointing_ms", 200)

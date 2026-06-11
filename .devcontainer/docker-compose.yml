@@ -12,7 +12,9 @@ services:
       POSTGRES_PASSWORD: meetlab
       POSTGRES_DB: meetlab
     ports:
-      - "5432:5432"
+      # host 5433 to avoid clashing with other local postgres containers;
+      # in-cluster connections still use postgres:5432
+      - "5433:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
@@ -65,6 +67,26 @@ services:
     environment:
       - COLLECTOR_OTLP_ENABLED=true
 
+  # Local Parakeet/Nemotron STT (Experiment 6) — CPU here, same HTTP API as the
+  # GPU build on AWS. Selected per-room via stt_model="parakeet-tdt-0.6b-v2".
+  # Model (~2.4GB) downloads into the volume on first start.
+  stt-nemotron:
+    build:
+      context: ../stt-nemotron
+    environment:
+      - DEVICE=cpu
+      - MODEL_PRECISION=fp32
+    ports:
+      - "8011:8000"
+    volumes:
+      - nemotron-models:/models
+    healthcheck:
+      test: ["CMD-SHELL", "python3 -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/healthz')\""]
+      interval: 10s
+      timeout: 5s
+      retries: 90
+      start_period: 30s
+
   agent-runner:
     build:
       context: ../agent-runner
@@ -75,6 +97,7 @@ services:
     environment:
       - DATABASE_URL=postgresql+asyncpg://meetlab:meetlab@postgres:5432/meetlab
       - BOT_RUNNER_SECRET=${BOT_RUNNER_SECRET:-}
+      - NEMOTRON_STT_URL=http://stt-nemotron:8000
     volumes:
       - ../agent-runner:/app:cached
       - agent-runner-venv:/app/.venv
@@ -120,3 +143,4 @@ volumes:
   agent-runner-venv:
   meet-node-modules:
   postgres-data:
+  nemotron-models:

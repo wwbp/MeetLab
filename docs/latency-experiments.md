@@ -30,7 +30,7 @@ Run commands are in `Makefile`; always use `BENCHMARK_SAMPLES=10` for meaningful
 
 ## Baseline — May 27, 2026
 
-Full 40-config sweep, 3 samples each. See full report at `docs/benchmark-report-2026-05-27.md`.
+Full 40-config sweep, 3 samples each. Raw data: `agent-runner/tests/fixtures/benchmark_results_archive_20260527_103106.json`.
 
 **Best config:** `nova-3-general + gpt-5.4-nano + elevenlabs`
 
@@ -298,62 +298,33 @@ at 200ms (lower values still raise the false-termination risk for no measured ga
 
 ---
 
-## Production Grafana setup
+## Production observability (current, 2026-06-11)
 
-### Metrics endpoint
+Metrics are pushed via OTLP (no Prometheus scraping — the old scrape setup was removed
+in PR #35). Prod agent-runner env: `ENABLE_TRACING=true`,
+`OTEL_EXPORTER_OTLP_ENDPOINT=https://otlp-gateway-prod-us-east-3.grafana.net/otlp`,
+`OTEL_SERVICE_NAME=meetlan-otel` (typo is live in labels — don't "fix" casually).
 
-`GET /metrics` on the agent-runner (port 7860) returns Prometheus-format text.
-Metrics emitted per utterance:
+Grafana Cloud stack: org `sabhay`, web UI https://sabhay.grafana.net, Prometheus read
+endpoint `prometheus-prod-66-prod-us-east-3.grafana.net` (instance 3238458). Query from
+the CLI with `scripts/grafana-prom.sh` (needs a `metrics:read` access-policy token in
+`~/.config/meetlab/grafana-read-token`; the token in `.env.runner` is OTLP write-only).
 
-| Metric | Labels | What it measures |
-|---|---|---|
-| `meetlab_e2e_latency_ms` | `stt_model`, `endpointing_ms` | transcript commit → first TTS audio (ms) |
-| `meetlab_llm_ttft_ms` | `llm_model` | LLM API request → first token (ms) |
-| `meetlab_sentence_agg_ms` | `tts_provider` | first LLM token → first sentence sent to TTS (ms) |
-| `meetlab_tts_ttfb_ms` | `tts_provider` | text sent to TTS API → first audio chunk (ms) |
-| `meetlab_utterances_total` | `stt_model` | total bot utterances (counter) |
+Metric names get a `_milliseconds` unit suffix in storage:
+`meetlab_stt_latency_ms_milliseconds_bucket`, `meetlab_e2e_latency_ms_milliseconds_bucket`,
+`meetlab_llm_ttft_ms_milliseconds_bucket`, `meetlab_tts_ttfb_ms_milliseconds_bucket`,
+`meetlab_utterances_total`. Useful labels: `stt_model`, `endpointing_ms`.
 
-Verify locally:
 ```bash
-curl http://localhost:7860/metrics | grep meetlab_
+# stt_ms P50 by model over the last 30 minutes
+scripts/grafana-prom.sh 'histogram_quantile(0.5,
+  sum by (stt_model, le) (rate(meetlab_stt_latency_ms_milliseconds_bucket[30m])))'
 ```
 
-### Prometheus scrape config
-
-Add to your `prometheus.yml` (or Grafana Cloud agent config):
-```yaml
-scrape_configs:
-  - job_name: meetlab-agent-runner
-    scrape_interval: 15s
-    static_configs:
-      - targets: ['<agent-runner-host>:7860']
-    metrics_path: /metrics
-```
-
-On AWS, `<agent-runner-host>` is the internal hostname or ECS task IP. If the agent-runner
-is behind a load balancer, scrape the task directly (not the ALB) to avoid duplicate counting.
-
-### Grafana dashboard queries (PromQL)
-
-```promql
-# E2E P50 by endpointing variant (Experiment 2)
-histogram_quantile(0.50,
-  rate(meetlab_e2e_latency_ms_bucket[5m])
-)
-
-# E2E P50 comparison: ep=200 vs ep=100
-histogram_quantile(0.50,
-  rate(meetlab_e2e_latency_ms_bucket{endpointing_ms="100"}[5m])
-)
-
-# LLM TTFT P50/P95 over time
-histogram_quantile(0.95,
-  rate(meetlab_llm_ttft_ms_bucket[5m])
-)
-
-# Utterances per minute (throughput)
-rate(meetlab_utterances_total[1m]) * 60
-```
+Pending ops (from the prod setup work, 2026-06-10): build the team dashboard + P95
+alert in Grafana; remove stale `GRAFANA_PROM_*` env vars from the EB environment
+(triggers a rolling restart — quiet window); move the OTLP write token out of the
+`.env.runner` comment block.
 
 ---
 
@@ -502,6 +473,78 @@ turbo transcribes 2s of audio in ~100-200ms and would plausibly beat Deepgram's 
 
 **Config:** `/config` accepts `whisper-turbo`, `whisper-base`, `whisper-small`
 (`runner.py` allowlist + admin UI choices).
+
+---
+
+## Experiment 6 — Self-hosted Parakeet STT (CPU + prod GPU) vs Deepgram
+
+**Status:** ✅ Stages 0–2 complete (2026-06-11) — **works, beats Deepgram modestly in prod;
+default unchanged pending accuracy study and cost call**
+
+**Hypothesis:** a self-hosted streaming-class STT can beat Deepgram nova-3's measured
+`stt_ms` floor (~375–395ms P50), which Experiment 2 proved un-tunable on their side.
+
+**Research basis (Stage 0):** Pipecat's official [stt-benchmark](https://github.com/pipecat-ai/stt-benchmark)
+(1000 samples, TTFS = our stt_ms) ranks NVIDIA Nemotron/Parakeet first at 221ms median /
+1.90% semantic WER, ahead of Deepgram nova-3 (247ms / 1.71%). Parakeet-TDT-0.6b-v2:
+Open ASR Leaderboard ~6.3% avg WER, RTFx ≈ 3300. Ruled out by cited evidence:
+streaming-whisper wrappers (LocalAgreement policy floor ≈ 1.9s even with infinite
+compute), Kyutai STT (fixed 500ms lookahead). ⚠ Research sweep's adversarial
+verification was rate-limited; numbers quoted from primary sources directly.
+
+**Setup:**
+- `stt-nemotron` sidecar: [Shadowfita/parakeet-tdt-0.6b-v2-fastapi](https://github.com/Shadowfita/parakeet-tdt-0.6b-v2-fastapi)
+  @ `31c5652` (GPL-3.0, cloned at image build — never vendored). Local compose service
+  = our CPU/arm64 Dockerfile (`stt-nemotron/Dockerfile`); prod = upstream's CUDA image
+  on EC2 g4dn.xlarge T4 (`meetlab-stt-gpu`, private 10.0.5.115 in the vivaprox VPC,
+  SG opens :8000 to the EB security group only). `NEMOTRON_STT_URL` on the EB env.
+- Bot side: `parakeet-*` stt_model prefix → (VADProcessor → `NemotronHTTPSTTService`)
+  per-participant chain (same mechanism as Experiment 5's whisper chain).
+  `should_chunk=false` per request — segments are already VAD-cut, and upstream's
+  chunking path crashes (their issue #16). `stt_endpointing_ms` drives Silero
+  `stop_secs` — genuinely effective, unlike Deepgram's knob.
+- Model download inside containers stalls (same as Exp 5) — host-download the 2.4GB
+  `.nemo` and install into the HF cache volume (blob name = sha256).
+
+**Results — local (laptop CPU, 10 samples, same-run control):**
+
+| | stt_ms P50/P95 | total P50/P95 |
+|---|---|---|
+| parakeet sidecar (CPU!) | **134 / 200ms** | **813 / 976ms** |
+| nova-3 control | 387 / 406ms | 951 / 1575ms |
+
+**Results — raw T4 (curl on-box):** 1.7s clip **96ms**, 8s clip **115ms**, word-perfect.
+Concurrency (serialized decoding, GPU at 15% util / 1.5GB VRAM): 4-way p50 290ms,
+8-way 475ms, 16-way 842ms — ceiling is the server, not the hardware.
+
+**Results — production (10 sessions/row, via Grafana `stt_model` split, same hour):**
+
+| Prod stt_ms | P50 | P95 |
+|---|---|---|
+| Deepgram nova-3 | 375ms | 488ms |
+| Parakeet T4, ep=200 | 358ms | 486ms |
+| **Parakeet T4, ep=100** | **334ms** | 483ms |
+
+Transcripts word-perfect (punctuated) in every run, both providers.
+
+**Analysis:** prod win is ~40ms P50 (~11%), far less than local — because in the real
+WebRTC path both stacks are **endpointing + delivery dominated**: halving the VAD wait
+(200→100ms) bought only 24ms, and P95 ≈ 485ms is identical everywhere (jitter
+buffer/packet cadence, not recognition). The local 134ms benefited from the stt_ms
+anchor overlapping the streamed audio tail. What self-hosting durably buys: a latency
+knob we own (ep<100, SmartTurn-style early commit now possible), no per-minute STT
+bill, audio stays in-house, and the P95 problem becomes ours to attack instead of
+vendor-opaque.
+
+**Decisions (2026-06-11):** default stays nova-3. Per-room flip switch shipped
+(console dropdown + `/config`). T4 runs only during demo/test windows (~$0.53/hr;
+$380/mo if 24/7 — likely above Deepgram per-minute at research volume). Demo rooms:
+`demo-fast-ears` (parakeet ep=100) vs `demo-classic-ears` (nova-3).
+
+**Open (Stages 3–4):** formal WER on a standard set (jiwer; candidate sets:
+LibriSpeech test-other / AMI); long-prompt false-termination test at ep=100; 30-min
+multi-bot soak; ep=50 probe; other OSS models (Canary, sherpa-onnx streaming
+zipformer) if the team wants a second candidate.
 
 ---
 

@@ -32,6 +32,7 @@ const STT_MODELS = [
   { value: 'gpt-realtime-whisper',   label: 'gpt-realtime-whisper (OpenAI)' },
   { value: 'gpt-4o-transcribe',      label: 'gpt-4o-transcribe (OpenAI)' },
   { value: 'gpt-4o-mini-transcribe', label: 'gpt-4o-mini-transcribe (OpenAI)' },
+  { value: 'parakeet-tdt-0.6b-v2',   label: 'parakeet-tdt-0.6b-v2 (self-hosted GPU)' },
 ];
 
 const LLM_MODELS = [

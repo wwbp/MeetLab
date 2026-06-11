@@ -103,7 +103,7 @@ Key facts:
    If a parakeet room's bot joins but never responds, that server is the first
    thing to check.
 
-Full detail, decisions, and dead ends: [experiment-6-gpu-stt.md](experiment-6-gpu-stt.md).
+Full detail, decisions, and dead ends: Experiment 6 in [latency-experiments.md](latency-experiments.md).
 
 ## Running the tests
 
@@ -134,12 +134,29 @@ Two dashboards, one for each environment:
 | Where | Tool | URL | What it shows |
 |-------|------|-----|---------------|
 | Local dev | Jaeger | http://localhost:16686 → service `meetlab-agent-runner` | A timeline ("trace") of every single conversation turn: how long the LLM and TTS steps took, token counts. Good for inspecting one slow turn in detail. |
-| Production | Grafana Cloud | (team Grafana, `meetlab-prod` stack) | Graphs over time of the same metrics across all real sessions: `meetlab.stt_latency_ms`, `meetlab.e2e_latency_ms`, `meetlab.llm_ttft_ms`, `meetlab.tts_ttfb_ms`, plus utterances per minute. Good for spotting trends and regressions. |
+| Production | Grafana Cloud | https://sabhay.grafana.net | Graphs over time of the same metrics across all real sessions: `meetlab_stt_latency_ms`, `meetlab_e2e_latency_ms`, `meetlab_llm_ttft_ms`, `meetlab_tts_ttfb_ms`, plus utterances per minute. Good for spotting trends and regressions. |
+
+Production metrics are also queryable from the terminal: `scripts/grafana-prom.sh`
+(setup instructions are in the script header; needs a one-time read token).
 
 Caveat worth knowing: the Jaeger timeline does **not** show the STT step (a measurement
 blind spot in the tracing library for our multi-speaker setup — see Experiment 3 in the
 experiment log). The STT number always comes from our own instrumentation, which both
 the benchmark and Grafana use.
+
+## Production reference
+
+| Thing | Where |
+|-------|-------|
+| App servers | AWS Elastic Beanstalk, app `vivaprox`: `agent-runner` + `meeting-client` (us-east-1, account 848180123498). Deploys automatically on merge to main. |
+| Prod logs | `aws logs tail /aws/elasticbeanstalk/agent-runner/var/log/eb-docker/containers/eb-current-app/stdouterr.log --since 15m --follow` |
+| Self-hosted STT server | EC2 `meetlab-stt-gpu` (T4 GPU, vivaprox VPC, private `10.0.5.115`); agent-runner finds it via the `NEMOTRON_STT_URL` environment setting. Run only when needed (~$0.53/hr). |
+| Metrics pipeline | agent-runner → OTLP push → Grafana Cloud (org `sabhay`). Stored metric names carry a `_milliseconds` suffix, e.g. `meetlab_stt_latency_ms_milliseconds_bucket`. |
+| Console / room config | `/desk` on the meet host (password) — per-room STT/LLM/TTS settings |
+
+Open ops tasks: team dashboard + P95 alert in Grafana; remove stale `GRAFANA_PROM_*`
+env vars from EB (rolling restart — quiet window); move the OTLP write token out of
+the `.env.runner` comment block.
 
 ## When to run what
 

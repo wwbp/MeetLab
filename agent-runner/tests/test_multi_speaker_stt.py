@@ -51,6 +51,10 @@ def _make_setup() -> FrameProcessorSetup:
     setup.task_manager = tm
     setup.clock = MagicMock()
     setup.clock.get_time.return_value = 0.0
+    # pipecat>=1.4.0 added a required ``pipeline_worker`` field on
+    # FrameProcessorSetup, read by FrameProcessor.setup(). The processors under
+    # test never dereference it, so a bare mock is sufficient.
+    setup.pipeline_worker = MagicMock()
     setup.observer = None
     return setup
 

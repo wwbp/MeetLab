@@ -101,6 +101,9 @@ services:
       # Bot JWT lifetime (min). Default 15; soak/longevity runs raise it so 20-min+
       # sessions don't drop on token expiry. `make soak` passes 30 here.
       - BOT_TOKEN_TTL_MINUTES=${BOT_TOKEN_TTL_MINUTES:-15}
+      # Zero-cost mock TTS for load/soak testing (no paid TTS calls). OFF by default —
+      # `make soak MOCK=1` turns it on. Never enable in production.
+      - BOT_MOCK_TTS=${BOT_MOCK_TTS:-0}
     volumes:
       - ../agent-runner:/app:cached
       - agent-runner-venv:/app/.venv

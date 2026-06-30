@@ -55,13 +55,18 @@ def request(method: str, path: str, body: dict | None = None) -> dict:
         return json.loads(resp.read())
 
 
-def set_config(scope: str, stt_model: str = "", endpointing_ms: str = "") -> dict:
-    """Apply per-room STT_MODEL / ENDPOINTING_MS overrides before the bot starts."""
+def set_config(scope: str, stt_model: str = "", endpointing_ms: str = "",
+               llm_model: str = "", tts_provider: str = "") -> dict:
+    """Apply per-room overrides before the bot starts (STT, endpointing, LLM, TTS)."""
     fields: dict = {"scope": scope}
     if stt_model:
         fields["stt_model"] = stt_model
     if endpointing_ms:
         fields["stt_endpointing_ms"] = int(endpointing_ms)
+    if llm_model:
+        fields["llm_model"] = llm_model
+    if tts_provider:
+        fields["tts_provider"] = tts_provider
     if len(fields) > 1:
         request("PUT", "/config", fields)
     return fields

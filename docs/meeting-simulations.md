@@ -121,9 +121,20 @@ the two users in a room staggered so turns mostly alternate (they overlap freely
 intentionally stresses the multi-speaker STT). All rooms run concurrently. `make soak` raises
 the bot token TTL to 30 min so sessions outlive the 15-min default.
 
-**Knobs:** `ROOMS=10`, `USERS_PER_ROOM=2`, `DURATION_MIN=20`, `SOAK_MODE=stress`, `STT_MODEL`,
-`ENDPOINTING_MS`, `MIN_GAP=3`, `MAX_GAP=8`, `SETTLE_SECS=4`, `STAGGER=4`, `DROP_GAP_SECS=60`,
-`SOAK_RESULTS_PATH`.
+**Cost control.** A long multi-room run makes thousands of LLM + TTS calls, so the harness keeps
+costs low by default:
+- **TTS** (the dominant per-character cost) is **mocked** — `make soak` defaults to `MOCK=1`,
+  which emits synthetic silence instead of calling a TTS API. Set `MOCK=0` for real TTS.
+- **LLM** is pinned to the cheapest model (`gpt-5.4-nano`) via `LLM_MODEL`; override if needed.
+- **STT** is never mocked. The default Parakeet is self-hosted (free); `STT_MODEL=whisper-base`
+  is a free, no-download local option for quick runs.
+
+With `MOCK=1`, `stt_ms` is still **real** (STT runs unchanged) — only `total_ms` understates real
+response time. Start with a short `make soak-sanity` (real cheap models, pennies), then scale up.
+
+**Knobs:** `ROOMS=10`, `USERS_PER_ROOM=2`, `DURATION_MIN=20`, `SOAK_MODE=stress`, `MOCK=1`,
+`STT_MODEL`, `LLM_MODEL=gpt-5.4-nano`, `TTS_PROVIDER=openai`, `ENDPOINTING_MS`, `MIN_GAP=3`,
+`MAX_GAP=8`, `SETTLE_SECS=4`, `STAGGER=4`, `DROP_GAP_SECS=60`, `SOAK_RESULTS_PATH`.
 
 **Reading the report:** aggregate `stt_ms`/`total_ms` P50/P95 across every turn in every room,
 max queue depth, spike/self-echo counts, a per-room line (with `quiet_s` = how long the bot was

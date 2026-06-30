@@ -52,6 +52,11 @@ USERS_PER_ROOM = int(env("USERS_PER_ROOM", "2"))
 DURATION_MIN = float(env("DURATION_MIN", "20"))
 STT_MODEL = env("STT_MODEL", "")
 ENDPOINTING_MS = env("ENDPOINTING_MS", "")
+# Cost control: pin the cheapest LLM and the cheaper (OpenAI) TTS for soak runs so a
+# long multi-room run doesn't run up API bills. Override if you need a specific model.
+# STT defaults to the bot default (parakeet, self-hosted = no per-use cost).
+LLM_MODEL = env("LLM_MODEL", "gpt-5.4-nano")
+TTS_PROVIDER = env("TTS_PROVIDER", "openai")
 MIN_GAP = float(env("MIN_GAP", "3"))
 MAX_GAP = float(env("MAX_GAP", "8"))
 SETTLE_SECS = float(env("SETTLE_SECS", "4"))
@@ -100,7 +105,8 @@ async def _run_room(idx: int, run_id: str, speech, sr: int, deadline: float) -> 
                     "talk_end": None, "quiet_gap_s": None, "dropped_early": False}
     rooms: list[rtc.Room] = []
     try:
-        set_config(room_name, stt_model=STT_MODEL, endpointing_ms=ENDPOINTING_MS)
+        set_config(room_name, stt_model=STT_MODEL, endpointing_ms=ENDPOINTING_MS,
+                   llm_model=LLM_MODEL, tts_provider=TTS_PROVIDER)
         resp = request("POST", "/start", {"room_name": room_name})
         result["session_id"] = resp["session_id"]
 

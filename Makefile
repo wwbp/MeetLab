@@ -145,12 +145,20 @@ simulate:
 # sidecar is expected to saturate under ~20 concurrent streams — that's the stress test.
 # Point AGENT_RUNNER_URL/LIVEKIT_URL/NEMOTRON_STT_URL at prod for real latency numbers.
 # See docs/meeting-simulations.md.
+# MOCK=1 swaps in zero-cost synthetic TTS (no paid TTS calls — the dominant soak cost),
+# while the soak still exercises real STT-under-load, the bot-speaking window, and
+# session teardown. `make soak` defaults to MOCK=1; set MOCK=0 for real TTS.
+# The LLM is always pinned to the cheapest model (gpt-5.4-nano) by the harness, not
+# mocked. STT is never mocked: the default parakeet STT is self-hosted (free); for a
+# no-download free run use STT_MODEL=whisper-base.
 ROOMS ?= 10
 USERS_PER_ROOM ?= 2
 DURATION_MIN ?= 20
 SOAK_MODE ?= stress
+soak: MOCK ?= 1
 soak:
-	BOT_TOKEN_TTL_MINUTES=30 $(COMPOSE) up -d transport-server agent-runner stt-nemotron
+	BOT_TOKEN_TTL_MINUTES=30 BOT_MOCK_TTS=$(MOCK) \
+		$(COMPOSE) up -d transport-server agent-runner stt-nemotron
 	$(COMPOSE) exec -T agent-runner uv run alembic upgrade head
 	$(COMPOSE) exec -T agent-runner \
 		env SOAK_MODE=$(SOAK_MODE) ROOMS=$(ROOMS) USERS_PER_ROOM=$(USERS_PER_ROOM) DURATION_MIN=$(DURATION_MIN) \
@@ -158,10 +166,13 @@ soak:
 		uv run python tests/soak_meeting.py
 
 # Sanity check FIRST: a small, strict run — every room's bot must reply and every
-# session must finalize. Run this before scaling up to the full `make soak`.
-# Override knobs as you scale: make soak-sanity ROOMS=4 DURATION_MIN=5
+# session must finalize. Defaults to REAL (cheap) models so it validates the real
+# pipeline; cost is pennies at this size. Run before scaling up to the full `make soak`.
+# Override as you scale: make soak-sanity ROOMS=4 DURATION_SANITY=5 MOCK=1
+soak-sanity: MOCK ?= 0
 soak-sanity:
-	BOT_TOKEN_TTL_MINUTES=30 $(COMPOSE) up -d transport-server agent-runner stt-nemotron
+	BOT_TOKEN_TTL_MINUTES=30 BOT_MOCK_TTS=$(MOCK) \
+		$(COMPOSE) up -d transport-server agent-runner stt-nemotron
 	$(COMPOSE) exec -T agent-runner uv run alembic upgrade head
 	$(COMPOSE) exec -T agent-runner \
 		env SOAK_MODE=sanity ROOMS=$(or $(ROOMS_SANITY),2) USERS_PER_ROOM=2 \

@@ -347,13 +347,22 @@ async def bot(runner_args: LiveKitRunnerArguments):
     logger.info(
         f"STT: model={bot_config.stt_model} mode=per-participant delay={bot_config.stt_delay}"
     )
+    # Mock TTS (BOT_MOCK_TTS) swaps in zero-cost synthetic silence for load/soak
+    # testing — no paid TTS calls. OFF by default; never enable in production. The LLM
+    # is pinned to the cheapest model by the soak harness rather than mocked.
+    _mock_tts = os.getenv("BOT_MOCK_TTS", "").lower() in ("1", "true", "yes")
+
     llm = OpenAILLMService(api_key=openai_api_key, model=bot_config.llm_model)
     _tts_mode = (
         TextAggregationMode.TOKEN
         if bot_config.tts_aggregation_mode == "token"
         else TextAggregationMode.SENTENCE
     )
-    if bot_config.tts_provider == "openai":
+    if _mock_tts:
+        from mock_services import MockTTSService
+        logger.warning("BOT_MOCK_TTS enabled — synthetic silence, no TTS API calls")
+        tts = MockTTSService(text_aggregation_mode=_tts_mode)
+    elif bot_config.tts_provider == "openai":
         from pipecat.services.openai.tts import OpenAITTSService
         tts = OpenAITTSService(
             api_key=openai_api_key,

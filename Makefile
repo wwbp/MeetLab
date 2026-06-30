@@ -131,7 +131,7 @@ benchmark-full:
 # See docs/meeting-simulations.md.
 SCENARIO ?= noise
 simulate:
-	$(COMPOSE) up -d transport-server agent-runner stt-nemotron
+	$(COMPOSE) up -d --wait transport-server agent-runner stt-nemotron
 	$(COMPOSE) exec -T agent-runner uv run alembic upgrade head
 	$(COMPOSE) exec -T agent-runner \
 		env SCENARIO=$(SCENARIO) \
@@ -158,7 +158,7 @@ SOAK_MODE ?= stress
 soak: MOCK ?= 1
 soak:
 	BOT_TOKEN_TTL_MINUTES=30 BOT_MOCK_TTS=$(MOCK) \
-		$(COMPOSE) up -d transport-server agent-runner stt-nemotron
+		$(COMPOSE) up -d --wait transport-server agent-runner stt-nemotron
 	$(COMPOSE) exec -T agent-runner uv run alembic upgrade head
 	$(COMPOSE) exec -T agent-runner \
 		env SOAK_MODE=$(SOAK_MODE) ROOMS=$(ROOMS) USERS_PER_ROOM=$(USERS_PER_ROOM) DURATION_MIN=$(DURATION_MIN) \
@@ -172,7 +172,7 @@ soak:
 soak-sanity: MOCK ?= 0
 soak-sanity:
 	BOT_TOKEN_TTL_MINUTES=30 BOT_MOCK_TTS=$(MOCK) \
-		$(COMPOSE) up -d transport-server agent-runner stt-nemotron
+		$(COMPOSE) up -d --wait transport-server agent-runner stt-nemotron
 	$(COMPOSE) exec -T agent-runner uv run alembic upgrade head
 	$(COMPOSE) exec -T agent-runner \
 		env SOAK_MODE=sanity ROOMS=$(or $(ROOMS_SANITY),2) USERS_PER_ROOM=2 \

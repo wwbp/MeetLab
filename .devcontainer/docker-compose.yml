@@ -98,6 +98,9 @@ services:
       - DATABASE_URL=postgresql+asyncpg://meetlab:meetlab@postgres:5432/meetlab
       - BOT_RUNNER_SECRET=${BOT_RUNNER_SECRET:-}
       - NEMOTRON_STT_URL=http://stt-nemotron:8000
+      # Bot JWT lifetime (min). Default 15; soak/longevity runs raise it so 20-min+
+      # sessions don't drop on token expiry. `make soak` passes 30 here.
+      - BOT_TOKEN_TTL_MINUTES=${BOT_TOKEN_TTL_MINUTES:-15}
     volumes:
       - ../agent-runner:/app:cached
       - agent-runner-venv:/app/.venv

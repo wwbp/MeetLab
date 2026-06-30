@@ -11,7 +11,7 @@ BENCHMARK_WAV ?=
 
 MSG ?= migration
 
-.PHONY: up down start stop logs migrate migration test test-unit test-integration test-bot-longevity test-multi-speaker test-multi-speaker-audio setup-livekit-cloud revert-livekit-local test-livekit-tooling scan scan-agent-runner scan-meet benchmark benchmark-audio benchmark-audio-long benchmark-full benchmark-exp2 benchmark-report
+.PHONY: up down start stop logs migrate migration test test-unit test-integration test-bot-longevity test-multi-speaker test-multi-speaker-audio test-session-lifecycle setup-livekit-cloud revert-livekit-local test-livekit-tooling scan scan-agent-runner scan-meet benchmark benchmark-audio benchmark-audio-long benchmark-full benchmark-exp2 benchmark-report simulate soak
 
 up:
 	$(COMPOSE) up --build -d
@@ -58,6 +58,15 @@ test-multi-speaker-audio:
 	$(COMPOSE) exec -T agent-runner \
 		env RUN_MULTI_SPEAKER=1 RUN_MULTI_SPEAKER_AUDIO=1 \
 		uv run python -m unittest -v tests.test_multi_speaker_e2e.TestMultiSpeakerE2E.test_07_audio_two_speakers
+
+# Session-end / DB-consistency: cancellation-safe terminal write, stale-conversation
+# reconciler, and the end-to-end all-users-leave path. See Part E / docs.
+test-session-lifecycle:
+	$(COMPOSE) up -d transport-server agent-runner
+	$(COMPOSE) exec -T agent-runner uv run alembic upgrade head
+	$(COMPOSE) exec -T agent-runner \
+		env RUN_SESSION_LIFECYCLE_TEST=1 \
+		uv run python -m unittest -v tests.test_session_lifecycle
 
 test-bot-longevity:
 	$(COMPOSE) up -d transport-server agent-runner meet
@@ -115,6 +124,37 @@ benchmark-full:
 		BENCHMARK_CONFIGS="$(BENCHMARK_CONFIGS)" \
 		BENCHMARK_WAV="$(BENCHMARK_WAV)" \
 		uv run python tests/run_benchmark_matrix.py
+
+# Meeting simulation: reproduce STT/VAD failure modes locally and read the
+# diagnostics. SCENARIO=noise|noise-bed|overlap|inaudible|echo (default noise).
+# Knobs: SNR_DB, NOISE=pink|white|hum|hf, DURATION, SPEAKERS, STT_MODEL, ENDPOINTING_MS.
+# See docs/meeting-simulations.md.
+SCENARIO ?= noise
+simulate:
+	$(COMPOSE) up -d transport-server agent-runner stt-nemotron
+	$(COMPOSE) exec -T agent-runner uv run alembic upgrade head
+	$(COMPOSE) exec -T agent-runner \
+		env SCENARIO=$(SCENARIO) \
+		SNR_DB=$(SNR_DB) NOISE=$(NOISE) DURATION=$(DURATION) SPEAKERS=$(SPEAKERS) \
+		STT_MODEL=$(STT_MODEL) ENDPOINTING_MS=$(ENDPOINTING_MS) \
+		uv run python tests/simulate_meeting.py
+
+# Multi-room soak / load test: ROOMS rooms x USERS_PER_ROOM users x 1 bot conversing
+# for DURATION_MIN minutes, all concurrent. Reports aggregate latency, backlog, and a
+# DB-consistency verdict (every session must end terminal). The local CPU stt-nemotron
+# sidecar is expected to saturate under ~20 concurrent streams — that's the stress test.
+# Point AGENT_RUNNER_URL/LIVEKIT_URL/NEMOTRON_STT_URL at prod for real latency numbers.
+# See docs/meeting-simulations.md.
+ROOMS ?= 10
+USERS_PER_ROOM ?= 2
+DURATION_MIN ?= 20
+soak:
+	BOT_TOKEN_TTL_MINUTES=30 $(COMPOSE) up -d transport-server agent-runner stt-nemotron
+	$(COMPOSE) exec -T agent-runner uv run alembic upgrade head
+	$(COMPOSE) exec -T agent-runner \
+		env ROOMS=$(ROOMS) USERS_PER_ROOM=$(USERS_PER_ROOM) DURATION_MIN=$(DURATION_MIN) \
+		STT_MODEL=$(STT_MODEL) ENDPOINTING_MS=$(ENDPOINTING_MS) \
+		uv run python tests/soak_meeting.py
 
 benchmark-exp2:
 	$(COMPOSE) up -d transport-server agent-runner

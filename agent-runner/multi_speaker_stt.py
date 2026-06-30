@@ -170,6 +170,14 @@ class MultiSpeakerSTT(FrameProcessor):
         else:
             await self.push_frame(frame, direction)
 
+    def qsize(self) -> int:
+        """Current depth of the merged output queue.
+
+        Read by bot.py's spike logging to attribute extreme stt_ms to backlog
+        (a stalled per-participant STT lets frames pile up here unboundedly).
+        """
+        return self._output_queue.qsize()
+
     async def remove_participant(self, sid: str) -> None:
         """Tear down the STT instance for a participant who left the room."""
         stt = self._stts.pop(sid, None)
@@ -213,6 +221,13 @@ class MultiSpeakerSTT(FrameProcessor):
         while True:
             try:
                 frame = await self._output_queue.get()
+                # Sample backlog after dequeue so a stalled consumer shows up as
+                # a rising distribution in meetlab.stt_queue_depth.
+                try:
+                    import metrics as _prom
+                    _prom.stt_queue_depth.record(self._output_queue.qsize())
+                except Exception:
+                    pass
                 await self.push_frame(frame, FrameDirection.DOWNSTREAM)
             except asyncio.CancelledError:
                 break

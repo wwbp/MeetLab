@@ -478,8 +478,9 @@ turbo transcribes 2s of audio in ~100-200ms and would plausibly beat Deepgram's 
 
 ## Experiment 6 — Self-hosted Parakeet STT (CPU + prod GPU) vs Deepgram
 
-**Status:** ✅ Stages 0–2 complete (2026-06-11) — **works, beats Deepgram modestly in prod;
-default unchanged pending accuracy study and cost call**
+**Status:** ✅ Stages 0–3 complete (soak harness 2026-06-30) — **works, beats Deepgram
+modestly in prod; promoted to the default (+ep=100) on 2026-06-30. Accuracy study (Stage 4)
+still open.**
 
 **Hypothesis:** a self-hosted streaming-class STT can beat Deepgram nova-3's measured
 `stt_ms` floor (~375–395ms P50), which Experiment 2 proved un-tunable on their side.
@@ -541,10 +542,37 @@ vendor-opaque.
 $380/mo if 24/7 — likely above Deepgram per-minute at research volume). Demo rooms:
 `demo-fast-ears` (parakeet ep=100) vs `demo-classic-ears` (nova-3).
 
-**Open (Stages 3–4):** formal WER on a standard set (jiwer; candidate sets:
-LibriSpeech test-other / AMI); long-prompt false-termination test at ep=100; 30-min
-multi-bot soak; ep=50 probe; other OSS models (Canary, sherpa-onnx streaming
-zipformer) if the team wants a second candidate.
+**Decisions (2026-06-30):** **default promoted to `parakeet-tdt-0.6b-v2` + `ep=100`**
+(`BotConfig` defaults + migration `c7f1a2b3d4e5`; console UI; nova-3 stays a one-click
+opt-out). Implies the sidecar is now always-on — standing T4 cost decision, not per-demo.
+Two soak prerequisites shipped alongside: bot token TTL is now env-configurable
+(`BOT_TOKEN_TTL_MINUTES`, default 15) so 20-min+ sessions don't drop at expiry, and the
+session-end "status stuck on `running`" bug is fixed (cancellation-safe terminal write +
+a stale-conversation reconciler in agent-runner). See `make test-session-lifecycle`.
+
+**Stage 3 — multi-bot soak (✅ harness shipped 2026-06-30):** `make soak` drives
+**10 rooms × 2 users × 1 bot for 20 min**, all concurrent, and reports aggregate latency,
+backlog, and a DB-consistency verdict. Two modes: local CPU (a backlog/saturation stress
+test — ~20 concurrent streams overwhelm the single serialized sidecar by design) and prod
+T4 for real latency under load. See `docs/meeting-simulations.md`. _Results table: TBD once
+the prod run completes._
+
+**Addendum — `parakeet-unified-en-0.6b` (offline, 2026-06-30):** NVIDIA's
+[unified offline+streaming English model](https://huggingface.co/nvidia/parakeet-unified-en-0.6b)
+(April 2026; RNN-T cache-aware FastConformer, selectable streaming latency 2080→160ms) is now
+a selectable STT (console dropdown + `/config` + valid set). It shares the `parakeet-` prefix so
+it routes through the **existing offline sidecar chain** (VAD-cut → POST WAV → transcript) with no
+bot-side wiring change. Caveats: (1) the bot does **not** send the model name to the sidecar — the
+served model is whatever the `stt-nemotron` container loaded, so deploying this model is a
+server-side choice (the bot-side id selects the sidecar + tags metrics); (2) **offline mode does not
+deliver the ~160ms streaming latency** — that needs a true streaming STT service (continuous chunks +
+cache-aware streaming endpoint) replacing the VAD-segment design, tracked as the streaming follow-up.
+
+**Open (Stage 4):** formal WER on a standard set (jiwer; candidate sets:
+LibriSpeech test-other / AMI); long-prompt false-termination test at ep=100; ep=50 probe;
+if prod soak latency under ~20-way concurrency is unacceptable, evaluate NVIDIA NIM / a
+continuous-batching server / multiple sidecar replicas; other OSS models (Canary,
+sherpa-onnx streaming zipformer) if the team wants a second candidate.
 
 ---
 

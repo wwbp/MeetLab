@@ -304,6 +304,16 @@ class RunnerStartApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.text)
         self.assertEqual(response.json().get("stt_model"), "parakeet-tdt-0.6b-v2")
 
+    def test_config_put_parakeet_unified_stt_model_accepted(self):
+        # parakeet-unified-en-0.6b: NVIDIA's offline+streaming unified English model,
+        # served (offline) by the stt-nemotron sidecar.
+        response = self.client.put(
+            "/config",
+            json={"scope": "test-runner-scope", "stt_model": "parakeet-unified-en-0.6b"},
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json().get("stt_model"), "parakeet-unified-en-0.6b")
+
     def test_config_put_invalid_tts_provider_returns_400(self):
         response = self.client.put(
             "/config",

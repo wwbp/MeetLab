@@ -57,7 +57,7 @@ class Conversation(Base):
     ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     status: Mapped[str] = mapped_column(
         String(32), default="running"
-    )  # running | completed | error
+    )  # running | completed | error | ended (reconciler-closed)
     root_utterance_id: Mapped[str | None] = mapped_column(String(64))
     meta: Mapped[dict] = mapped_column(JSONB, default=dict, server_default="{}")
 
@@ -174,12 +174,12 @@ class BotConfig(Base):
     vad_stop_secs: Mapped[float] = mapped_column(Float, default=0.6)
     llm_model: Mapped[str] = mapped_column(String(128), default="gpt-5.4-nano")
     tts_voice: Mapped[str] = mapped_column(String(64), default="WhMcMcvXQ8T2QfmQmlYh")
-    stt_model: Mapped[str] = mapped_column(String(128), default="nova-3-general")
+    stt_model: Mapped[str] = mapped_column(String(128), default="parakeet-tdt-0.6b-v2")
     stt_vad_mode: Mapped[str] = mapped_column(String(32), default="local")
     stt_delay: Mapped[str | None] = mapped_column(String(32), nullable=True)
     tts_provider: Mapped[str] = mapped_column(String(32), default="elevenlabs")
     tts_aggregation_mode: Mapped[str] = mapped_column(String(16), default="sentence")
-    stt_endpointing_ms: Mapped[int] = mapped_column(BigInteger, default=200, server_default="200")
+    stt_endpointing_ms: Mapped[int] = mapped_column(BigInteger, default=100, server_default="100")
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_now, onupdate=_now
     )

@@ -11,7 +11,7 @@ BENCHMARK_WAV ?=
 
 MSG ?= migration
 
-.PHONY: up down start stop logs migrate migration test test-unit test-integration test-bot-longevity test-multi-speaker test-multi-speaker-audio test-session-lifecycle setup-livekit-cloud revert-livekit-local test-livekit-tooling scan scan-agent-runner scan-meet benchmark benchmark-audio benchmark-audio-long benchmark-full benchmark-exp2 benchmark-report simulate soak
+.PHONY: up down start stop logs migrate migration test test-unit test-integration test-bot-longevity test-multi-speaker test-multi-speaker-audio test-session-lifecycle setup-livekit-cloud revert-livekit-local test-livekit-tooling scan scan-agent-runner scan-meet benchmark benchmark-audio benchmark-audio-long benchmark-full benchmark-exp2 benchmark-report simulate soak soak-sanity
 
 up:
 	$(COMPOSE) up --build -d
@@ -148,11 +148,24 @@ simulate:
 ROOMS ?= 10
 USERS_PER_ROOM ?= 2
 DURATION_MIN ?= 20
+SOAK_MODE ?= stress
 soak:
 	BOT_TOKEN_TTL_MINUTES=30 $(COMPOSE) up -d transport-server agent-runner stt-nemotron
 	$(COMPOSE) exec -T agent-runner uv run alembic upgrade head
 	$(COMPOSE) exec -T agent-runner \
-		env ROOMS=$(ROOMS) USERS_PER_ROOM=$(USERS_PER_ROOM) DURATION_MIN=$(DURATION_MIN) \
+		env SOAK_MODE=$(SOAK_MODE) ROOMS=$(ROOMS) USERS_PER_ROOM=$(USERS_PER_ROOM) DURATION_MIN=$(DURATION_MIN) \
+		STT_MODEL=$(STT_MODEL) ENDPOINTING_MS=$(ENDPOINTING_MS) \
+		uv run python tests/soak_meeting.py
+
+# Sanity check FIRST: a small, strict run — every room's bot must reply and every
+# session must finalize. Run this before scaling up to the full `make soak`.
+# Override knobs as you scale: make soak-sanity ROOMS=4 DURATION_MIN=5
+soak-sanity:
+	BOT_TOKEN_TTL_MINUTES=30 $(COMPOSE) up -d transport-server agent-runner stt-nemotron
+	$(COMPOSE) exec -T agent-runner uv run alembic upgrade head
+	$(COMPOSE) exec -T agent-runner \
+		env SOAK_MODE=sanity ROOMS=$(or $(ROOMS_SANITY),2) USERS_PER_ROOM=2 \
+		DURATION_MIN=$(or $(DURATION_SANITY),2) \
 		STT_MODEL=$(STT_MODEL) ENDPOINTING_MS=$(ENDPOINTING_MS) \
 		uv run python tests/soak_meeting.py
 

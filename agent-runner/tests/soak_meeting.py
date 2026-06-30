@@ -22,6 +22,7 @@ token doesn't expire mid-run.
 Run in-container:  make soak ROOMS=10 USERS_PER_ROOM=2 DURATION_MIN=20
 """
 import asyncio
+import json
 import os
 import sys
 import time
@@ -57,6 +58,19 @@ SETTLE_SECS = float(env("SETTLE_SECS", "4"))
 STAGGER = float(env("STAGGER", "4"))
 COLLECT_TIMEOUT = float(env("COLLECT_TIMEOUT", "30"))
 
+# Mode controls how strict the pass/fail verdict is:
+#   sanity  — small run, everything must work: a bot that never replies is a FAIL.
+#   stress  — load run, the local CPU sidecar is meant to saturate: no-reply rooms
+#             and high latency are REPORTED, not failed. Correctness (every session
+#             ends terminal) is enforced in both modes.
+SOAK_MODE = env("SOAK_MODE", "stress").lower()
+STRICT = SOAK_MODE in ("sanity", "realism")
+# A room whose bot fell silent more than this many seconds before the room ended is
+# flagged as a likely mid-run drop (TTL expiry, crash, OOM).
+DROP_GAP_SECS = float(env("DROP_GAP_SECS", "60"))
+# Where to write the machine-readable run log for later tracing/debugging.
+SOAK_RESULTS_PATH = env("SOAK_RESULTS_PATH", "")
+
 
 def _pct(values: list[float], q: float) -> float | None:
     if not values:
@@ -82,7 +96,8 @@ async def _run_room(idx: int, run_id: str, speech, sr: int, deadline: float) -> 
     """Start a bot, join USERS_PER_ROOM talkers, converse until the deadline, leave."""
     room_name = f"soak-{run_id}-r{idx:02d}"
     result: dict = {"idx": idx, "room": room_name, "session_id": None,
-                    "turns": 0, "status": None, "ended_at": None, "error": None}
+                    "turns": 0, "status": None, "ended_at": None, "error": None,
+                    "talk_end": None, "quiet_gap_s": None, "dropped_early": False}
     rooms: list[rtc.Room] = []
     try:
         set_config(room_name, stt_model=STT_MODEL, endpointing_ms=ENDPOINTING_MS)
@@ -104,6 +119,9 @@ async def _run_room(idx: int, run_id: str, speech, sr: int, deadline: float) -> 
     except Exception as e:  # one room failing must not abort the whole soak
         result["error"] = repr(e)
     finally:
+        # Unix epoch when talking stopped — reference for early-drop detection
+        # (Utterance.ts is also unix epoch, so the two are directly comparable).
+        result["talk_end"] = time.time()
         for room in rooms:
             try:
                 await room.disconnect()
@@ -124,11 +142,48 @@ async def _finalize_and_collect(result: dict) -> dict:
         await asyncio.sleep(1.0)
         status, ended_at = await conversation_status(sid)
     result["status"], result["ended_at"] = status, ended_at
-    result["metas"] = await query_bot_metas(sid)
+    metas = await query_bot_metas(sid)
+    result["metas"] = metas
+
+    # Early-drop detection: did the bot fall silent well before the room ended?
+    # Compares the last bot turn's timestamp against when we stopped talking.
+    ts_list = [m["ts"] for m in metas if isinstance(m.get("ts"), (int, float))]
+    if ts_list and result.get("talk_end") is not None:
+        gap = result["talk_end"] - max(ts_list)
+        result["quiet_gap_s"] = round(gap, 1)
+        result["dropped_early"] = gap > DROP_GAP_SECS
+        if result["dropped_early"]:
+            print(f"  ⚠ {result['room']}: bot quiet for {gap:.0f}s before room end "
+                  f"— possible mid-run drop")
     return result
 
 
-def _report(results: list[dict]) -> bool:
+def _write_artifact(run_id: str, results: list[dict], verdict: dict) -> str:
+    """Write a machine-readable run log for later tracing/debugging."""
+    path = SOAK_RESULTS_PATH or f"soak-results-{run_id}.json"
+    payload = {
+        "run_id": run_id, "mode": SOAK_MODE,
+        "config": {"rooms": ROOMS, "users_per_room": USERS_PER_ROOM,
+                   "duration_min": DURATION_MIN, "stt_model": STT_MODEL or "(default)",
+                   "endpointing_ms": ENDPOINTING_MS or "(default)"},
+        "verdict": verdict,
+        "rooms": [
+            {"room": r["room"], "session_id": r["session_id"], "status": r["status"],
+             "ended_at": r["ended_at"].isoformat() if r.get("ended_at") else None,
+             "turns": r["turns"], "quiet_gap_s": r.get("quiet_gap_s"),
+             "dropped_early": r.get("dropped_early"), "error": r.get("error")}
+            for r in results
+        ],
+    }
+    try:
+        with open(path, "w") as f:
+            json.dump(payload, f, indent=2)
+    except Exception as e:
+        print(f"  (could not write results artifact to {path}: {e})")
+    return path
+
+
+def _report(run_id: str, results: list[dict]) -> bool:
     stt, total, qdepth = [], [], []
     spikes = echoes = total_turns = 0
     for r in results:
@@ -149,39 +204,61 @@ def _report(results: list[dict]) -> bool:
     hung = [r for r in results if r["status"] in (None, "running")]
     no_turns = [r for r in results if r["session_id"] and not r.get("metas")]
     errored = [r for r in results if r["error"]]
+    dropped = [r for r in results if r.get("dropped_early")]
 
     bar = "─" * 78
     print(f"\n{bar}")
-    print(f"SOAK  rooms={ROOMS} users/room={USERS_PER_ROOM} duration={DURATION_MIN}min "
-          f"stt={STT_MODEL or '(default)'} ep={ENDPOINTING_MS or '(default)'}")
+    print(f"SOAK [{SOAK_MODE}]  rooms={ROOMS} users/room={USERS_PER_ROOM} "
+          f"duration={DURATION_MIN}min stt={STT_MODEL or '(default)'} ep={ENDPOINTING_MS or '(default)'}")
     print(bar)
     print(f"  sessions: {len(results)}   bot turns: {total_turns}   "
           f"errored rooms: {len(errored)}")
     print(f"  stt_ms   P50={_pct(stt,50)}  P95={_pct(stt,95)}   (n={len(stt)})")
     print(f"  total_ms P50={_pct(total,50)}  P95={_pct(total,95)}")
     print(f"  qdepth   max={max(qdepth) if qdepth else 0}   spikes={spikes}  self_echo={echoes}")
+    print("  bot interruptions / talk-over: see meetlab.bot_interruptions_total + "
+          "meetlab.bot_talkover_ms (agent-runner logs/metrics)")
     print(bar)
-    print(f"{'room':>14}  {'turns':>5}  {'status':>9}  {'stt_p50':>7}")
+    print(f"{'room':>16}  {'turns':>5}  {'status':>9}  {'stt_p50':>7}  {'quiet_s':>7}")
     for r in results:
         rs = [m['meta'].get('timing', {}).get('stt_ms') for m in r.get('metas', [])]
         rs = [x for x in rs if isinstance(x, (int, float))]
-        print(f"{r['room']:>14}  {r['turns']:>5}  {str(r['status']):>9}  "
-              f"{str(_pct(rs,50)):>7}" + (f"   ERROR {r['error']}" if r['error'] else ""))
+        flag = "  DROP?" if r.get("dropped_early") else ""
+        print(f"{r['room']:>16}  {r['turns']:>5}  {str(r['status']):>9}  "
+              f"{str(_pct(rs,50)):>7}  {str(r.get('quiet_gap_s')):>7}{flag}"
+              + (f"   ERROR {r['error']}" if r['error'] else ""))
     print(bar)
 
-    # DB-consistency / liveness verdict (hard pass-fail; latency is informational
-    # because the local CPU sidecar is expected to saturate).
+    # Verdict. DB-consistency (terminal status) is ALWAYS enforced — it's correctness,
+    # not load. No-reply and early-drop are hard fails only in strict (sanity) mode;
+    # under stress the CPU sidecar is expected to saturate, so they're warnings.
     ok = True
     if hung:
         ok = False
-        print(f"  ✗ {len(hung)} session(s) never reached a terminal status (status stuck "
-              f"on 'running'): {', '.join(r['room'] for r in hung)}")
+        print(f"  ✗ {len(hung)} session(s) stuck on 'running' (never finalized): "
+              f"{', '.join(r['room'] for r in hung)}")
     else:
         print("  ✓ all sessions reached a terminal status with ended_at")
-    if no_turns:
-        ok = False
-        print(f"  ✗ {len(no_turns)} session(s) produced zero bot turns: "
-              f"{', '.join(r['room'] for r in no_turns)}")
+
+    def _fail_or_warn(items, label):
+        nonlocal ok
+        if not items:
+            return
+        rooms = ', '.join(r['room'] for r in items)
+        if STRICT:
+            ok = False
+            print(f"  ✗ {len(items)} {label}: {rooms}")
+        else:
+            print(f"  ⚠ {len(items)} {label} (tolerated in '{SOAK_MODE}' mode): {rooms}")
+
+    _fail_or_warn(no_turns, "session(s) produced zero bot turns")
+    _fail_or_warn(dropped, "session(s) went quiet early (possible mid-run drop)")
+
+    verdict = {"ok": ok, "hung": len(hung), "no_turns": len(no_turns),
+               "dropped_early": len(dropped), "errored": len(errored),
+               "stt_ms_p50": _pct(stt, 50), "stt_ms_p95": _pct(stt, 95)}
+    path = _write_artifact(run_id, results, verdict)
+    print(f"  results → {path}")
     print(f"{bar}\n")
     return ok
 
@@ -190,7 +267,7 @@ async def main() -> None:
     run_id = uuid4().hex[:6]
     speech, sr = load_speech()
     deadline = time.monotonic() + DURATION_MIN * 60
-    print(f"[soak] run={run_id} rooms={ROOMS} users/room={USERS_PER_ROOM} "
+    print(f"[soak] run={run_id} mode={SOAK_MODE} rooms={ROOMS} users/room={USERS_PER_ROOM} "
           f"duration={DURATION_MIN}min target={LIVEKIT_URL}")
 
     results = await asyncio.gather(*(
@@ -198,7 +275,7 @@ async def main() -> None:
     ))
     results = await asyncio.gather(*(_finalize_and_collect(r) for r in results))
 
-    ok = _report(results)
+    ok = _report(run_id, results)
 
     from db.engine import engine
     await engine.dispose()

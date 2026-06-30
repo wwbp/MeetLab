@@ -120,7 +120,7 @@ async def query_bot_metas(session_id: str) -> list[dict]:
         )
         for utt in rows.scalars().all():
             if utt.meta and "timing" in utt.meta:
-                out.append({"id": utt.id, "text": utt.text, "meta": utt.meta})
+                out.append({"id": utt.id, "text": utt.text, "meta": utt.meta, "ts": utt.ts})
     return out
 
 

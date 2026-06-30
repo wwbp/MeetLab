@@ -13,6 +13,8 @@ from PIL import Image
 from livekit import rtc
 
 from pipecat.frames.frames import (
+    BotStartedSpeakingFrame,
+    BotStoppedSpeakingFrame,
     InterruptionFrame,
     MetricsFrame,
     TranscriptionFrame,
@@ -47,6 +49,7 @@ from config import load_config, require
 from db.config_loader import load_bot_config
 from db.engine import AsyncSessionLocal
 from db.models import Conversation, Speaker, Utterance
+from interruption import InterruptionTracker
 from multi_speaker_stt import MultiSpeakerSTT, SpeakerLabelInjector
 from runner_types import LiveKitRunnerArguments
 
@@ -332,7 +335,15 @@ async def bot(runner_args: LiveKitRunnerArguments):
     def _stt_factory():
         return _build_stt_for_multi_speaker(bot_config, openai_api_key, env_config.deepgram_api_key)
 
-    multi_stt = MultiSpeakerSTT(_stt_factory)
+    # Interruption tracking: the bot should yield, not talk over users. The tracker
+    # is fed bot-speaking frames (via _InterruptionObserver) and REAL user speech
+    # onset from the per-participant VAD (via MultiSpeakerSTT's on_speech_onset).
+    interruptions = InterruptionTracker(labels={"stt_model": bot_config.stt_model})
+
+    def _on_speech_onset(sid: str) -> None:
+        interruptions.user_onset(time.monotonic(), sid)
+
+    multi_stt = MultiSpeakerSTT(_stt_factory, on_speech_onset=_on_speech_onset)
     logger.info(
         f"STT: model={bot_config.stt_model} mode=per-participant delay={bot_config.stt_delay}"
     )
@@ -420,6 +431,28 @@ async def bot(runner_args: LiveKitRunnerArguments):
                 _metrics_data["sentence_agg_ms"] = val_ms
                 _prom.sentence_agg.record(val_ms, {"tts_provider": bot_config.tts_provider})
 
+    class _InterruptionObserver(BaseObserver):
+        """Feeds the bot's TTS speaking window to the InterruptionTracker.
+
+        Pairs with MultiSpeakerSTT's on_speech_onset (real user speech start) so the
+        tracker can tell when a user spoke while the bot was still talking.
+        """
+
+        def __init__(self):
+            super().__init__()
+            self._seen: set = set()
+
+        async def on_push_frame(self, data: FramePushed):
+            frame = data.frame
+            if frame.id in self._seen:
+                return
+            if isinstance(frame, BotStartedSpeakingFrame):
+                self._seen.add(frame.id)
+                interruptions.bot_started(time.monotonic())
+            elif isinstance(frame, BotStoppedSpeakingFrame):
+                self._seen.add(frame.id)
+                interruptions.bot_stopped(time.monotonic())
+
     class _AudioTimestampRecorder(FrameProcessor):
         """Records the monotonic time of each participant's last audio frame.
 
@@ -494,7 +527,7 @@ async def bot(runner_args: LiveKitRunnerArguments):
             enable_metrics=True,
             enable_usage_metrics=True,
         ),
-        observers=[MetricsLogObserver(), _MetricsObserver()],
+        observers=[MetricsLogObserver(), _MetricsObserver(), _InterruptionObserver()],
         enable_tracing=env_config.enable_tracing,
         enable_turn_tracking=env_config.enable_tracing,
         conversation_id=runner_args.session_id,
@@ -802,7 +835,12 @@ async def bot(runner_args: LiveKitRunnerArguments):
         logger.error(f"Bot pipeline error in room {runner_args.room_name}: {e}")
     finally:
         await _finalize_conversation(runner_args.session_id, status)
-        logger.info(f"Bot session {runner_args.session_id} ended ({status})")
+        _isum = interruptions.summary()
+        logger.info(
+            f"Bot session {runner_args.session_id} ended ({status}) — "
+            f"interruptions={_isum['interruptions']} "
+            f"talkover_ms(max={_isum['talkover_ms_max']:.0f} avg={_isum['talkover_ms_avg']:.0f})"
+        )
 
 
 def _build_stt_for_multi_speaker(bot_config, openai_api_key: str, deepgram_api_key: str | None):

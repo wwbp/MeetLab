@@ -58,3 +58,14 @@ self_echo_suspected_total = _meter.create_counter(
     "meetlab.self_echo_suspected_total",
     description="User transcripts that closely match recent bot TTS output (likely speaker re-capture)",
 )
+
+# ── Interruption handling: the bot should yield, not talk over users ─────────
+bot_interruptions_total = _meter.create_counter(
+    "meetlab.bot_interruptions_total",
+    description="Times a user started speaking while the bot was still speaking (talk-over events)",
+)
+bot_talkover_ms = _meter.create_histogram(
+    "meetlab.bot_talkover_ms",
+    unit="ms",
+    description="How long the bot kept speaking after a user interrupted (lower = yields faster)",
+)

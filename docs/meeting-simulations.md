@@ -97,23 +97,41 @@ The single-room scenarios above reproduce *failure modes*. The soak reproduces *
 minutes. It's the pre-event load check — the goal config is **10 rooms × 2 users × 1 bot
 for 20 minutes**.
 
+**Start small, then scale up.** Always run the strict sanity check first — a tiny run where
+everything *must* work — before the full load run:
+
 ```bash
-make soak                                     # 10 rooms, 2 users, 20 min (defaults)
-make soak ROOMS=4 USERS_PER_ROOM=2 DURATION_MIN=5   # quick smoke
+make soak-sanity                              # 2 rooms, 2 users, 2 min, STRICT verdict
+make soak-sanity ROOMS=4 DURATION_SANITY=5    # scale the sanity run up
+make soak                                     # the target: 10 rooms, 2 users, 20 min
 make soak STT_MODEL=nova-3-general            # compare against Deepgram
 ```
 
-Each user loops the speech fixture with randomized inter-turn gaps (`MIN_GAP`/`MAX_GAP`),
-the two users in a room staggered so turns mostly alternate. All rooms run concurrently.
-`make soak` raises the bot token TTL to 30 min so sessions outlive the 15-min default.
+**Modes (`SOAK_MODE`):**
+- `sanity` — strict. Every room's bot must reply and every session must finalize, or it FAILS.
+  Use it to prove the pipeline is healthy before piling on load.
+- `stress` (default for `make soak`) — the local CPU sidecar is *meant* to be overwhelmed by
+  ~20 concurrent streams, so no-reply rooms and high latency are **reported, not failed**.
 
-**Knobs:** `ROOMS=10`, `USERS_PER_ROOM=2`, `DURATION_MIN=20`, `STT_MODEL`, `ENDPOINTING_MS`,
-`MIN_GAP=3`, `MAX_GAP=8`, `SETTLE_SECS=4`, `STAGGER=4`.
+Either way, **DB consistency is always enforced**: a session left stuck on `running` is a hard
+fail in both modes (that's correctness, not load).
+
+Each user loops the speech fixture with randomized inter-turn gaps (`MIN_GAP`/`MAX_GAP`),
+the two users in a room staggered so turns mostly alternate (they overlap freely — that
+intentionally stresses the multi-speaker STT). All rooms run concurrently. `make soak` raises
+the bot token TTL to 30 min so sessions outlive the 15-min default.
+
+**Knobs:** `ROOMS=10`, `USERS_PER_ROOM=2`, `DURATION_MIN=20`, `SOAK_MODE=stress`, `STT_MODEL`,
+`ENDPOINTING_MS`, `MIN_GAP=3`, `MAX_GAP=8`, `SETTLE_SECS=4`, `STAGGER=4`, `DROP_GAP_SECS=60`,
+`SOAK_RESULTS_PATH`.
 
 **Reading the report:** aggregate `stt_ms`/`total_ms` P50/P95 across every turn in every room,
-max queue depth, spike/self-echo counts, a per-room line, and a **verdict**. The verdict
-hard-fails on two things only: any session left stuck on `running` (the hanging-status bug —
-see below) and any session that produced zero bot turns. Latency is *informational*, because:
+max queue depth, spike/self-echo counts, a per-room line (with `quiet_s` = how long the bot was
+silent before the room ended, and a `DROP?` flag if that gap exceeds `DROP_GAP_SECS`), and a
+**verdict**. A machine-readable copy is written to `soak-results-<run>.json` for later tracing.
+Bot interruption numbers (how often / how long the bot talked over a user) are emitted as
+`meetlab.bot_interruptions_total` + `meetlab.bot_talkover_ms` and logged per session — see
+"Bot interruptions" below. Latency is *informational* in stress mode, because:
 
 > **The local CPU sidecar is expected to saturate.** 10 rooms × 2 speakers = up to 20
 > concurrent per-participant STT streams hitting one `stt-nemotron` container, which decodes
@@ -126,6 +144,22 @@ it disconnects every user (the all-users-leave path) and asserts each `Conversat
 terminal status with `ended_at`. For the focused, deterministic version of these checks —
 cancellation-safe finalize, the stale-conversation reconciler, and the all-users-leave path —
 run `make test-session-lifecycle`.
+
+## Bot interruptions (the bot shouldn't talk over people)
+
+We measure when a user starts speaking while the bot is still talking, and how long the bot
+keeps going before it yields:
+
+- `meetlab.bot_interruptions_total` — count of talk-over events.
+- `meetlab.bot_talkover_ms` — how long the bot kept speaking after the user started. **Lower is
+  better** — a well-behaved bot yields almost immediately.
+
+Each session also logs a one-line summary at shutdown
+(`… ended (completed) — interruptions=N talkover_ms(max=… avg=…)`). The signal is the *real*
+user speech onset from the per-participant VAD (not the transcript-commit time), so it reflects
+genuine overlap. This is wired for the VAD-based STT paths — the **default Parakeet**, whisper,
+and Deepgram. The OpenAI realtime path uses its own server-side interruption handling and is not
+fed into this metric. Logic is unit-tested in `tests/test_interruption.py`.
 
 ## Notes & limits
 

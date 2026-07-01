@@ -74,16 +74,19 @@ docker run -it --rm --name=$CONTAINER_ID \
   For true streaming, use a streaming model (Parakeet RNNT / the unified model) via Riva.
 - **Health check:** poll `GET http://<host>:9000/v1/health/ready` before sending traffic.
 
-### Bot-side integration (the one code change)
-Our bot talks to STT via `NemotronHTTPSTTService`, which POSTs WAV segments to Shadowfita's
-`/transcribe`. NIM's endpoint is the OpenAI-compatible `/v1/audio/transcriptions` (multipart
-`file=` + `model=`). Migration is small and additive:
-- Point a new `NEMOTRON_STT_URL` (or a new `NIM_STT_URL`) at the NIM.
-- Add a NIM STT service (or adapt `NemotronHTTPSTTService._transcribe`) to POST to
-  `/v1/audio/transcriptions` with the OpenAI field names and parse the `text` field.
-- Keep the existing `(VADProcessor → STT)` segmented chain — segments are already VAD-cut WAVs.
-- Validate with `make soak SOAK_LOAD_ONLY=1 … STT_MODEL=parakeet-tdt-0.6b-v2` against the NIM and
-  re-read Grafana; expect the P50 to hold near the low-concurrency ~334ms across 10 rooms.
+### Bot-side integration (already shipped — just flip an env)
+`NemotronHTTPSTTService` now speaks both APIs (`nemotron_stt.py`): Shadowfita's `/transcribe`
+and the OpenAI-compatible `/v1/audio/transcriptions`, selected by **`NEMOTRON_STT_API`**
+(`shadowfita` default | `openai`). Both return `{"text": ...}`; the segmented `(VADProcessor →
+STT)` chain is unchanged (segments are already VAD-cut WAVs). To migrate:
+1. `NEMOTRON_STT_API=openai` on the agent-runner env.
+2. `NEMOTRON_STT_URL=http://<nim-host>:9000` (NIM HTTP port).
+
+No per-room config or model-id change. Validate the fix:
+- `make bench-stt-concurrency STT_API=openai STT_URL=http://<nim>:9000` — expect p50 to stay
+  ~flat as concurrency climbs and throughput to scale (vs the serialized baseline above).
+- `make soak SOAK_LOAD_ONLY=1 … STT_MODEL=parakeet-tdt-0.6b-v2` against the NIM; re-read Grafana —
+  expect P50 to hold near the low-concurrency ~334ms across 10 rooms.
 
 ## Alternative: Riva / Triton (fully OSS)
 

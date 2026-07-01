@@ -569,7 +569,19 @@ concurrency climbs — the P95 tail and per-room 5s medians are the ceiling show
 **10-room target needs the GPU/prod sidecar** (or a concurrency-capped / multi-replica /
 NIM deployment). DB consistency held through the OOM: all stranded sessions finalized (bot
 finalize + reconciler). Hardening shipped: `restart: unless-stopped` on the sidecar;
-`FINALIZE_WAIT_SECS` so the soak verdict waits for late finalization. _Prod-T4 10-room run: TBD._
+`FINALIZE_WAIT_SECS` so the soak verdict waits for late finalization.
+
+**Prod-T4 10-room run (2026-07-01, `SOAK_LOAD_ONLY` against prod LiveKit Cloud, per-room
+parakeet + nano + OpenAI TTS):** 10 bots started 10/10, 0 errors, 473 audio turns streamed.
+The **GPU survived** — no OOM, no crash, 0 STT connection errors (vs the local CPU OOM). **But
+the single-threaded Shadowfita STT server serialized under 20 concurrent streams**: Grafana
+showed parakeet stt_ms **P50 ≈ 5.0s / P95 ≈ 7.3s**, and only ~17 bot utterances were produced
+against 473 turns offered — the server processed a trickle and the rest queued/were dropped.
+Confirms Experiment 6's "ceiling is the server, not the hardware": **10-room concurrency needs
+a concurrent-serving STT layer — NVIDIA NIM, a continuous-batching server, or multiple sidecar
+replicas behind a balancer** — not just a bigger GPU. Usable concurrency on the single Shadowfita
+server is low (Exp 6: 4-way p50 290ms, 8-way 475ms, 16-way 842ms; 20-way here ≈ 5s under sustained
+real load).
 
 **Addendum — `parakeet-unified-en-0.6b` (offline, 2026-06-30):** NVIDIA's
 [unified offline+streaming English model](https://huggingface.co/nvidia/parakeet-unified-en-0.6b)

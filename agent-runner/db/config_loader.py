@@ -50,12 +50,12 @@ async def load_bot_config(room_name: str | None = None) -> EffectiveBotConfig:
                 vad_stop_secs=0.6,
                 llm_model="gpt-5.4-nano",
                 tts_voice="WhMcMcvXQ8T2QfmQmlYh",
-                stt_model="nova-3-general",
+                stt_model="parakeet-tdt-0.6b-v2",
                 stt_vad_mode="local",
                 stt_delay=None,
                 tts_provider="elevenlabs",
                 tts_aggregation_mode="sentence",
-                stt_endpointing_ms=200,
+                stt_endpointing_ms=100,
             )
 
         return EffectiveBotConfig(

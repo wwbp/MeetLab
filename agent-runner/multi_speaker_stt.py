@@ -72,10 +72,13 @@ class _FrameCollector(FrameProcessor):
     around each final TranscriptionFrame so the context aggregator commits the turn.
     """
 
-    def __init__(self, queue: asyncio.Queue, *, needs_vad_wrap: bool = False):
+    def __init__(self, queue: asyncio.Queue, *, needs_vad_wrap: bool = False,
+                 sid: str | None = None, on_speech_onset: Callable[[str], None] | None = None):
         super().__init__()
         self._queue = queue
         self._needs_vad_wrap = needs_vad_wrap
+        self._sid = sid
+        self._on_speech_onset = on_speech_onset
 
     async def queue_frame(
         self,
@@ -95,6 +98,14 @@ class _FrameCollector(FrameProcessor):
             # The synthetic sandwich below is the single source of VAD events for
             # the main pipeline — letting these through would double-fire the
             # latency observer and reconfigure the aggregator's speech params.
+            # But VADUserStartedSpeakingFrame is the REAL user speech onset, so
+            # surface it to the interruption tracker (talk-over detection) before
+            # dropping it from the main pipeline.
+            if isinstance(frame, VADUserStartedSpeakingFrame) and self._on_speech_onset:
+                try:
+                    self._on_speech_onset(self._sid)
+                except Exception as e:
+                    logger.warning(f"_FrameCollector: on_speech_onset error: {e}")
             return
         if self._needs_vad_wrap and isinstance(frame, TranscriptionFrame) and frame.finalized:
             # VADUser* frames must arrive at the observer BEFORE UserStoppedSpeakingFrame
@@ -126,9 +137,11 @@ class MultiSpeakerSTT(FrameProcessor):
     asyncio.Queue and pumped back into the main pipeline downstream.
     """
 
-    def __init__(self, stt_factory: Callable[[], FrameProcessor]):
+    def __init__(self, stt_factory: Callable[[], FrameProcessor],
+                 on_speech_onset: Callable[[str], None] | None = None):
         super().__init__()
         self._stt_factory = stt_factory
+        self._on_speech_onset = on_speech_onset
         self._stts: dict[str, FrameProcessor] = {}
         self._output_queue: asyncio.Queue = asyncio.Queue()
         self._pump_task: asyncio.Task | None = None
@@ -170,6 +183,14 @@ class MultiSpeakerSTT(FrameProcessor):
         else:
             await self.push_frame(frame, direction)
 
+    def qsize(self) -> int:
+        """Current depth of the merged output queue.
+
+        Read by bot.py's spike logging to attribute extreme stt_ms to backlog
+        (a stalled per-participant STT lets frames pile up here unboundedly).
+        """
+        return self._output_queue.qsize()
+
     async def remove_participant(self, sid: str) -> None:
         """Tear down the STT instance for a participant who left the room."""
         stt = self._stts.pop(sid, None)
@@ -195,7 +216,10 @@ class MultiSpeakerSTT(FrameProcessor):
             chain = self._stt_factory()
             head, tail = chain if isinstance(chain, tuple) else (chain, chain)
             needs_vad_wrap = not _stt_emits_vad_frames(tail)
-            collector = _FrameCollector(self._output_queue, needs_vad_wrap=needs_vad_wrap)
+            collector = _FrameCollector(
+                self._output_queue, needs_vad_wrap=needs_vad_wrap,
+                sid=sid, on_speech_onset=self._on_speech_onset,
+            )
             tail.link(collector)
             if self._setup_params is not None:
                 await head.setup(self._setup_params)
@@ -213,6 +237,13 @@ class MultiSpeakerSTT(FrameProcessor):
         while True:
             try:
                 frame = await self._output_queue.get()
+                # Sample backlog after dequeue so a stalled consumer shows up as
+                # a rising distribution in meetlab.stt_queue_depth.
+                try:
+                    import metrics as _prom
+                    _prom.stt_queue_depth.record(self._output_queue.qsize())
+                except Exception:
+                    pass
                 await self.push_frame(frame, FrameDirection.DOWNSTREAM)
             except asyncio.CancelledError:
                 break

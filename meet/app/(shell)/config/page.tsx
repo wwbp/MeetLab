@@ -18,7 +18,7 @@ type BotConfig = {
 const EMPTY_CONFIG: Omit<BotConfig, 'scope'> = {
   system_prompt: '',
   greeting: '',
-  stt_model: 'nova-3-general',
+  stt_model: 'parakeet-tdt-0.6b-v2',
   llm_model: 'gpt-5.4-nano',
   tts_provider: 'elevenlabs',
   tts_voice: 'WhMcMcvXQ8T2QfmQmlYh',
@@ -28,11 +28,12 @@ const EMPTY_CONFIG: Omit<BotConfig, 'scope'> = {
 };
 
 const STT_MODELS = [
+  { value: 'parakeet-tdt-0.6b-v2',   label: 'parakeet-tdt-0.6b-v2 (self-hosted GPU) (default)' },
+  { value: 'parakeet-unified-en-0.6b', label: 'parakeet-unified-en-0.6b (self-hosted, offline)' },
   { value: 'nova-3-general',         label: 'nova-3-general (Deepgram)' },
   { value: 'gpt-realtime-whisper',   label: 'gpt-realtime-whisper (OpenAI)' },
   { value: 'gpt-4o-transcribe',      label: 'gpt-4o-transcribe (OpenAI)' },
   { value: 'gpt-4o-mini-transcribe', label: 'gpt-4o-mini-transcribe (OpenAI)' },
-  { value: 'parakeet-tdt-0.6b-v2',   label: 'parakeet-tdt-0.6b-v2 (self-hosted GPU)' },
 ];
 
 const LLM_MODELS = [
@@ -67,11 +68,11 @@ export default function ConfigPage() {
         return;
       }
       const loadedLlm = data.llm_model ?? 'gpt-5.4-nano';
-      const loadedStt = data.stt_model ?? 'nova-3-general';
+      const loadedStt = data.stt_model ?? 'parakeet-tdt-0.6b-v2';
       setForm({
         system_prompt: data.system_prompt ?? '',
         greeting: data.greeting ?? '',
-        stt_model: STT_MODELS.some((m) => m.value === loadedStt) ? loadedStt : 'nova-3-general',
+        stt_model: STT_MODELS.some((m) => m.value === loadedStt) ? loadedStt : 'parakeet-tdt-0.6b-v2',
         llm_model: LLM_MODELS.includes(loadedLlm) ? loadedLlm : LLM_MODELS[0],
         tts_provider: data.tts_provider ?? 'elevenlabs',
         tts_voice: data.tts_voice ?? '',

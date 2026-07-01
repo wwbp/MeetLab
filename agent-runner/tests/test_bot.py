@@ -17,6 +17,8 @@ from bot import (
     _build_stt,
     _build_stt_for_multi_speaker,
     _find_participant_by_sid,
+    _normalize_words,
+    _text_similarity,
     _turn_detection_for_vad_mode,
     _OpenAIRealtimeSTT,
 )
@@ -218,6 +220,16 @@ class TestBuildSttParakeetChain(unittest.TestCase):
         _, tail = _build_stt(cfg, "openai-key", None)
         self.assertEqual(tail.model_name, "parakeet-tdt-0.6b-v2")
 
+    def test_parakeet_unified_routes_to_sidecar_chain(self):
+        # parakeet-unified-en-0.6b shares the parakeet- prefix → same offline sidecar
+        # chain (streaming ~160ms mode is a separate, future integration).
+        from nemotron_stt import NemotronHTTPSTTService
+        cfg = _FakeBotConfig(stt_model="parakeet-unified-en-0.6b")
+        head, tail = _build_stt(cfg, "openai-key", None)
+        self.assertIsInstance(head, VADProcessor)
+        self.assertIsInstance(tail, NemotronHTTPSTTService)
+        self.assertEqual(tail.model_name, "parakeet-unified-en-0.6b")
+
 
 class TestOnUserTurnStoppedGuards(unittest.TestCase):
     """Guard conditions for on_user_turn_stopped mirror the bot handler logic.
@@ -307,16 +319,16 @@ class TestValidSttModels(unittest.TestCase):
 class TestConfigLoaderDefaults(unittest.TestCase):
     """Hardcoded fallback in config_loader uses the benchmark-winning defaults."""
 
-    def test_default_stt_is_nova_3_general(self):
+    def test_default_stt_is_parakeet(self):
         from db.config_loader import EffectiveBotConfig
         cfg = EffectiveBotConfig(
             system_prompt="", greeting="", vad_stop_secs=0.6,
             llm_model="gpt-5.4-nano", tts_voice="WhMcMcvXQ8T2QfmQmlYh",
-            stt_model="nova-3-general", stt_vad_mode="local",
+            stt_model="parakeet-tdt-0.6b-v2", stt_vad_mode="local",
             stt_delay=None, tts_provider="elevenlabs",
-            tts_aggregation_mode="sentence", stt_endpointing_ms=200,
+            tts_aggregation_mode="sentence", stt_endpointing_ms=100,
         )
-        self.assertEqual(cfg.stt_model, "nova-3-general")
+        self.assertEqual(cfg.stt_model, "parakeet-tdt-0.6b-v2")
         self.assertEqual(cfg.llm_model, "gpt-5.4-nano")
         self.assertEqual(cfg.tts_provider, "elevenlabs")
         self.assertEqual(cfg.stt_vad_mode, "local")
@@ -324,12 +336,48 @@ class TestConfigLoaderDefaults(unittest.TestCase):
 
     def test_fallback_constants_match_benchmark_winner(self):
         import db.config_loader as cl
-        import inspect, ast, textwrap
+        import inspect
         src = inspect.getsource(cl.load_bot_config)
-        # Ensure the hardcoded fallback uses the winning defaults
-        self.assertIn("nova-3-general", src)
+        # Ensure the hardcoded fallback uses the promoted default (Experiment 6).
+        self.assertIn("parakeet-tdt-0.6b-v2", src)
+        self.assertIn("stt_endpointing_ms=100", src)
         self.assertIn("gpt-5.4-nano", src)
         self.assertIn("elevenlabs", src)
+
+
+class TestSelfEchoHeuristic(unittest.TestCase):
+    """_text_similarity / _normalize_words back the bot self-echo detector."""
+
+    def test_identical_text_is_max_similarity(self):
+        self.assertEqual(_text_similarity("what is the speed of light", "what is the speed of light"), 1.0)
+
+    def test_disjoint_text_is_zero(self):
+        self.assertEqual(_text_similarity("hello there friend", "completely unrelated words"), 0.0)
+
+    def test_empty_either_side_is_zero(self):
+        self.assertEqual(_text_similarity("", "anything at all"), 0.0)
+        self.assertEqual(_text_similarity("anything at all", ""), 0.0)
+
+    def test_speaker_prefix_is_stripped_before_compare(self):
+        # SpeakerLabelInjector prepends "Alice: "; the bot text has no prefix.
+        # The name must not dilute the overlap, so this should read as a strong echo.
+        bot = "the boiling point of water is one hundred degrees"
+        user = "Alice: the boiling point of water is one hundred degrees"
+        self.assertGreaterEqual(_text_similarity(user, bot), 0.65)
+
+    def test_partial_overlap_between_zero_and_one(self):
+        sim = _text_similarity("the quick brown fox", "the quick red hound")
+        self.assertGreater(sim, 0.0)
+        self.assertLess(sim, 1.0)
+
+    def test_normalize_drops_punctuation_and_case(self):
+        self.assertEqual(_normalize_words("Hello, World!"), ["hello", "world"])
+
+    def test_normalize_strips_short_name_prefix_only(self):
+        # A colon early in the string is treated as a speaker prefix...
+        self.assertEqual(_normalize_words("Bob: hi"), ["hi"])
+        # ...but a colon deep in the text (no prefix) is not stripped.
+        self.assertIn("ratio", _normalize_words("the result was a strange ratio: forty two to one"))
 
 
 if __name__ == "__main__":

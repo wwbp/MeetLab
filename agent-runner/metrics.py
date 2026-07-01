@@ -36,3 +36,36 @@ utterances_total = _meter.create_counter(
     "meetlab.utterances_total",
     description="Total utterances processed",
 )
+
+# ── Phase 1 diagnostics: latency-spike root-cause instrumentation ────────────
+# These exist to discriminate between the candidate causes of occasional
+# extreme STT latency: VAD held open by continuous noise, output-queue backlog,
+# STT provider stalls, and bot self-echo. See docs and bot.py spike logging.
+
+stt_queue_depth = _meter.create_histogram(
+    "meetlab.stt_queue_depth",
+    description="MultiSpeakerSTT output-queue depth sampled at each dequeue (backlog detector)",
+)
+stt_spikes_total = _meter.create_counter(
+    "meetlab.stt_spikes_total",
+    description="Count of utterances whose stt_ms exceeded the spike threshold",
+)
+phantom_segments_total = _meter.create_counter(
+    "meetlab.phantom_segments_total",
+    description="User turns committed with empty content (VAD/STT fired but no transcript)",
+)
+self_echo_suspected_total = _meter.create_counter(
+    "meetlab.self_echo_suspected_total",
+    description="User transcripts that closely match recent bot TTS output (likely speaker re-capture)",
+)
+
+# ── Interruption handling: the bot should yield, not talk over users ─────────
+bot_interruptions_total = _meter.create_counter(
+    "meetlab.bot_interruptions_total",
+    description="Times a user started speaking while the bot was still speaking (talk-over events)",
+)
+bot_talkover_ms = _meter.create_histogram(
+    "meetlab.bot_talkover_ms",
+    unit="ms",
+    description="How long the bot kept speaking after a user interrupted (lower = yields faster)",
+)

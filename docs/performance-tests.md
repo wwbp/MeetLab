@@ -101,7 +101,8 @@ Key facts:
 3. *In production*: the GPU server must be running (EC2 `meetlab-stt-gpu`,
    private address set via `NEMOTRON_STT_URL` on the agent-runner environment).
    If a parakeet room's bot joins but never responds, that server is the first
-   thing to check.
+   thing to check. Deploy/ops + the move to the standard NVIDIA (NIM/Riva)
+   concurrent server: [gpu-stt-deployment.md](gpu-stt-deployment.md).
 
 Full detail, decisions, and dead ends: Experiment 6 in [latency-experiments.md](latency-experiments.md).
 

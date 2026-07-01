@@ -1,6 +1,7 @@
 import asyncio
 import json
 import os
+import re
 import sys
 import time
 import uuid as _uuid_mod
@@ -12,6 +13,8 @@ from PIL import Image
 from livekit import rtc
 
 from pipecat.frames.frames import (
+    BotStartedSpeakingFrame,
+    BotStoppedSpeakingFrame,
     InterruptionFrame,
     MetricsFrame,
     TranscriptionFrame,
@@ -46,10 +49,48 @@ from config import load_config, require
 from db.config_loader import load_bot_config
 from db.engine import AsyncSessionLocal
 from db.models import Conversation, Speaker, Utterance
+from interruption import InterruptionTracker
 from multi_speaker_stt import MultiSpeakerSTT, SpeakerLabelInjector
 from runner_types import LiveKitRunnerArguments
 
 _STT_DELAY_VALUES = frozenset({"minimal", "low", "medium", "high", "xhigh"})
+
+# ── Phase 1 diagnostics tunables ─────────────────────────────────────────────
+# stt_ms above this is logged + counted as a spike so we can capture the
+# conditions (queue depth, model, content) when extreme latency occurs.
+_STT_SPIKE_THRESHOLD_MS = float(os.getenv("STT_SPIKE_THRESHOLD_MS", "2000"))
+# Word-overlap above this between a user transcript and recent bot TTS flags a
+# likely speaker re-capture (browser AEC failure). Heuristic, not exact.
+_SELF_ECHO_SIMILARITY = float(os.getenv("STT_SELF_ECHO_SIMILARITY", "0.65"))
+# How many recent bot utterances to compare incoming user transcripts against.
+_RECENT_BOT_TEXT_WINDOW = 5
+
+_WORD_RE = re.compile(r"[a-z0-9]+")
+
+
+def _normalize_words(text: str) -> list[str]:
+    """Lowercase word tokens, stripping punctuation and any 'Name:' speaker prefix."""
+    # SpeakerLabelInjector prepends "DisplayName: " to user transcripts; drop the
+    # prefix so the name itself doesn't dilute the bot-echo comparison. Only treat
+    # it as a prefix when the part before ": " is short (a name, ≤3 words), so a
+    # colon deeper in real content (e.g. "...a strange ratio: forty two") is kept.
+    if text and ": " in text:
+        head, body = text.split(": ", 1)
+        if len(head.split()) <= 3:
+            text = body
+    return _WORD_RE.findall((text or "").lower())
+
+
+def _text_similarity(a: str, b: str) -> float:
+    """Word-level Jaccard similarity in [0, 1]; 0 if either side is empty.
+
+    Cheap self-echo heuristic: a user transcript that overlaps heavily with
+    recent bot TTS text is likely the bot's own voice re-captured by a speaker.
+    """
+    wa, wb = set(_normalize_words(a)), set(_normalize_words(b))
+    if not wa or not wb:
+        return 0.0
+    return len(wa & wb) / len(wa | wb)
 
 
 class _OpenAIRealtimeSTT(OpenAIRealtimeSTTService):
@@ -217,6 +258,35 @@ logger.remove()
 logger.add(sys.stderr, level="DEBUG")
 
 
+async def _finalize_conversation(session_id: str, status: str) -> None:
+    """Write a conversation's terminal status + ended_at, resilient to cancellation.
+
+    Conversation.status would otherwise stay stuck on 'running' if the bot task is
+    cancelled mid-write — all participants leaving fires on_participant_disconnected
+    → task.cancel(), and a plain `await` inside the shutdown path can be interrupted
+    before the UPDATE commits. The write runs inside asyncio.shield so a cancellation
+    of the surrounding bot() coroutine cannot abort the commit; if our await is the
+    one cancelled, we still wait for the shielded write to finish before re-raising.
+    """
+    async def _write() -> None:
+        async with AsyncSessionLocal() as db:
+            async with db.begin():
+                await db.execute(
+                    update(Conversation)
+                    .where(Conversation.id == session_id)
+                    .values(ended_at=datetime.now(timezone.utc), status=status)
+                )
+
+    write_task = asyncio.ensure_future(_write())
+    try:
+        await asyncio.shield(write_task)
+    except asyncio.CancelledError:
+        await write_task  # shielded write is still running — let it commit
+        raise
+    except Exception as e:
+        logger.error(f"Failed to finalize conversation {session_id}: {e}")
+
+
 async def bot(runner_args: LiveKitRunnerArguments):
     logger.info(f"Bot starting - joining room: {runner_args.room_name}")
 
@@ -265,17 +335,34 @@ async def bot(runner_args: LiveKitRunnerArguments):
     def _stt_factory():
         return _build_stt_for_multi_speaker(bot_config, openai_api_key, env_config.deepgram_api_key)
 
-    multi_stt = MultiSpeakerSTT(_stt_factory)
+    # Interruption tracking: the bot should yield, not talk over users. The tracker
+    # is fed bot-speaking frames (via _InterruptionObserver) and REAL user speech
+    # onset from the per-participant VAD (via MultiSpeakerSTT's on_speech_onset).
+    interruptions = InterruptionTracker(labels={"stt_model": bot_config.stt_model})
+
+    def _on_speech_onset(sid: str) -> None:
+        interruptions.user_onset(time.monotonic(), sid)
+
+    multi_stt = MultiSpeakerSTT(_stt_factory, on_speech_onset=_on_speech_onset)
     logger.info(
         f"STT: model={bot_config.stt_model} mode=per-participant delay={bot_config.stt_delay}"
     )
+    # Mock TTS (BOT_MOCK_TTS) swaps in zero-cost synthetic silence for load/soak
+    # testing — no paid TTS calls. OFF by default; never enable in production. The LLM
+    # is pinned to the cheapest model by the soak harness rather than mocked.
+    _mock_tts = os.getenv("BOT_MOCK_TTS", "").lower() in ("1", "true", "yes")
+
     llm = OpenAILLMService(api_key=openai_api_key, model=bot_config.llm_model)
     _tts_mode = (
         TextAggregationMode.TOKEN
         if bot_config.tts_aggregation_mode == "token"
         else TextAggregationMode.SENTENCE
     )
-    if bot_config.tts_provider == "openai":
+    if _mock_tts:
+        from mock_services import MockTTSService
+        logger.warning("BOT_MOCK_TTS enabled — synthetic silence, no TTS API calls")
+        tts = MockTTSService(text_aggregation_mode=_tts_mode)
+    elif bot_config.tts_provider == "openai":
         from pipecat.services.openai.tts import OpenAITTSService
         tts = OpenAITTSService(
             api_key=openai_api_key,
@@ -310,6 +397,8 @@ async def bot(runner_args: LiveKitRunnerArguments):
     # Used to compute real STT latency: last audio frame → transcript committed.
     # Covers endpointing silence wait + transcription + network roundtrip.
     _last_audio_times: dict[str, float] = {}
+    # Recent bot TTS texts, for the self-echo heuristic in on_user_turn_stopped.
+    _recent_bot_texts: list[str] = []
 
     class _MetricsObserver(BaseObserver):
         """Intercepts Pipecat MetricsFrame to capture per-stage TTFB values.
@@ -350,6 +439,28 @@ async def bot(runner_args: LiveKitRunnerArguments):
                 val_ms = m.value * 1000
                 _metrics_data["sentence_agg_ms"] = val_ms
                 _prom.sentence_agg.record(val_ms, {"tts_provider": bot_config.tts_provider})
+
+    class _InterruptionObserver(BaseObserver):
+        """Feeds the bot's TTS speaking window to the InterruptionTracker.
+
+        Pairs with MultiSpeakerSTT's on_speech_onset (real user speech start) so the
+        tracker can tell when a user spoke while the bot was still talking.
+        """
+
+        def __init__(self):
+            super().__init__()
+            self._seen: set = set()
+
+        async def on_push_frame(self, data: FramePushed):
+            frame = data.frame
+            if frame.id in self._seen:
+                return
+            if isinstance(frame, BotStartedSpeakingFrame):
+                self._seen.add(frame.id)
+                interruptions.bot_started(time.monotonic())
+            elif isinstance(frame, BotStoppedSpeakingFrame):
+                self._seen.add(frame.id)
+                interruptions.bot_stopped(time.monotonic())
 
     class _AudioTimestampRecorder(FrameProcessor):
         """Records the monotonic time of each participant's last audio frame.
@@ -425,7 +536,7 @@ async def bot(runner_args: LiveKitRunnerArguments):
             enable_metrics=True,
             enable_usage_metrics=True,
         ),
-        observers=[MetricsLogObserver(), _MetricsObserver()],
+        observers=[MetricsLogObserver(), _MetricsObserver(), _InterruptionObserver()],
         enable_tracing=env_config.enable_tracing,
         enable_turn_tracking=env_config.enable_tracing,
         conversation_id=runner_args.session_id,
@@ -452,8 +563,53 @@ async def bot(runner_args: LiveKitRunnerArguments):
         last_audio_ts = _turn_timing.pop("last_audio_ts", None)
         if last_audio_ts is not None:
             _turn_timing["stt_ms"] = (stt_done_time - last_audio_ts) * 1000
+        # Spike diagnostics: capture the conditions when stt_ms goes extreme so we
+        # can attribute it (queue backlog vs held-open VAD vs provider stall).
+        stt_ms = _turn_timing.get("stt_ms")
+        # Record queue depth on every turn so the overlap scenario can see backlog
+        # even when no individual turn crosses the spike threshold.
+        _turn_timing["diag_queue_depth"] = multi_stt.qsize()
+        if stt_ms is not None and stt_ms > _STT_SPIKE_THRESHOLD_MS:
+            _turn_timing["diag_stt_spike"] = True
+            _ep = getattr(bot_config, "stt_endpointing_ms", 200)
+            try:
+                import metrics as _prom
+                _prom.stt_spikes_total.add(
+                    1, {"stt_model": bot_config.stt_model, "endpointing_ms": str(_ep)}
+                )
+            except Exception:
+                pass
+            logger.warning(
+                "STT latency spike: stt_ms={:.0f} model={} endpointing_ms={} "
+                "queue_depth={} content={!r}",
+                stt_ms, bot_config.stt_model, _ep, multi_stt.qsize(),
+                (message.content or "")[:80],
+            )
         if not message.content:
+            # VAD/STT fired but produced no transcript — these are dropped from the
+            # stt_ms histogram, so count them separately to explain percentile skew.
+            try:
+                import metrics as _prom
+                _prom.phantom_segments_total.add(1, {"stt_model": bot_config.stt_model})
+            except Exception:
+                pass
+            logger.debug("Phantom segment: user turn committed with empty content")
             return
+        # Self-echo heuristic: does this user transcript echo recent bot TTS?
+        for _bot_text in _recent_bot_texts:
+            sim = _text_similarity(message.content, _bot_text)
+            if sim >= _SELF_ECHO_SIMILARITY:
+                _turn_timing["diag_self_echo"] = True
+                try:
+                    import metrics as _prom
+                    _prom.self_echo_suspected_total.add(1, {"stt_model": bot_config.stt_model})
+                except Exception:
+                    pass
+                logger.warning(
+                    "Possible bot self-echo (sim={:.2f}): user={!r} ~ bot={!r}",
+                    sim, message.content[:80], _bot_text[:80],
+                )
+                break
         # Resolution order for speaker identity:
         #   1. SID stored by _SpeakerTracker from TranscriptionFrame.user_id
         #   2. Raw SID stored directly from on_data_received (_last_data_sender)
@@ -498,6 +654,11 @@ async def bot(runner_args: LiveKitRunnerArguments):
 
     @context_aggregator.assistant().event_handler("on_assistant_turn_stopped")
     async def on_assistant_turn_stopped(aggregator, message):
+        # Remember recent bot speech so on_user_turn_stopped can flag self-echo.
+        if message.content:
+            _recent_bot_texts.append(message.content)
+            if len(_recent_bot_texts) > _RECENT_BOT_TEXT_WINDOW:
+                del _recent_bot_texts[0]
         ts = _iso_to_unix(message.timestamp)
         utt_id = _new_id()
         meta: dict = {}
@@ -521,6 +682,17 @@ async def bot(runner_args: LiveKitRunnerArguments):
             meta["total_latency_ms"] = round(timing["stt_ms"] + meta["latency_ms"], 1)
         if timing:
             meta["timing"] = timing
+        # Diagnostics surfaced to the DB so the simulation harness (and prod
+        # debugging) can see spikes/echo/backlog without scraping logs/Prometheus.
+        diag: dict = {}
+        if t.get("diag_stt_spike"):
+            diag["stt_spike"] = True
+        if t.get("diag_self_echo"):
+            diag["self_echo"] = True
+        if "diag_queue_depth" in t:
+            diag["queue_depth"] = t["diag_queue_depth"]
+        if diag:
+            meta["diag"] = diag
         # E2E latency + utterance counter (per-stage metrics observed by _MetricsObserver)
         try:
             import metrics as _prom
@@ -662,18 +834,22 @@ async def bot(runner_args: LiveKitRunnerArguments):
     try:
         await runner.run(task)
         status = "completed"
+    except asyncio.CancelledError:
+        # Graceful end: all participants left (on_participant_disconnected →
+        # task.cancel()) or the runner's background task was cancelled. Record a
+        # clean completion, then re-raise so the cancellation isn't swallowed.
+        status = "completed"
+        raise
     except Exception as e:
         logger.error(f"Bot pipeline error in room {runner_args.room_name}: {e}")
     finally:
-        async with AsyncSessionLocal() as db:
-            async with db.begin():
-                await db.execute(
-                    update(Conversation)
-                    .where(Conversation.id == runner_args.session_id)
-                    .values(ended_at=datetime.now(timezone.utc), status=status)
-                )
-
-    logger.info(f"Bot session {runner_args.session_id} ended ({status})")
+        await _finalize_conversation(runner_args.session_id, status)
+        _isum = interruptions.summary()
+        logger.info(
+            f"Bot session {runner_args.session_id} ended ({status}) — "
+            f"interruptions={_isum['interruptions']} "
+            f"talkover_ms(max={_isum['talkover_ms_max']:.0f} avg={_isum['talkover_ms_avg']:.0f})"
+        )
 
 
 def _build_stt_for_multi_speaker(bot_config, openai_api_key: str, deepgram_api_key: str | None):

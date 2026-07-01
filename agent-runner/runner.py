@@ -1,3 +1,4 @@
+import asyncio
 import os
 import traceback
 import uuid
@@ -87,6 +88,10 @@ LIVEKIT_API_KEY = require(config.livekit_api_key, "LIVEKIT_API_KEY")
 BOT_RUNNER_SECRET = os.environ.get("BOT_RUNNER_SECRET")
 LIVEKIT_API_SECRET = require(config.livekit_api_secret, "LIVEKIT_API_SECRET")
 LIVEKIT_URL = require(config.livekit_url, "LIVEKIT_URL")
+# Bot JWT lifetime. Default 15 min matches LiveKit's historical behavior; raise it
+# (e.g. soak/longevity runs export BOT_TOKEN_TTL_MINUTES=30) so sessions longer than
+# 15 min don't silently drop on token expiry.
+BOT_TOKEN_TTL_MINUTES = int(os.environ.get("BOT_TOKEN_TTL_MINUTES", "15"))
 
 
 def verify_api_key(request: Request):
@@ -218,6 +223,8 @@ _LLM_CHOICES = [
 ]
 
 _STT_MODEL_CHOICES = [
+    ("parakeet-tdt-0.6b-v2", "parakeet-tdt-0.6b-v2 (stt-nemotron sidecar) (default)"),
+    ("parakeet-unified-en-0.6b", "parakeet-unified-en-0.6b (stt-nemotron sidecar, offline)"),
     ("nova-3-general", "nova-3-general (Deepgram)"),
     ("gpt-realtime-whisper", "gpt-realtime-whisper (OpenAI)"),
     ("gpt-4o-transcribe", "gpt-4o-transcribe (OpenAI)"),
@@ -225,7 +232,6 @@ _STT_MODEL_CHOICES = [
     ("whisper-turbo", "whisper-turbo (local faster-whisper, CPU)"),
     ("whisper-base", "whisper-base (local faster-whisper, CPU)"),
     ("whisper-small", "whisper-small (local faster-whisper, CPU)"),
-    ("parakeet-tdt-0.6b-v2", "parakeet-tdt-0.6b-v2 (stt-nemotron sidecar)"),
 ]
 
 
@@ -256,7 +262,7 @@ class BotConfigAdmin(ModelView, model=BotConfig):
         "stt_delay": {"choices": [("", "— (none)")]},
         "tts_provider": {"choices": [("elevenlabs", "elevenlabs"), ("openai", "openai")]},
         "tts_aggregation_mode": {"choices": [("sentence", "sentence (default)"), ("token", "token (lower latency)")]},
-        "stt_endpointing_ms": {"choices": [("200", "200ms (default)"), ("100", "100ms (lower latency)"), ("50", "50ms (aggressive)")]},
+        "stt_endpointing_ms": {"choices": [("100", "100ms (default)"), ("200", "200ms"), ("50", "50ms (aggressive)")]},
     }
     name = "Bot Config"
     name_plural = "Bot Configs"
@@ -295,7 +301,7 @@ async def _create_bot_token(
                 agent=True,
             )
         )
-        .with_ttl(timedelta(minutes=15))
+        .with_ttl(timedelta(minutes=BOT_TOKEN_TTL_MINUTES))
     )
     if agent_name:
         token = token.with_room_config(
@@ -532,8 +538,10 @@ async def update_config(request: Request, _=Depends(verify_api_key)):
             "nova-3-general", "gpt-realtime-whisper", "gpt-4o-transcribe", "gpt-4o-mini-transcribe",
             # local faster-whisper (whisper-<model_size>); CPU-only — see Experiment 5
             "whisper-turbo", "whisper-base", "whisper-small",
-            # stt-nemotron sidecar (Parakeet-TDT) — see Experiment 6
+            # stt-nemotron sidecar (Parakeet) — see Experiment 6. parakeet-unified-en-0.6b
+            # is NVIDIA's offline+streaming unified English model, served here in offline mode.
             "parakeet-tdt-0.6b-v2",
+            "parakeet-unified-en-0.6b",
         }
         if body["stt_model"] not in _valid_stt:
             return JSONResponse({"error": f"stt_model must be one of: {', '.join(sorted(_valid_stt))}"}, status_code=400)
@@ -852,6 +860,80 @@ async def stop_recording(request: Request, _=Depends(verify_api_key)):
 
     logger.info(f"recording stopped: room={room_name} egress_count={len(active)}")
     return {"stopped": len(active)}
+
+
+async def reconcile_stale_conversations(min_age_seconds: int = 60) -> int:
+    """Close conversations stuck on 'running' whose LiveKit room no longer exists.
+
+    The bot's own finally block normally writes the terminal status, but if the bot
+    process dies hard (OOM under load, kill, crash) that block never runs and the row
+    stays 'running' forever. This sweep is the safety net: it lists active LiveKit
+    rooms and marks any running conversation whose room is gone as 'ended'.
+
+    min_age_seconds guards against racing a freshly-created session whose bot has not
+    yet joined — the room doesn't exist in LiveKit until the bot connects.
+    """
+    from livekit.protocol.room import ListRoomsRequest
+
+    cutoff = datetime.now(timezone.utc) - timedelta(seconds=min_age_seconds)
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(
+            select(Conversation).where(
+                Conversation.status == "running",
+                Conversation.started_at < cutoff,
+            )
+        )
+        running = list(result.scalars().all())
+    if not running:
+        return 0
+
+    async with api.LiveKitAPI(
+        url=_lk_http_url(), api_key=LIVEKIT_API_KEY, api_secret=LIVEKIT_API_SECRET
+    ) as lk:
+        rooms = (await lk.room.list_rooms(ListRoomsRequest())).rooms
+    active_rooms = {r.name for r in rooms}
+
+    stale = [c for c in running if c.room_name not in active_rooms]
+    if not stale:
+        return 0
+
+    async with AsyncSessionLocal() as db:
+        async with db.begin():
+            await db.execute(
+                update(Conversation)
+                .where(Conversation.id.in_([c.id for c in stale]))
+                .values(ended_at=datetime.now(timezone.utc), status="ended")
+            )
+    logger.info(
+        f"reconcile: closed {len(stale)} stale conversation(s): "
+        f"{', '.join(c.room_name for c in stale)}"
+    )
+    return len(stale)
+
+
+@app.post("/conversations/reconcile")
+async def reconcile_conversations(_=Depends(verify_api_key)):
+    """Manually trigger the stale-conversation sweep (also runs on a timer)."""
+    closed = await reconcile_stale_conversations()
+    return {"closed": closed}
+
+
+@app.on_event("startup")
+async def _start_conversation_reconcile_loop() -> None:
+    if os.environ.get("DISABLE_CONVERSATION_RECONCILE", "").lower() in ("1", "true", "yes"):
+        return
+    interval = int(os.environ.get("CONVERSATION_RECONCILE_INTERVAL_SECONDS", "120"))
+
+    async def _loop() -> None:
+        while True:
+            await asyncio.sleep(interval)
+            try:
+                await reconcile_stale_conversations()
+            except Exception as e:
+                logger.warning(f"conversation reconcile loop error: {e}")
+
+    asyncio.create_task(_loop())
+    logger.info(f"conversation reconcile loop started (every {interval}s)")
 
 
 @app.post("/recordings/reconcile")

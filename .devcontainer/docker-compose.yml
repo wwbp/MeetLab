@@ -73,6 +73,10 @@ services:
   stt-nemotron:
     build:
       context: ../stt-nemotron
+    # Auto-recover from OOM: under heavy concurrency (e.g. a 10-room soak on a small
+    # host) the CPU sidecar can exhaust memory and be killed (exit 137). Without this
+    # it stays down and every bot's STT fails; with it the sidecar comes back.
+    restart: unless-stopped
     environment:
       - DEVICE=cpu
       - MODEL_PRECISION=fp32
@@ -98,6 +102,12 @@ services:
       - DATABASE_URL=postgresql+asyncpg://meetlab:meetlab@postgres:5432/meetlab
       - BOT_RUNNER_SECRET=${BOT_RUNNER_SECRET:-}
       - NEMOTRON_STT_URL=http://stt-nemotron:8000
+      # Bot JWT lifetime (min). Default 15; soak/longevity runs raise it so 20-min+
+      # sessions don't drop on token expiry. `make soak` passes 30 here.
+      - BOT_TOKEN_TTL_MINUTES=${BOT_TOKEN_TTL_MINUTES:-15}
+      # Zero-cost mock TTS for load/soak testing (no paid TTS calls). OFF by default —
+      # `make soak MOCK=1` turns it on. Never enable in production.
+      - BOT_MOCK_TTS=${BOT_MOCK_TTS:-0}
     volumes:
       - ../agent-runner:/app:cached
       - agent-runner-venv:/app/.venv

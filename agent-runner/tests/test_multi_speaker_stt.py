@@ -183,6 +183,21 @@ class TestFrameCollector(unittest.IsolatedAsyncioTestCase):
         self.assertIsInstance(frames[3], TranscriptionFrame)
         self.assertIsInstance(frames[4], UserStoppedSpeakingFrame)
 
+    async def test_real_vad_onset_fires_speech_onset_callback(self):
+        """VADUserStartedSpeakingFrame (real onset) is surfaced to on_speech_onset,
+        then dropped from the main pipeline — this is the interruption signal."""
+        q: asyncio.Queue = asyncio.Queue()
+        seen = []
+        collector = _FrameCollector(
+            q, needs_vad_wrap=True, sid="sidA",
+            on_speech_onset=lambda sid: seen.append(sid),
+        )
+
+        await collector.queue_frame(VADUserStartedSpeakingFrame(), FrameDirection.DOWNSTREAM)
+
+        self.assertEqual(seen, ["sidA"])      # callback fired with the participant sid
+        self.assertTrue(q.empty())            # frame still dropped from main pipeline
+
     async def test_no_vad_wrap_for_interim_transcription(self):
         q: asyncio.Queue = asyncio.Queue()
         collector = _FrameCollector(q, needs_vad_wrap=True)

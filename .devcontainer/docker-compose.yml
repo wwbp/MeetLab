@@ -73,6 +73,10 @@ services:
   stt-nemotron:
     build:
       context: ../stt-nemotron
+    # Auto-recover from OOM: under heavy concurrency (e.g. a 10-room soak on a small
+    # host) the CPU sidecar can exhaust memory and be killed (exit 137). Without this
+    # it stays down and every bot's STT fails; with it the sidecar comes back.
+    restart: unless-stopped
     environment:
       - DEVICE=cpu
       - MODEL_PRECISION=fp32

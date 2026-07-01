@@ -62,6 +62,12 @@ MAX_GAP = float(env("MAX_GAP", "8"))
 SETTLE_SECS = float(env("SETTLE_SECS", "4"))
 STAGGER = float(env("STAGGER", "4"))
 COLLECT_TIMEOUT = float(env("COLLECT_TIMEOUT", "30"))
+# How long to wait for each session to reach a terminal status before calling it stuck.
+# Normal teardown is <1s, but under STT failure a bot may sit idle-but-connected until
+# its idle timeout, then the stale-conversation reconciler (≈120s) closes it. Wait past
+# that so the DB-consistency verdict reflects the real outcome, not a too-early snapshot.
+# The poll short-circuits the moment a session goes terminal, so healthy runs don't wait.
+FINALIZE_WAIT_SECS = float(env("FINALIZE_WAIT_SECS", "180"))
 
 # Mode controls how strict the pass/fail verdict is:
 #   sanity  — small run, everything must work: a bot that never replies is a FAIL.
@@ -141,11 +147,11 @@ async def _finalize_and_collect(result: dict) -> dict:
     sid = result["session_id"]
     if not sid:
         return result
-    # Poll for terminal status (the all-users-leave teardown path).
-    deadline = time.monotonic() + COLLECT_TIMEOUT
+    # Poll for terminal status (all-users-leave finalize, or the reconciler safety net).
+    deadline = time.monotonic() + FINALIZE_WAIT_SECS
     status, ended_at = await conversation_status(sid)
     while status == "running" and time.monotonic() < deadline:
-        await asyncio.sleep(1.0)
+        await asyncio.sleep(2.0)
         status, ended_at = await conversation_status(sid)
     result["status"], result["ended_at"] = status, ended_at
     metas = await query_bot_metas(sid)

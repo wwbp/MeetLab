@@ -22,6 +22,21 @@ It loads and runs inference sequentially — one request at a time, no batching,
 queue management. Concurrency numbers (Experiment 6): 4-way p50 290ms, 8-way 475ms, 16-way
 842ms; 20-way under sustained real load ≈ 5s. The ceiling is the **serving layer**, not the T4.
 
+**Baseline benchmark** (`make bench-stt-concurrency`, local CPU sidecar, 2026-07-01) — the
+serialization is exact and unambiguous:
+
+| concurrency | p50 | p95 | throughput |
+|---|---|---|---|
+| 1 | 708ms | 727ms | 1.41 req/s |
+| 2 | 1413ms | 1419ms | 1.41 req/s |
+| 4 | 2826ms | 2865ms | 1.41 req/s |
+| 8 | 5642ms | 5666ms | 1.41 req/s |
+
+Latency scales **linearly** with concurrency (8× at 8-way) while **throughput stays pinned at
+1.41 req/s** — the server processes one request at a time; concurrency just lengthens the queue.
+A batched Triton server should hold p50 roughly flat and let throughput climb. Re-run the same
+tool against the NIM/Riva server (`STT_API=openai STT_URL=<nim>`) to quantify the fix.
+
 ## Target: NVIDIA Speech NIM (recommended)
 
 NIM is NVIDIA's production-grade, GPU-accelerated container: model + CUDA + TensorRT + Triton +

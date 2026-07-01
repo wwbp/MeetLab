@@ -11,7 +11,7 @@ BENCHMARK_WAV ?=
 
 MSG ?= migration
 
-.PHONY: up down start stop logs migrate migration test test-unit test-integration test-bot-longevity test-multi-speaker test-multi-speaker-audio test-session-lifecycle setup-livekit-cloud revert-livekit-local test-livekit-tooling scan scan-agent-runner scan-meet benchmark benchmark-audio benchmark-audio-long benchmark-full benchmark-exp2 benchmark-report simulate soak soak-sanity
+.PHONY: up down start stop logs migrate migration test test-unit test-integration test-bot-longevity test-multi-speaker test-multi-speaker-audio test-session-lifecycle setup-livekit-cloud revert-livekit-local test-livekit-tooling scan scan-agent-runner scan-meet benchmark benchmark-audio benchmark-audio-long benchmark-full benchmark-exp2 benchmark-report simulate soak soak-sanity bench-stt-concurrency
 
 up:
 	$(COMPOSE) up --build -d
@@ -179,6 +179,17 @@ soak-sanity:
 		DURATION_MIN=$(or $(DURATION_SANITY),2) \
 		STT_MODEL=$(STT_MODEL) ENDPOINTING_MS=$(ENDPOINTING_MS) \
 		uv run python tests/soak_meeting.py
+
+# Direct STT-server concurrency benchmark: fire N concurrent transcriptions straight at
+# the STT server (no LiveKit/bot) and measure latency vs concurrency. Baseline the current
+# sidecar, then re-run against NIM/Riva to quantify the fix. See docs/gpu-stt-deployment.md.
+# Knobs: STT_URL, STT_API=shadowfita|openai, STT_MODEL, CONCURRENCIES, REQUESTS_PER.
+bench-stt-concurrency:
+	$(COMPOSE) up -d --wait agent-runner stt-nemotron
+	$(COMPOSE) exec -T agent-runner \
+		env STT_URL="$(or $(STT_URL),http://stt-nemotron:8000)" STT_API="$(or $(STT_API),shadowfita)" \
+		STT_MODEL="$(STT_MODEL)" CONCURRENCIES="$(CONCURRENCIES)" REQUESTS_PER="$(REQUESTS_PER)" \
+		uv run python tests/bench_stt_concurrency.py
 
 benchmark-exp2:
 	$(COMPOSE) up -d transport-server agent-runner

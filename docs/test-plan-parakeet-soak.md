@@ -53,6 +53,22 @@ stays hanging"):
 | Bot dies hard (OOM/kill, no finally) | lifecycle B (room-gone reconcile) | periodic reconciler marks it `ended` (min-age grace spares just-started sessions — lifecycle B2) |
 | Normal completion | lifecycle A (finalize directly) | terminal status committed even if the caller is cancelled mid-write |
 
+## Local capacity findings (8 GB dev host, 2026-06-30)
+
+Scaling `make soak` on the local CPU sidecar (mock TTS + nano LLM, so STT is the variable):
+
+| Rooms | Streams | Outcome |
+|---|---|---|
+| 2 | 4 | clean, P50 158ms |
+| 4 | 8 | survives; P95 5.2s, 6 spikes, 1 room quiet-early |
+| 6 | 12 | survives; 12 spikes, 1 room starved to 5.2s median |
+| 10 | 20 | **OOM** — sidecar killed, 0 bot turns |
+
+**Usable ≤4 rooms; memory-survivable ≤6; OOMs by 10.** The 10-room target needs the prod GPU
+sidecar (or concurrency cap / replicas / NIM). DB consistency held through the OOM (all sessions
+finalized via bot + reconciler). Resilience shipped: sidecar `restart: unless-stopped`,
+`FINALIZE_WAIT_SECS=180` verdict wait.
+
 ## Decisions applied
 
 - **Graduated runs.** Sanity check first (`make soak-sanity`, strict), then scale to the full

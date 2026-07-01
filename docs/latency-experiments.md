@@ -550,12 +550,26 @@ Two soak prerequisites shipped alongside: bot token TTL is now env-configurable
 session-end "status stuck on `running`" bug is fixed (cancellation-safe terminal write +
 a stale-conversation reconciler in agent-runner). See `make test-session-lifecycle`.
 
-**Stage 3 — multi-bot soak (✅ harness shipped 2026-06-30):** `make soak` drives
-**10 rooms × 2 users × 1 bot for 20 min**, all concurrent, and reports aggregate latency,
-backlog, and a DB-consistency verdict. Two modes: local CPU (a backlog/saturation stress
-test — ~20 concurrent streams overwhelm the single serialized sidecar by design) and prod
-T4 for real latency under load. See `docs/meeting-simulations.md`. _Results table: TBD once
-the prod run completes._
+**Stage 3 — multi-bot soak (✅ harness + local capacity run 2026-06-30):** `make soak`
+drives N rooms × 2 users × 1 bot, all concurrent, reporting aggregate latency, backlog,
+early-drop detection, and a DB-consistency verdict. See `docs/meeting-simulations.md`.
+
+**Local capacity (8 GB dev host, CPU sidecar, mock TTS + nano LLM so STT is isolated):**
+
+| Rooms | Streams | Result |
+|---|---|---|
+| 2 | 4 | Clean — stt_ms P50 158ms, no spikes |
+| 4 | 8 | Survives — P50 155ms, P95 5.2s, 6 spikes, 1 room quiet-early |
+| 6 | 12 | Survives — P50 166ms, 12 spikes, 1 room starved to 5.2s median |
+| 10 | 20 | **OOM** — sidecar killed (exit 137), STT dead, 0 bot turns |
+
+Takeaways: the single CPU sidecar's memory ceiling is between 6 and 10 rooms on 8 GB;
+**usable** quality holds only to ~4 rooms (serialized decoding starves some rooms as
+concurrency climbs — the P95 tail and per-room 5s medians are the ceiling showing). The
+**10-room target needs the GPU/prod sidecar** (or a concurrency-capped / multi-replica /
+NIM deployment). DB consistency held through the OOM: all stranded sessions finalized (bot
+finalize + reconciler). Hardening shipped: `restart: unless-stopped` on the sidecar;
+`FINALIZE_WAIT_SECS` so the soak verdict waits for late finalization. _Prod-T4 10-room run: TBD._
 
 **Addendum — `parakeet-unified-en-0.6b` (offline, 2026-06-30):** NVIDIA's
 [unified offline+streaming English model](https://huggingface.co/nvidia/parakeet-unified-en-0.6b)

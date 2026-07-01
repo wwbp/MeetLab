@@ -56,7 +56,7 @@ def request(method: str, path: str, body: dict | None = None) -> dict:
 
 
 def set_config(scope: str, stt_model: str = "", endpointing_ms: str = "",
-               llm_model: str = "", tts_provider: str = "") -> dict:
+               llm_model: str = "", tts_provider: str = "", tts_voice: str = "") -> dict:
     """Apply per-room overrides before the bot starts (STT, endpointing, LLM, TTS)."""
     fields: dict = {"scope": scope}
     if stt_model:
@@ -67,6 +67,10 @@ def set_config(scope: str, stt_model: str = "", endpointing_ms: str = "",
         fields["llm_model"] = llm_model
     if tts_provider:
         fields["tts_provider"] = tts_provider
+    # Voice must match the provider (OpenAI rejects ElevenLabs voice IDs), so pin a
+    # compatible voice whenever we override the provider.
+    if tts_voice:
+        fields["tts_voice"] = tts_voice
     if len(fields) > 1:
         request("PUT", "/config", fields)
     return fields

@@ -57,6 +57,10 @@ ENDPOINTING_MS = env("ENDPOINTING_MS", "")
 # STT defaults to the bot default (parakeet, self-hosted = no per-use cost).
 LLM_MODEL = env("LLM_MODEL", "gpt-5.4-nano")
 TTS_PROVIDER = env("TTS_PROVIDER", "openai")
+# Voice must match the provider — OpenAI TTS rejects ElevenLabs voice IDs. Default to a
+# valid OpenAI voice since TTS_PROVIDER defaults to openai (matters when TTS isn't mocked,
+# e.g. prod runs). Override alongside TTS_PROVIDER=elevenlabs if using an 11labs voice.
+TTS_VOICE = env("TTS_VOICE", "alloy")
 MIN_GAP = float(env("MIN_GAP", "3"))
 MAX_GAP = float(env("MAX_GAP", "8"))
 SETTLE_SECS = float(env("SETTLE_SECS", "4"))
@@ -68,6 +72,10 @@ COLLECT_TIMEOUT = float(env("COLLECT_TIMEOUT", "30"))
 # that so the DB-consistency verdict reflects the real outcome, not a too-early snapshot.
 # The poll short-circuits the moment a session goes terminal, so healthy runs don't wait.
 FINALIZE_WAIT_SECS = float(env("FINALIZE_WAIT_SECS", "180"))
+# Load-only mode: drive load (start bots + stream audio) but skip all direct DB access.
+# Required when testing PROD, whose RDS isn't reachable from outside the VPC — read
+# latency/results from Grafana instead (same approach as Experiment 6's prod numbers).
+LOAD_ONLY = env("SOAK_LOAD_ONLY", "").lower() in ("1", "true", "yes")
 
 # Mode controls how strict the pass/fail verdict is:
 #   sanity  — small run, everything must work: a bot that never replies is a FAIL.
@@ -112,7 +120,7 @@ async def _run_room(idx: int, run_id: str, speech, sr: int, deadline: float) -> 
     rooms: list[rtc.Room] = []
     try:
         set_config(room_name, stt_model=STT_MODEL, endpointing_ms=ENDPOINTING_MS,
-                   llm_model=LLM_MODEL, tts_provider=TTS_PROVIDER)
+                   llm_model=LLM_MODEL, tts_provider=TTS_PROVIDER, tts_voice=TTS_VOICE)
         resp = request("POST", "/start", {"room_name": room_name})
         result["session_id"] = resp["session_id"]
 
@@ -146,6 +154,12 @@ async def _finalize_and_collect(result: dict) -> dict:
     """After users leave, confirm the session went terminal and pull its bot turns."""
     sid = result["session_id"]
     if not sid:
+        return result
+    if LOAD_ONLY:
+        # No DB reach (prod RDS is private) — results come from Grafana. We only know
+        # client-side signal here: the session started and how much audio we streamed.
+        result["status"] = "(load-only)"
+        result["metas"] = []
         return result
     # Poll for terminal status (all-users-leave finalize, or the reconciler safety net).
     deadline = time.monotonic() + FINALIZE_WAIT_SECS
@@ -196,6 +210,28 @@ def _write_artifact(run_id: str, results: list[dict], verdict: dict) -> str:
 
 
 def _report(run_id: str, results: list[dict]) -> bool:
+    bar = "─" * 78
+    if LOAD_ONLY:
+        errored = [r for r in results if r["error"]]
+        started = [r for r in results if r["session_id"]]
+        streamed = sum(r["turns"] for r in results)
+        print(f"\n{bar}")
+        print(f"SOAK [load-only] rooms={ROOMS} users/room={USERS_PER_ROOM} "
+              f"duration={DURATION_MIN}min stt={STT_MODEL or '(default)'} target={LIVEKIT_URL}")
+        print(bar)
+        print(f"  bots started: {len(started)}/{ROOMS}   errored rooms: {len(errored)}   "
+              f"audio turns streamed: {streamed}")
+        for r in results:
+            print(f"{r['room']:>18}  started={'yes' if r['session_id'] else 'NO':>3}  "
+                  f"streamed={r['turns']:>3}" + (f"   ERROR {r['error']}" if r['error'] else ""))
+        print(bar)
+        print("  Latency/health: read Grafana (meetlab_stt_latency_ms by stt_model) for the")
+        print("  run window, and prod agent-runner logs. DB verdict N/A (prod RDS not reachable).")
+        _write_artifact(run_id, results, {"mode": "load-only", "started": len(started),
+                                          "errored": len(errored), "streamed": streamed})
+        print(f"{bar}\n")
+        return len(errored) == 0 and len(started) == ROOMS
+
     stt, total, qdepth = [], [], []
     spikes = echoes = total_turns = 0
     for r in results:
@@ -289,8 +325,9 @@ async def main() -> None:
 
     ok = _report(run_id, results)
 
-    from db.engine import engine
-    await engine.dispose()
+    if not LOAD_ONLY:
+        from db.engine import engine
+        await engine.dispose()
 
     sys.exit(0 if ok else 1)
 

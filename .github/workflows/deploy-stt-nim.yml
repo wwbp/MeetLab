@@ -1,0 +1,102 @@
+name: Deploy STT NIM
+
+# Provisions/updates the Parakeet NIM GPU box (infra/stt-nim) via Terraform + SSM.
+# Drift-free: nothing is hand-run on the instance. See docs/gpu-stt-deployment.md.
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "Terraform action"
+        type: choice
+        options: [plan, apply]
+        default: plan
+  push:
+    branches: [main]
+    paths:
+      - "infra/stt-nim/**"
+      - ".github/workflows/deploy-stt-nim.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: stt-nim-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Terraform + NIM
+    runs-on: ubuntu-latest
+    environment: production
+    permissions:
+      id-token: write
+      contents: read
+    env:
+      AWS_REGION: us-east-1
+      # apply ONLY on an explicit workflow_dispatch(action=apply). Push to main = plan preview
+      # (never a surprise apply on merge — standing up the GPU box is always deliberate).
+      TF_ACTION: ${{ inputs.action == 'apply' && 'apply' || 'plan' }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/${{ secrets.AWS_ROLE_NAME }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Seed NGC key to SSM (SecureString)
+        if: env.TF_ACTION == 'apply'
+        run: |
+          set -euo pipefail
+          aws ssm put-parameter --name "/meetlab/stt-nim/ngc_api_key" \
+            --type SecureString --value "${{ secrets.NGC_API_KEY }}" --overwrite >/dev/null
+          echo "NGC key written to SSM."
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.9.8"
+
+      - name: Terraform init
+        working-directory: infra/stt-nim
+        run: |
+          set -euo pipefail
+          terraform init \
+            -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}" \
+            -backend-config="region=${{ env.AWS_REGION }}" \
+            -backend-config="dynamodb_table=${{ vars.TF_STATE_LOCK_TABLE }}"
+
+      - name: Terraform ${{ env.TF_ACTION }}
+        working-directory: infra/stt-nim
+        run: |
+          set -euo pipefail
+          terraform ${{ env.TF_ACTION }} -input=false ${{ env.TF_ACTION == 'apply' && '-auto-approve' || '' }} \
+            -var="region=${{ env.AWS_REGION }}" \
+            -var="vpc_id=${{ vars.STT_VPC_ID }}" \
+            -var="subnet_id=${{ vars.STT_SUBNET_ID }}" \
+            -var="agent_runner_sg_id=${{ vars.AGENT_RUNNER_SG_ID }}" \
+            -var="private_zone_id=${{ vars.PRIVATE_ZONE_ID }}"
+
+      - name: Roll the NIM container + health check (via SSM, on the box)
+        if: env.TF_ACTION == 'apply'
+        working-directory: infra/stt-nim
+        run: |
+          set -euo pipefail
+          IID="$(terraform output -raw instance_id)"
+          echo "Instance: $IID"
+          # Pull latest image + restart the unit, then wait for readiness — all on the box,
+          # since the NIM's private IP isn't reachable from the GitHub runner.
+          CMD_ID="$(aws ssm send-command \
+            --instance-ids "$IID" \
+            --document-name "AWS-RunShellScript" \
+            --comment "roll+health nim-stt" \
+            --parameters commands='["set -e","systemctl restart nim-stt","for i in $(seq 1 60); do curl -fsS localhost:9000/v1/health/ready && exit 0; echo waiting $i; sleep 10; done; echo NIM not ready; exit 1"]' \
+            --query Command.CommandId --output text)"
+          echo "SSM command: $CMD_ID"
+          aws ssm wait command-executed --command-id "$CMD_ID" --instance-id "$IID" || true
+          STATUS="$(aws ssm get-command-invocation --command-id "$CMD_ID" --instance-id "$IID" --query Status --output text)"
+          echo "SSM status: $STATUS"
+          aws ssm get-command-invocation --command-id "$CMD_ID" --instance-id "$IID" --query StandardOutputContent --output text || true
+          test "$STATUS" = "Success"

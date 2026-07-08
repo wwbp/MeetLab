@@ -1,0 +1,75 @@
+{
+  "Version": "2012-10-17",
+  "Comment": "Permissions the GitHub Actions OIDC deploy role needs for infra/stt-nim (deploy-stt-nim.yml). Attach to the role named in the AWS_ROLE_NAME secret. Scope-tightenable; kept functional for Terraform + SSM here.",
+  "Statement": [
+    {
+      "Sid": "TerraformState",
+      "Effect": "Allow",
+      "Action": ["s3:ListBucket", "s3:GetObject", "s3:PutObject", "s3:DeleteObject"],
+      "Resource": [
+        "arn:aws:s3:::meetlab-tfstate-848180123498",
+        "arn:aws:s3:::meetlab-tfstate-848180123498/*"
+      ]
+    },
+    {
+      "Sid": "TerraformLock",
+      "Effect": "Allow",
+      "Action": ["dynamodb:GetItem", "dynamodb:PutItem", "dynamodb:DeleteItem", "dynamodb:DescribeTable"],
+      "Resource": "arn:aws:dynamodb:us-east-1:848180123498:table/meetlab-tf-lock"
+    },
+    {
+      "Sid": "Ec2ForNimInstance",
+      "Effect": "Allow",
+      "Action": [
+        "ec2:Describe*",
+        "ec2:RunInstances",
+        "ec2:TerminateInstances",
+        "ec2:StartInstances",
+        "ec2:StopInstances",
+        "ec2:CreateTags",
+        "ec2:DeleteTags",
+        "ec2:CreateSecurityGroup",
+        "ec2:DeleteSecurityGroup",
+        "ec2:AuthorizeSecurityGroupIngress",
+        "ec2:AuthorizeSecurityGroupEgress",
+        "ec2:RevokeSecurityGroupIngress",
+        "ec2:RevokeSecurityGroupEgress",
+        "ec2:ModifyInstanceAttribute",
+        "ec2:ModifyInstanceMetadataOptions"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "IamInstanceProfile",
+      "Effect": "Allow",
+      "Action": [
+        "iam:CreateRole", "iam:DeleteRole", "iam:GetRole", "iam:TagRole",
+        "iam:PutRolePolicy", "iam:GetRolePolicy", "iam:DeleteRolePolicy",
+        "iam:AttachRolePolicy", "iam:DetachRolePolicy", "iam:ListRolePolicies",
+        "iam:ListAttachedRolePolicies", "iam:ListInstanceProfilesForRole",
+        "iam:CreateInstanceProfile", "iam:DeleteInstanceProfile", "iam:GetInstanceProfile",
+        "iam:AddRoleToInstanceProfile", "iam:RemoveRoleFromInstanceProfile"
+      ],
+      "Resource": [
+        "arn:aws:iam::848180123498:role/meetlab-stt-nim",
+        "arn:aws:iam::848180123498:instance-profile/meetlab-stt-nim"
+      ]
+    },
+    {
+      "Sid": "IamPassRoleToInstance",
+      "Effect": "Allow",
+      "Action": "iam:PassRole",
+      "Resource": "arn:aws:iam::848180123498:role/meetlab-stt-nim",
+      "Condition": { "StringEquals": { "iam:PassedToService": "ec2.amazonaws.com" } }
+    },
+    {
+      "Sid": "NgcKeyAndRunCommand",
+      "Effect": "Allow",
+      "Action": [
+        "ssm:PutParameter", "ssm:GetParameter", "ssm:DeleteParameter",
+        "ssm:SendCommand", "ssm:GetCommandInvocation", "ssm:ListCommands", "ssm:ListCommandInvocations"
+      ],
+      "Resource": "*"
+    }
+  ]
+}

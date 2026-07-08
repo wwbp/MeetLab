@@ -18,8 +18,9 @@ replacing the single-threaded Shadowfita sidecar. Applied via GitHub Actions
    `TF_STATE_BUCKET`, `TF_STATE_LOCK_TABLE`.
 3. **Network ids** → repo **vars** `STT_VPC_ID`, `STT_SUBNET_ID`, `AGENT_RUNNER_SG_ID`,
    `PRIVATE_ZONE_ID` (the vivaprox VPC/subnet, the agent-runner EB security group, the private zone).
-4. **IAM/OIDC** → the Actions role (`AWS_ROLE_NAME`) needs EC2 + IAM (instance profile) + SSM +
-   Route53 + S3/DynamoDB (state). Expansion of the existing deploy role.
+4. **IAM/OIDC** → attach [`actions-role-policy.json`](actions-role-policy.json) to the Actions
+   role (`AWS_ROLE_NAME`): EC2 + IAM (instance profile) + SSM + S3/DynamoDB (state).
+   e.g. `aws iam put-role-policy --role-name <AWS_ROLE_NAME> --policy-name meetlab-stt-nim --policy-document file://actions-role-policy.json`
 5. Confirm **NVIDIA AI Enterprise** licensing for prod NIM use.
 
 ## Deploy

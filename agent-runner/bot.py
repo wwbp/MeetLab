@@ -186,10 +186,11 @@ def _build_parakeet_chain(bot_config):
     stt-nemotron service (CPU locally, GPU in cloud — same HTTP API).
     Experiment log: docs/experiment-6-gpu-stt.md
     """
-    from nemotron_stt import NemotronHTTPSTTService, nemotron_stt_url
+    from nemotron_stt import NemotronHTTPSTTService, nemotron_stt_api, nemotron_stt_url
 
     vad = _build_vad_processor(bot_config)
-    stt = NemotronHTTPSTTService(base_url=nemotron_stt_url(), model=bot_config.stt_model)
+    stt = NemotronHTTPSTTService(
+        base_url=nemotron_stt_url(), model=bot_config.stt_model, api=nemotron_stt_api())
     vad.link(stt)
     return (vad, stt)
 

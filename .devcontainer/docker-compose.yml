@@ -102,6 +102,10 @@ services:
       - DATABASE_URL=postgresql+asyncpg://meetlab:meetlab@postgres:5432/meetlab
       - BOT_RUNNER_SECRET=${BOT_RUNNER_SECRET:-}
       - NEMOTRON_STT_URL=http://stt-nemotron:8000
+      # STT server API: 'shadowfita' (POST /transcribe, current sidecar) or 'openai'
+      # (POST /v1/audio/transcriptions — NVIDIA NIM / Riva concurrent server). Flip to
+      # 'openai' + point NEMOTRON_STT_URL at the NIM to migrate; no per-room change.
+      - NEMOTRON_STT_API=${NEMOTRON_STT_API:-shadowfita}
       # Bot JWT lifetime (min). Default 15; soak/longevity runs raise it so 20-min+
       # sessions don't drop on token expiry. `make soak` passes 30 here.
       - BOT_TOKEN_TTL_MINUTES=${BOT_TOKEN_TTL_MINUTES:-15}

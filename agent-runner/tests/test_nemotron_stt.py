@@ -44,7 +44,8 @@ class _StubHandler(BaseHTTPRequestHandler):
     def do_POST(self):
         body = self.rfile.read(int(self.headers["Content-Length"]))
         _StubHandler.received.append({"path": self.path, "length": len(body), "body": body})
-        if self.path != "/transcribe":
+        # shadowfita → /transcribe ; NIM/OpenAI-compatible → /v1/audio/transcriptions
+        if self.path not in ("/transcribe", "/v1/audio/transcriptions"):
             self.send_response(404)
             self.end_headers()
             return
@@ -100,6 +101,24 @@ class TestNemotronHTTPSTTService(unittest.IsolatedAsyncioTestCase):
     async def test_base_url_trailing_slash_normalized(self):
         svc = NemotronHTTPSTTService(base_url=f"http://127.0.0.1:{self.port}/", model="x")
         self.assertEqual(svc.base_url, f"http://127.0.0.1:{self.port}")
+
+    async def test_openai_api_posts_to_v1_endpoint_with_model(self):
+        """api='openai' targets the NIM/OpenAI-compatible /v1/audio/transcriptions with a
+        model field (no should_chunk), and parses the same {"text": ...} response."""
+        svc = NemotronHTTPSTTService(
+            base_url=f"http://127.0.0.1:{self.port}", model="parakeet-tdt-0.6b-v2", api="openai")
+        text = await svc._transcribe(_wav_bytes())
+        self.assertEqual(text, "what is the capital of france")
+        rec = _StubHandler.received[0]
+        self.assertEqual(rec["path"], "/v1/audio/transcriptions")
+        self.assertIn(b'name="model"', rec["body"])
+        self.assertIn(b"parakeet-tdt-0.6b-v2", rec["body"])
+        self.assertNotIn(b'name="should_chunk"', rec["body"])
+
+    async def test_default_api_is_shadowfita(self):
+        svc = NemotronHTTPSTTService(base_url=f"http://127.0.0.1:{self.port}", model="x")
+        await svc._transcribe(_wav_bytes())
+        self.assertEqual(_StubHandler.received[0]["path"], "/transcribe")
 
 
 if __name__ == "__main__":

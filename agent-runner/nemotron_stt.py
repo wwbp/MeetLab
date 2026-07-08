@@ -25,13 +25,27 @@ def nemotron_stt_url() -> str:
     return os.environ.get("NEMOTRON_STT_URL", DEFAULT_NEMOTRON_STT_URL).rstrip("/")
 
 
+def nemotron_stt_api() -> str:
+    """Which server API the sidecar speaks:
+
+    'shadowfita' (default) — the community FastAPI wrapper's POST /transcribe.
+    'openai'               — NVIDIA NIM / Riva OpenAI-compatible POST /v1/audio/transcriptions.
+
+    Flip NEMOTRON_STT_API=openai (and point NEMOTRON_STT_URL at the NIM) to migrate to the
+    concurrent Triton-backed server without any per-room config change.
+    """
+    return os.environ.get("NEMOTRON_STT_API", "shadowfita").strip().lower()
+
+
 class NemotronHTTPSTTService(SegmentedSTTService):
     """Transcribes VAD-cut speech segments via the stt-nemotron sidecar."""
 
-    def __init__(self, *, base_url: str, model: str, request_timeout_s: float = 30.0, **kwargs):
+    def __init__(self, *, base_url: str, model: str, request_timeout_s: float = 30.0,
+                 api: str = "shadowfita", **kwargs):
         super().__init__(**kwargs)
         self.base_url = base_url.rstrip("/")
         self._request_timeout_s = request_timeout_s
+        self._api = api.strip().lower()
         # model name's single source of truth is _settings.model (AIService)
         self._settings.model = model
         self._sync_model_name_to_metrics()
@@ -41,15 +55,25 @@ class NemotronHTTPSTTService(SegmentedSTTService):
         return self._settings.model
 
     async def _transcribe(self, wav_bytes: bytes) -> str:
-        """POST WAV segment to /transcribe, return the transcript text."""
+        """POST a WAV segment to the STT server and return the transcript text.
+
+        Both server flavors return an OpenAI-style {"text": ...} body; only the endpoint
+        and form fields differ.
+        """
         form = aiohttp.FormData()
         form.add_field("file", wav_bytes, filename="segment.wav", content_type="audio/wav")
-        # Segments are already VAD-cut single utterances — server-side chunking is
-        # redundant, and upstream's chunking path crashes (Shadowfita issue #16).
-        form.add_field("should_chunk", "false")
+        if self._api == "openai":
+            # NVIDIA NIM / Riva OpenAI-compatible transcription endpoint.
+            form.add_field("model", self._settings.model)
+            path = "/v1/audio/transcriptions"
+        else:
+            # Segments are already VAD-cut single utterances — server-side chunking is
+            # redundant, and upstream's chunking path crashes (Shadowfita issue #16).
+            form.add_field("should_chunk", "false")
+            path = "/transcribe"
         timeout = aiohttp.ClientTimeout(total=self._request_timeout_s)
         async with aiohttp.ClientSession(timeout=timeout) as session:
-            async with session.post(f"{self.base_url}/transcribe", data=form) as resp:
+            async with session.post(f"{self.base_url}{path}", data=form) as resp:
                 resp.raise_for_status()
                 payload = await resp.json()
         return (payload.get("text") or "").strip()

@@ -102,6 +102,10 @@ resource "aws_instance" "nim" {
   subnet_id              = var.subnet_id
   vpc_security_group_ids = [aws_security_group.nim.id]
   iam_instance_profile   = aws_iam_instance_profile.nim.name
+  # The STT subnet is public (routes to an IGW), so a public IP is required for egress
+  # (NGC image/model pull, SSM). Ingress is still locked to the agent-runner SG. Matches
+  # the existing T4 box. Move to a NAT'd private subnet later if a public IP isn't wanted.
+  associate_public_ip_address = true
 
   user_data = templatefile("${path.module}/user-data.sh", {
     nim_image             = var.nim_image

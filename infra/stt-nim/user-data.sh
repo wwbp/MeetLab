@@ -25,10 +25,13 @@ mkdir -p /opt/nim/cache
 umask 077
 cat > /etc/nim-stt.env <<EOF
 NGC_API_KEY=$NGC_API_KEY
-NIM_TAGS_SELECTOR=${nim_tags_selector}
 NIM_HTTP_API_PORT=9000
 NIM_GRPC_API_PORT=50051
 EOF
+# Only set NIM_TAGS_SELECTOR for non-default profiles (English v2 uses no selector).
+%{ if nim_tags_selector != "" ~}
+echo "NIM_TAGS_SELECTOR=${nim_tags_selector}" >> /etc/nim-stt.env
+%{ endif ~}
 
 cat > /etc/systemd/system/nim-stt.service <<UNIT
 [Unit]

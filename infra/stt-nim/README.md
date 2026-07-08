@@ -14,8 +14,8 @@ replacing the single-threaded Shadowfita sidecar. Applied via GitHub Actions
 ## One-time bootstrap (you)
 1. **NGC key** → GitHub Actions secret `NGC_API_KEY`. The workflow copies it to SSM SecureString
    (`/meetlab/stt-nim/ngc_api_key`) before apply.
-2. **TF state backend** → create an S3 bucket + DynamoDB lock table; set repo **vars**
-   `TF_STATE_BUCKET`, `TF_STATE_LOCK_TABLE`.
+2. **TF state backend** → an S3 bucket (repo **var** `TF_STATE_BUCKET`). State locking is
+   S3-native (`use_lockfile`, Terraform ≥ 1.10) — no DynamoDB table needed.
 3. **Network ids** → repo **vars** `STT_VPC_ID`, `STT_SUBNET_ID`, `AGENT_RUNNER_SG_ID`,
    `PRIVATE_ZONE_ID` (the vivaprox VPC/subnet, the agent-runner EB security group, the private zone).
 4. **IAM/OIDC** → attach [`actions-role-policy.json`](actions-role-policy.json) to the Actions

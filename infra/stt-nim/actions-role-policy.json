@@ -12,12 +12,6 @@
       ]
     },
     {
-      "Sid": "TerraformLock",
-      "Effect": "Allow",
-      "Action": ["dynamodb:GetItem", "dynamodb:PutItem", "dynamodb:DeleteItem", "dynamodb:DescribeTable"],
-      "Resource": "arn:aws:dynamodb:us-east-1:848180123498:table/meetlab-tf-lock"
-    },
-    {
       "Sid": "Ec2ForNimInstance",
       "Effect": "Allow",
       "Action": [

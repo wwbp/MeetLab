@@ -57,7 +57,7 @@ jobs:
 
       - uses: hashicorp/setup-terraform@v3
         with:
-          terraform_version: "1.9.8"
+          terraform_version: "1.13.3"
 
       - name: Terraform init
         working-directory: infra/stt-nim
@@ -65,8 +65,7 @@ jobs:
           set -euo pipefail
           terraform init \
             -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}" \
-            -backend-config="region=${{ env.AWS_REGION }}" \
-            -backend-config="dynamodb_table=${{ vars.TF_STATE_LOCK_TABLE }}"
+            -backend-config="region=${{ env.AWS_REGION }}"
 
       - name: Terraform ${{ env.TF_ACTION }}
         working-directory: infra/stt-nim

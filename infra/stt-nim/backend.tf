@@ -13,8 +13,10 @@ terraform {
   # so this file stays free of account-specific ids.
   backend "s3" {
     key = "stt-nim/terraform.tfstate"
-    # bucket, region, dynamodb_table provided via -backend-config
+    # bucket + region provided via -backend-config at init.
     encrypt = true
+    # S3-native state locking (Terraform >= 1.10) — no DynamoDB lock table needed.
+    use_lockfile = true
   }
 }
 

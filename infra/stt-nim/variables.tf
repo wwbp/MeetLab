@@ -38,9 +38,9 @@ variable "nim_image" {
 }
 
 variable "nim_tags_selector" {
-  description = "NIM model profile: 'type=default' (English v2) or 'type=multi' (multilingual v3)."
+  description = "Optional NIM model profile. Empty = English v2 (NVIDIA's documented default, no selector). Set 'type=multi' for the multilingual v3 model."
   type        = string
-  default     = "type=default"
+  default     = ""
 }
 
 variable "ngc_api_key_ssm_param" {

@@ -49,6 +49,11 @@ class NemotronHTTPSTTService(SegmentedSTTService):
         # model name's single source of truth is _settings.model (AIService)
         self._settings.model = model
         self._sync_model_name_to_metrics()
+        # The NIM (openai API) advertises its own model id + requires a language field —
+        # both differ from our internal stt_model. Env-overridable; defaults match the
+        # deployed Parakeet NIM (multilingual offline profile).
+        self._openai_model = os.environ.get("NEMOTRON_STT_MODEL", "parakeet-tdt-0.6b-multi-asr-offline")
+        self._language = os.environ.get("NEMOTRON_STT_LANGUAGE", "multi")
 
     @property
     def model_name(self) -> str:
@@ -63,8 +68,10 @@ class NemotronHTTPSTTService(SegmentedSTTService):
         form = aiohttp.FormData()
         form.add_field("file", wav_bytes, filename="segment.wav", content_type="audio/wav")
         if self._api == "openai":
-            # NVIDIA NIM / Riva OpenAI-compatible transcription endpoint.
-            form.add_field("model", self._settings.model)
+            # NVIDIA NIM / Riva OpenAI-compatible transcription endpoint. The NIM validates
+            # both the served model id and a language code (it 400/404/500s without them).
+            form.add_field("model", self._openai_model)
+            form.add_field("language", self._language)
             path = "/v1/audio/transcriptions"
         else:
             # Segments are already VAD-cut single utterances — server-side chunking is

@@ -46,6 +46,9 @@ jobs:
         with:
           role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/${{ secrets.AWS_ROLE_NAME }}
           aws-region: ${{ env.AWS_REGION }}
+          # First-boot NIM model generation (~20 min) + health poll can exceed the default
+          # 1h session; request 2h so creds don't expire mid-wait (role max-session-duration=7200).
+          role-duration-seconds: 7200
 
       - name: Seed NGC key to SSM (SecureString)
         if: env.TF_ACTION == 'apply'
@@ -100,13 +103,13 @@ jobs:
             --document-name "AWS-RunShellScript" \
             --comment "roll+health nim-stt" \
             --timeout-seconds 600 \
-            --parameters 'commands=["systemctl start nim-stt","for i in $(seq 1 240); do curl -fsS localhost:9000/v1/health/ready && exit 0; echo waiting $i; sleep 10; done; echo NIM not ready after ~40m; systemctl status nim-stt --no-pager | tail -20; exit 1"]' \
+            --parameters 'commands=["systemctl start nim-stt","for i in $(seq 1 300); do curl -fsS localhost:9000/v1/health/ready && exit 0; echo waiting $i; sleep 10; done; echo NIM not ready after ~50m; systemctl status nim-stt --no-pager | tail -20; exit 1"]' \
             --query Command.CommandId --output text)"
           echo "SSM command: $CMD_ID"
           # Poll the invocation to a terminal state (up to ~40 min) — the wait waiter's
           # attempt cap is too short for a 35-min health loop.
           STATUS="Pending"
-          for i in $(seq 1 80); do
+          for i in $(seq 1 120); do
             STATUS="$(aws ssm get-command-invocation --command-id "$CMD_ID" --instance-id "$IID" --query Status --output text 2>/dev/null || echo Pending)"
             case "$STATUS" in Success|Failed|Cancelled|TimedOut) break;; esac
             echo "invocation status ($i): $STATUS"; sleep 30

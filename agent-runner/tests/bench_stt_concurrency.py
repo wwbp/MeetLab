@@ -36,6 +36,8 @@ import aiohttp
 STT_URL = os.getenv("STT_URL", "http://stt-nemotron:8000").rstrip("/")
 STT_API = os.getenv("STT_API", "shadowfita").strip().lower()
 STT_MODEL = os.getenv("STT_MODEL", "parakeet-tdt-0.6b-v2")
+# NIM (openai API) requires a language code alongside the model.
+STT_LANGUAGE = os.getenv("STT_LANGUAGE", "multi")
 CONCURRENCIES = [int(x) for x in os.getenv("CONCURRENCIES", "1,2,4,8,16").split(",") if x.strip()]
 REQUESTS_PER = int(os.getenv("REQUESTS_PER", "24"))
 FIXTURE = os.getenv("FIXTURE", str(Path(__file__).parent / "fixtures" / "benchmark_prompt.wav"))
@@ -56,6 +58,7 @@ def _build_form(wav: bytes) -> aiohttp.FormData:
         # OpenAI-compatible (NVIDIA NIM /v1/audio/transcriptions)
         form.add_field("file", wav, filename="segment.wav", content_type="audio/wav")
         form.add_field("model", STT_MODEL)
+        form.add_field("language", STT_LANGUAGE)
     else:
         # Shadowfita /transcribe (segments are pre-cut → should_chunk=false)
         form.add_field("file", wav, filename="segment.wav", content_type="audio/wav")

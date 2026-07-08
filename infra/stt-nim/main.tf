@@ -125,8 +125,12 @@ resource "aws_instance" "nim" {
   tags = merge(var.tags, { Name = "meetlab-stt-gpu-nim" })
 }
 
-# ── Stable private DNS so NEMOTRON_STT_URL doesn't change with the instance ───────────
+# ── Optional stable private DNS (only if a zone in this VPC is provided) ──────────────
+# The existing zone `dev.bcfg-twilio-bot.local` is bound to a different VPC, so by default
+# this is skipped and NEMOTRON_STT_URL uses the instance private IP (stable in practice —
+# the instance is only replaced on a config change).
 resource "aws_route53_record" "nim" {
+  count   = var.private_zone_id != "" ? 1 : 0
   zone_id = var.private_zone_id
   name    = var.stt_dns_name
   type    = "A"

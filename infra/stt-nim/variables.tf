@@ -50,14 +50,15 @@ variable "ngc_api_key_ssm_param" {
 }
 
 variable "private_zone_id" {
-  description = "Route53 private hosted zone id for a stable STT endpoint (e.g. vivaprox.internal)."
+  description = "Optional Route53 private hosted zone id (must be associated with var.vpc_id) for a stable STT endpoint. Leave empty to skip DNS and use the instance private IP as NEMOTRON_STT_URL."
   type        = string
+  default     = ""
 }
 
 variable "stt_dns_name" {
-  description = "Stable private DNS name for the NIM — used as NEMOTRON_STT_URL host."
+  description = "Stable private DNS name for the NIM (only used when private_zone_id is set)."
   type        = string
-  default     = "stt-nim.vivaprox.internal"
+  default     = "stt-nim.meetlab.internal"
 }
 
 variable "tags" {

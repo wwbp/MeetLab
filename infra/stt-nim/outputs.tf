@@ -9,6 +9,6 @@ output "private_ip" {
 }
 
 output "stt_url" {
-  description = "Stable NIM endpoint — set as NEMOTRON_STT_URL (with NEMOTRON_STT_API=openai)."
-  value       = "http://${var.stt_dns_name}:9000"
+  description = "NIM endpoint — set as NEMOTRON_STT_URL (with NEMOTRON_STT_API=openai). Uses the private DNS name if a zone was provided, else the instance private IP."
+  value       = var.private_zone_id != "" ? "http://${var.stt_dns_name}:9000" : "http://${aws_instance.nim.private_ip}:9000"
 }

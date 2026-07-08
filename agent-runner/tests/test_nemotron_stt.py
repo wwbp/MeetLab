@@ -12,6 +12,7 @@ import os
 import sys
 import threading
 import unittest
+import unittest.mock
 import wave
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
@@ -102,9 +103,9 @@ class TestNemotronHTTPSTTService(unittest.IsolatedAsyncioTestCase):
         svc = NemotronHTTPSTTService(base_url=f"http://127.0.0.1:{self.port}/", model="x")
         self.assertEqual(svc.base_url, f"http://127.0.0.1:{self.port}")
 
-    async def test_openai_api_posts_to_v1_endpoint_with_model(self):
-        """api='openai' targets the NIM/OpenAI-compatible /v1/audio/transcriptions with a
-        model field (no should_chunk), and parses the same {"text": ...} response."""
+    async def test_openai_api_posts_to_v1_endpoint_with_model_and_language(self):
+        """api='openai' targets /v1/audio/transcriptions with the NIM's served model id +
+        a language field (both required by the NIM), no should_chunk, and parses {"text"}."""
         svc = NemotronHTTPSTTService(
             base_url=f"http://127.0.0.1:{self.port}", model="parakeet-tdt-0.6b-v2", api="openai")
         text = await svc._transcribe(_wav_bytes())
@@ -112,8 +113,18 @@ class TestNemotronHTTPSTTService(unittest.IsolatedAsyncioTestCase):
         rec = _StubHandler.received[0]
         self.assertEqual(rec["path"], "/v1/audio/transcriptions")
         self.assertIn(b'name="model"', rec["body"])
-        self.assertIn(b"parakeet-tdt-0.6b-v2", rec["body"])
+        self.assertIn(b"parakeet-tdt-0.6b-multi-asr-offline", rec["body"])  # NIM's served id, not stt_model
+        self.assertIn(b'name="language"', rec["body"])
         self.assertNotIn(b'name="should_chunk"', rec["body"])
+
+    async def test_openai_model_and_language_env_overridable(self):
+        import os
+        with unittest.mock.patch.dict(os.environ, {"NEMOTRON_STT_MODEL": "custom-model", "NEMOTRON_STT_LANGUAGE": "en-GB"}):
+            svc = NemotronHTTPSTTService(base_url=f"http://127.0.0.1:{self.port}", model="x", api="openai")
+        await svc._transcribe(_wav_bytes())
+        body = _StubHandler.received[0]["body"]
+        self.assertIn(b"custom-model", body)
+        self.assertIn(b"en-GB", body)
 
     async def test_default_api_is_shadowfita(self):
         svc = NemotronHTTPSTTService(base_url=f"http://127.0.0.1:{self.port}", model="x")

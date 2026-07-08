@@ -100,7 +100,7 @@ jobs:
             --document-name "AWS-RunShellScript" \
             --comment "roll+health nim-stt" \
             --timeout-seconds 600 \
-            --parameters 'commands=["systemctl restart nim-stt","for i in $(seq 1 210); do curl -fsS localhost:9000/v1/health/ready && exit 0; echo waiting $i; sleep 10; done; echo NIM not ready after ~35m; systemctl status nim-stt --no-pager | tail -20; exit 1"]' \
+            --parameters 'commands=["systemctl start nim-stt","for i in $(seq 1 240); do curl -fsS localhost:9000/v1/health/ready && exit 0; echo waiting $i; sleep 10; done; echo NIM not ready after ~40m; systemctl status nim-stt --no-pager | tail -20; exit 1"]' \
             --query Command.CommandId --output text)"
           echo "SSM command: $CMD_ID"
           # Poll the invocation to a terminal state (up to ~40 min) — the wait waiter's

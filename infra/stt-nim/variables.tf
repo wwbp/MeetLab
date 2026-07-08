@@ -26,9 +26,9 @@ variable "instance_type" {
 }
 
 variable "root_volume_gb" {
-  description = "Root EBS size. NIM image + TensorRT engine + model cache need headroom."
+  description = "Root EBS size. The NIM image (CUDA/TensorRT layers) is very large plus the DL AMI base and model cache — needs generous headroom."
   type        = number
-  default     = 120
+  default     = 250
 }
 
 variable "nim_image" {

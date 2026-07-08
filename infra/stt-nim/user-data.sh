@@ -19,8 +19,6 @@ NGC_API_KEY="$(aws ssm get-parameter --name "$NGC_PARAM" --with-decryption --reg
 # Authenticate to NVIDIA's registry for the image pull.
 echo "$NGC_API_KEY" | docker login nvcr.io --username '$oauthtoken' --password-stdin
 
-mkdir -p /opt/nim/cache
-
 # Root-only env file consumed by the systemd unit.
 umask 077
 cat > /etc/nim-stt.env <<EOF
@@ -50,7 +48,7 @@ ExecStart=/usr/bin/docker run --rm --name nim-stt \\
   --gpus all --shm-size=8GB --ulimit nofile=2048:2048 \\
   -e NGC_API_KEY -e NIM_TAGS_SELECTOR -e NIM_HTTP_API_PORT -e NIM_GRPC_API_PORT \\
   -p 9000:9000 -p 50051:50051 \\
-  -v /opt/nim/cache:/opt/nim/.cache \\
+  -v nim-cache:/opt/nim/.cache \\
   ${nim_image}
 ExecStop=/usr/bin/docker stop nim-stt
 

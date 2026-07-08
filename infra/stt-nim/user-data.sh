@@ -48,7 +48,6 @@ ExecStart=/usr/bin/docker run --rm --name nim-stt \\
   --gpus all --shm-size=8GB --ulimit nofile=2048:2048 \\
   -e NGC_API_KEY -e NIM_TAGS_SELECTOR -e NIM_HTTP_API_PORT -e NIM_GRPC_API_PORT \\
   -p 9000:9000 -p 50051:50051 \\
-  -v nim-cache:/opt/nim/.cache \\
   ${nim_image}
 ExecStop=/usr/bin/docker stop nim-stt
 

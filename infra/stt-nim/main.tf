@@ -20,7 +20,7 @@ data "aws_ami" "dl_base_gpu" {
 # ── Security group: NIM ports reachable ONLY from the agent-runner EB SG ──────────────
 resource "aws_security_group" "nim" {
   name        = "meetlab-stt-nim"
-  description = "Parakeet NIM — HTTP/gRPC open to the agent-runner EB SG only"
+  description = "Parakeet NIM - HTTP/gRPC open to the agent-runner EB SG only"
   vpc_id      = var.vpc_id
   tags        = merge(var.tags, { Name = "meetlab-stt-nim" })
 

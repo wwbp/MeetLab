@@ -41,7 +41,8 @@
         "iam:AttachRolePolicy", "iam:DetachRolePolicy", "iam:ListRolePolicies",
         "iam:ListAttachedRolePolicies", "iam:ListInstanceProfilesForRole",
         "iam:CreateInstanceProfile", "iam:DeleteInstanceProfile", "iam:GetInstanceProfile",
-        "iam:AddRoleToInstanceProfile", "iam:RemoveRoleFromInstanceProfile"
+        "iam:AddRoleToInstanceProfile", "iam:RemoveRoleFromInstanceProfile",
+        "iam:TagInstanceProfile", "iam:UntagInstanceProfile"
       ],
       "Resource": [
         "arn:aws:iam::848180123498:role/meetlab-stt-nim",

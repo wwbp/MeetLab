@@ -7,6 +7,12 @@ set -euxo pipefail
 REGION="${region}"
 NGC_PARAM="${ngc_api_key_ssm_param}"
 
+# Ensure the SSM agent is installed + running (the Ubuntu DL AMI doesn't ship it enabled),
+# so the deploy workflow can Run-Command this box for rolls/health checks.
+snap install amazon-ssm-agent --classic 2>/dev/null || true
+systemctl enable --now snap.amazon-ssm-agent.amazon-ssm-agent.service 2>/dev/null \
+  || systemctl enable --now amazon-ssm-agent 2>/dev/null || true
+
 # NGC key from SSM SecureString (instance profile grants ssm:GetParameter + kms:Decrypt).
 NGC_API_KEY="$(aws ssm get-parameter --name "$NGC_PARAM" --with-decryption --region "$REGION" --query Parameter.Value --output text)"
 

@@ -85,6 +85,12 @@ jobs:
           set -euo pipefail
           IID="$(terraform output -raw instance_id)"
           echo "Instance: $IID"
+          # Wait for the SSM agent to register (fresh boot + user-data install takes 1-3 min).
+          for i in $(seq 1 30); do
+            PING="$(aws ssm describe-instance-information --filters "Key=InstanceIds,Values=$IID" --query 'InstanceInformationList[0].PingStatus' --output text 2>/dev/null || true)"
+            [ "$PING" = "Online" ] && { echo "SSM online"; break; }
+            echo "waiting for SSM registration ($i): ${PING:-none}"; sleep 10
+          done
           # Pull latest image + restart the unit, then wait for readiness — all on the box,
           # since the NIM's private IP isn't reachable from the GitHub runner.
           CMD_ID="$(aws ssm send-command \

@@ -1,6 +1,5 @@
 {
   "Version": "2012-10-17",
-  "Comment": "Permissions the GitHub Actions OIDC deploy role needs for infra/stt-nim (deploy-stt-nim.yml). Attach to the role named in the AWS_ROLE_NAME secret. Scope-tightenable; kept functional for Terraform + SSM here.",
   "Statement": [
     {
       "Sid": "TerraformState",

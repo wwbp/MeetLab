@@ -70,27 +70,6 @@ services:
   # Local Parakeet/Nemotron STT (Experiment 6) — CPU here, same HTTP API as the
   # GPU build on AWS. Selected per-room via stt_model="parakeet-tdt-0.6b-v2".
   # Model (~2.4GB) downloads into the volume on first start.
-  stt-nemotron:
-    build:
-      context: ../stt-nemotron
-    # Auto-recover from OOM: under heavy concurrency (e.g. a 10-room soak on a small
-    # host) the CPU sidecar can exhaust memory and be killed (exit 137). Without this
-    # it stays down and every bot's STT fails; with it the sidecar comes back.
-    restart: unless-stopped
-    environment:
-      - DEVICE=cpu
-      - MODEL_PRECISION=fp32
-    ports:
-      - "8011:8000"
-    volumes:
-      - nemotron-models:/models
-    healthcheck:
-      test: ["CMD-SHELL", "python3 -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/healthz')\""]
-      interval: 10s
-      timeout: 5s
-      retries: 90
-      start_period: 30s
-
   agent-runner:
     build:
       context: ../agent-runner
@@ -101,11 +80,14 @@ services:
     environment:
       - DATABASE_URL=postgresql+asyncpg://meetlab:meetlab@postgres:5432/meetlab
       - BOT_RUNNER_SECRET=${BOT_RUNNER_SECRET:-}
-      - NEMOTRON_STT_URL=http://stt-nemotron:8000
-      # STT server API: 'shadowfita' (POST /transcribe, current sidecar) or 'openai'
-      # (POST /v1/audio/transcriptions — NVIDIA NIM / Riva concurrent server). Flip to
-      # 'openai' + point NEMOTRON_STT_URL at the NIM to migrate; no per-room change.
-      - NEMOTRON_STT_API=${NEMOTRON_STT_API:-shadowfita}
+      # Local dev has no GPU for the Parakeet NIM (the prod default STT), so force
+      # in-process whisper-base locally — no STT sidecar needed. Prod leaves this unset
+      # and uses the DB config (NIM). Set STT_MODEL_OVERRIDE= (empty) to honor the DB.
+      - STT_MODEL_OVERRIDE=${STT_MODEL_OVERRIDE-whisper-base}
+      # Only used when STT_MODEL_OVERRIDE is cleared and a parakeet-* model is selected:
+      # point NEMOTRON_STT_URL at a reachable NIM and set NEMOTRON_STT_API=openai.
+      - NEMOTRON_STT_URL=${NEMOTRON_STT_URL:-}
+      - NEMOTRON_STT_API=${NEMOTRON_STT_API:-openai}
       # Bot JWT lifetime (min). Default 15; soak/longevity runs raise it so 20-min+
       # sessions don't drop on token expiry. `make soak` passes 30 here.
       - BOT_TOKEN_TTL_MINUTES=${BOT_TOKEN_TTL_MINUTES:-15}
@@ -157,4 +139,3 @@ volumes:
   agent-runner-venv:
   meet-node-modules:
   postgres-data:
-  nemotron-models:

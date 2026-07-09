@@ -345,6 +345,38 @@ class TestConfigLoaderDefaults(unittest.TestCase):
         self.assertIn("elevenlabs", src)
 
 
+class TestSTTModelOverride(unittest.TestCase):
+    """STT_MODEL_OVERRIDE forces the STT model (local dev → in-process whisper-base,
+    since there's no local GPU for the Parakeet NIM). Prod leaves it unset."""
+
+    def setUp(self):
+        import db.config_loader as cl
+        self.cl = cl
+
+    def test_unset_returns_none(self):
+        import os
+        with unittest.mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("STT_MODEL_OVERRIDE", None)
+            self.assertIsNone(self.cl._stt_model_override())
+
+    def test_empty_string_returns_none(self):
+        import os
+        with unittest.mock.patch.dict(os.environ, {"STT_MODEL_OVERRIDE": "  "}):
+            self.assertIsNone(self.cl._stt_model_override())
+
+    def test_set_value_is_stripped(self):
+        import os
+        with unittest.mock.patch.dict(os.environ, {"STT_MODEL_OVERRIDE": " whisper-base "}):
+            self.assertEqual(self.cl._stt_model_override(), "whisper-base")
+
+    def test_load_bot_config_applies_override(self):
+        import inspect
+        src = inspect.getsource(self.cl.load_bot_config)
+        # The override must be applied to the returned config regardless of DB source.
+        self.assertIn("_stt_model_override()", src)
+        self.assertIn("stt_model=override", src)
+
+
 class TestSelfEchoHeuristic(unittest.TestCase):
     """_text_similarity / _normalize_words back the bot self-echo detector."""
 

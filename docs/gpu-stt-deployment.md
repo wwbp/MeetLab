@@ -16,6 +16,28 @@ sidecar, and the standard NVIDIA deployment to move to.
   concurrency natively** and scales to hundreds of parallel streams. This is the fix for 10-room
   scale; a bigger GPU alone is not.
 
+## Status (as of 2026-07-07): NIM live in prod
+
+- The Parakeet-TDT **NIM is deployed and serving prod** on the g6 (L4) via `infra/stt-nim/`.
+  agent-runner points at it (`NEMOTRON_STT_API=openai`, `NEMOTRON_STT_URL=http://10.0.5.21:9000`);
+  a real prod bot transcribed correctly through it. The concurrency benchmark showed the fix:
+  ~22× throughput and ~11× lower p50 vs the serialized Shadowfita baseline, errors=0.
+- **Shadowfita is being removed in two phases** (tech-debt cleanup):
+  - **Phase 1 (done):** local dev no longer runs the Shadowfita CPU sidecar. The local stack
+    transcribes with **in-process whisper-base** via `STT_MODEL_OVERRIDE=whisper-base` (set in
+    `.devcontainer/docker-compose.yml`); prod leaves the override unset and uses the DB config (NIM).
+  - **Phase 2 (deferred ~1 week, after the NIM proves stable):** delete the `shadowfita` code path
+    + tests, terminate the T4, scrub remaining references. Until then, the `shadowfita` API branch
+    and the **stopped T4** are kept **only** as the fast prod rollback (step 7 below).
+
+> **⚠ Licensing — action needed.** The prod cutover on **2026-07-07** uses an **NVIDIA Developer
+> Program** NGC key, which covers **development / testing / research** (≤16 GPUs) for free. If this
+> prod traffic counts as **production** (not academic research), it's governed by **NVIDIA AI
+> Enterprise**: a free **90-day evaluation**, then **~$4,500/GPU/yr**. **Decision owner: team;
+> deadline to start the eval or confirm the research exemption ≈ 2026-10-05** (90 days from
+> cutover). Nothing tracks this clock but this note — reconcile before then. See
+> [reference: NIM licensing](../infra/stt-nim/README.md).
+
 ## Why not just keep Shadowfita
 
 It loads and runs inference sequentially — one request at a time, no batching, no request
@@ -97,15 +119,17 @@ OSS community tutorials: [nvidia-riva/tutorials](https://github.com/nvidia-riva/
 Triton concurrency/batching; more manual setup (build `.rmir` → `riva-build`/`riva-deploy` →
 `riva_start.sh`). gRPC streaming supported. This is the "standard NVIDIA OSS community" path.
 
-## Ops (current sidecar, until migration)
+## Ops — the old T4 Shadowfita box (rollback only, pending Phase-2 decommission)
+
+Prod now serves from the NIM (see Status). The T4 below is kept **stopped** purely as the rollback
+target until Phase 2; start it only if executing the rollback in step 7.
 
 | Task | How |
 |---|---|
 | Instance | EC2 `meetlab-stt-gpu` (`i-0f045aa6c337b55ab`), T4, vivaprox VPC, private `10.0.5.115` |
-| Start / stop | `aws ec2 start-instances --instance-ids i-0f045aa6c337b55ab` / `stop-instances …`. Run only when needed (~$0.53/hr, ~$380/mo if 24/7). |
-| Wiring | agent-runner finds it via `NEMOTRON_STT_URL` on the EB env (`agent-runner` / app `vivaprox`) |
+| Start / stop | `aws ec2 start-instances --instance-ids i-0f045aa6c337b55ab` / `stop-instances …`. Keep stopped (~$0.53/hr when running). |
+| Wiring (rollback) | set `NEMOTRON_STT_API=shadowfita` + `NEMOTRON_STT_URL=http://10.0.5.115:8000` on the EB env |
 | Health (Shadowfita) | `GET :8000/healthz` |
-| First-symptom check | parakeet room's bot joins but never replies → check this server first |
 
 ## Migration plan (Shadowfita/T4 → NIM/g6)
 

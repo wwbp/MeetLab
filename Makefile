@@ -131,7 +131,7 @@ benchmark-full:
 # See docs/meeting-simulations.md.
 SCENARIO ?= noise
 simulate:
-	$(COMPOSE) up -d --wait transport-server agent-runner stt-nemotron
+	$(COMPOSE) up -d --wait transport-server agent-runner
 	$(COMPOSE) exec -T agent-runner uv run alembic upgrade head
 	$(COMPOSE) exec -T agent-runner \
 		env SCENARIO=$(SCENARIO) \
@@ -141,16 +141,16 @@ simulate:
 
 # Multi-room soak / load test: ROOMS rooms x USERS_PER_ROOM users x 1 bot conversing
 # for DURATION_MIN minutes, all concurrent. Reports aggregate latency, backlog, and a
-# DB-consistency verdict (every session must end terminal). The local CPU stt-nemotron
-# sidecar is expected to saturate under ~20 concurrent streams — that's the stress test.
-# Point AGENT_RUNNER_URL/LIVEKIT_URL/NEMOTRON_STT_URL at prod for real latency numbers.
+# DB-consistency verdict (every session must end terminal). Locally the bot transcribes
+# with in-process whisper-base (STT_MODEL_OVERRIDE), so no STT sidecar is needed.
+# Point AGENT_RUNNER_URL/LIVEKIT_URL at prod for real latency numbers against the NIM.
 # See docs/meeting-simulations.md.
 # MOCK=1 swaps in zero-cost synthetic TTS (no paid TTS calls — the dominant soak cost),
 # while the soak still exercises real STT-under-load, the bot-speaking window, and
 # session teardown. `make soak` defaults to MOCK=1; set MOCK=0 for real TTS.
 # The LLM is always pinned to the cheapest model (gpt-5.4-nano) by the harness, not
-# mocked. STT is never mocked: the default parakeet STT is self-hosted (free); for a
-# no-download free run use STT_MODEL=whisper-base.
+# mocked. STT is never mocked: locally it's in-process whisper-base (free, no download
+# after first run); prod uses the self-hosted Parakeet NIM.
 ROOMS ?= 10
 USERS_PER_ROOM ?= 2
 DURATION_MIN ?= 20
@@ -158,7 +158,7 @@ SOAK_MODE ?= stress
 soak: MOCK ?= 1
 soak:
 	BOT_TOKEN_TTL_MINUTES=30 BOT_MOCK_TTS=$(MOCK) \
-		$(COMPOSE) up -d --wait transport-server agent-runner stt-nemotron
+		$(COMPOSE) up -d --wait transport-server agent-runner
 	$(COMPOSE) exec -T agent-runner uv run alembic upgrade head
 	$(COMPOSE) exec -T agent-runner \
 		env SOAK_MODE=$(SOAK_MODE) ROOMS=$(ROOMS) USERS_PER_ROOM=$(USERS_PER_ROOM) DURATION_MIN=$(DURATION_MIN) \
@@ -172,7 +172,7 @@ soak:
 soak-sanity: MOCK ?= 0
 soak-sanity:
 	BOT_TOKEN_TTL_MINUTES=30 BOT_MOCK_TTS=$(MOCK) \
-		$(COMPOSE) up -d --wait transport-server agent-runner stt-nemotron
+		$(COMPOSE) up -d --wait transport-server agent-runner
 	$(COMPOSE) exec -T agent-runner uv run alembic upgrade head
 	$(COMPOSE) exec -T agent-runner \
 		env SOAK_MODE=sanity ROOMS=$(or $(ROOMS_SANITY),2) USERS_PER_ROOM=2 \
@@ -181,13 +181,14 @@ soak-sanity:
 		uv run python tests/soak_meeting.py
 
 # Direct STT-server concurrency benchmark: fire N concurrent transcriptions straight at
-# the STT server (no LiveKit/bot) and measure latency vs concurrency. Baseline the current
-# sidecar, then re-run against NIM/Riva to quantify the fix. See docs/gpu-stt-deployment.md.
-# Knobs: STT_URL, STT_API=shadowfita|openai, STT_MODEL, CONCURRENCIES, REQUESTS_PER.
+# the STT server (no LiveKit/bot) and measure latency vs concurrency. Point STT_URL at a
+# reachable NIM (run from inside the VPC) to confirm it scales. The old-sidecar baseline
+# is recorded in docs/gpu-stt-deployment.md. See that doc for the before/after table.
+# Knobs: STT_URL (required), STT_API=openai|shadowfita, STT_MODEL, CONCURRENCIES, REQUESTS_PER.
 bench-stt-concurrency:
-	$(COMPOSE) up -d --wait agent-runner stt-nemotron
+	$(COMPOSE) up -d --wait agent-runner
 	$(COMPOSE) exec -T agent-runner \
-		env STT_URL="$(or $(STT_URL),http://stt-nemotron:8000)" STT_API="$(or $(STT_API),shadowfita)" \
+		env STT_URL="$(STT_URL)" STT_API="$(or $(STT_API),openai)" \
 		STT_MODEL="$(STT_MODEL)" CONCURRENCIES="$(CONCURRENCIES)" REQUESTS_PER="$(REQUESTS_PER)" \
 		uv run python tests/bench_stt_concurrency.py
 

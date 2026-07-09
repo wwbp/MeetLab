@@ -14,6 +14,7 @@ os.environ.setdefault("DEEPGRAM_API_KEY", "test-deepgram-key")
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from bot import (
+    _apply_stt_model_override,
     _build_stt,
     _build_stt_for_multi_speaker,
     _find_participant_by_sid,
@@ -343,6 +344,36 @@ class TestConfigLoaderDefaults(unittest.TestCase):
         self.assertIn("stt_endpointing_ms=100", src)
         self.assertIn("gpt-5.4-nano", src)
         self.assertIn("elevenlabs", src)
+
+
+class TestSTTModelOverride(unittest.TestCase):
+    """STT_MODEL_OVERRIDE forces the bot's STT model (local dev → in-process whisper-base,
+    since there's no local GPU for the Parakeet NIM). Prod leaves it unset. Applied to the
+    running bot only — never to the /config store/API, which reflects what's persisted."""
+
+    def _cfg(self, stt_model="parakeet-tdt-0.6b-v2"):
+        return _FakeBotConfig(stt_model=stt_model)
+
+    def test_unset_returns_config_unchanged(self):
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("STT_MODEL_OVERRIDE", None)
+            cfg = self._cfg()
+            self.assertIs(_apply_stt_model_override(cfg), cfg)
+
+    def test_empty_string_returns_config_unchanged(self):
+        with patch.dict(os.environ, {"STT_MODEL_OVERRIDE": "  "}):
+            cfg = self._cfg()
+            self.assertIs(_apply_stt_model_override(cfg), cfg)
+
+    def test_set_value_overrides_stt_model_stripped(self):
+        with patch.dict(os.environ, {"STT_MODEL_OVERRIDE": " whisper-base "}):
+            out = _apply_stt_model_override(self._cfg("parakeet-tdt-0.6b-v2"))
+            self.assertEqual(out.stt_model, "whisper-base")
+
+    def test_override_matching_current_is_noop(self):
+        with patch.dict(os.environ, {"STT_MODEL_OVERRIDE": "whisper-base"}):
+            cfg = self._cfg("whisper-base")
+            self.assertIs(_apply_stt_model_override(cfg), cfg)
 
 
 class TestSelfEchoHeuristic(unittest.TestCase):

@@ -13,9 +13,9 @@ Run it against the current sidecar to capture the baseline, then against the NIM
 server to quantify the fix — same tool, just point STT_URL / STT_API at each.
 
 Env:
-  STT_URL         base URL (default http://stt-nemotron:8000)
-  STT_API         shadowfita → POST /transcribe (default)
-                  openai     → POST /v1/audio/transcriptions (NIM / OpenAI-compatible)
+  STT_URL         base URL of the STT server (required, e.g. http://10.0.5.21:9000)
+  STT_API         openai     → POST /v1/audio/transcriptions (NIM / OpenAI-compatible, default)
+                  shadowfita → POST /transcribe (legacy sidecar)
   STT_MODEL       model field for the openai API (default parakeet-tdt-0.6b-v2)
   CONCURRENCIES   comma list of in-flight levels to sweep (default 1,2,4,8,16)
   REQUESTS_PER    requests sent per level (default 24)
@@ -33,8 +33,8 @@ from pathlib import Path
 
 import aiohttp
 
-STT_URL = os.getenv("STT_URL", "http://stt-nemotron:8000").rstrip("/")
-STT_API = os.getenv("STT_API", "shadowfita").strip().lower()
+STT_URL = os.getenv("STT_URL", "").rstrip("/")
+STT_API = os.getenv("STT_API", "openai").strip().lower()
 STT_MODEL = os.getenv("STT_MODEL", "parakeet-tdt-0.6b-v2")
 # NIM (openai API) requires a language code alongside the model.
 STT_LANGUAGE = os.getenv("STT_LANGUAGE", "multi")
@@ -109,6 +109,9 @@ async def _run_level(wav: bytes, concurrency: int) -> dict:
 
 
 async def main() -> None:
+    if not STT_URL:
+        sys.exit("STT_URL is required — point it at a reachable NIM, e.g. "
+                 "make bench-stt-concurrency STT_URL=http://10.0.5.21:9000")
     wav = Path(FIXTURE).read_bytes()
     print(f"[bench-stt] url={STT_URL} api={STT_API} model={STT_MODEL} "
           f"fixture={Path(FIXTURE).name} ({len(wav)} bytes) requests/level={REQUESTS_PER}")

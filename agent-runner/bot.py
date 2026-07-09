@@ -5,6 +5,7 @@ import re
 import sys
 import time
 import uuid as _uuid_mod
+from dataclasses import replace
 from datetime import datetime, timezone
 
 from loguru import logger
@@ -195,6 +196,21 @@ def _build_parakeet_chain(bot_config):
     return (vad, stt)
 
 
+def _apply_stt_model_override(bot_config):
+    """Force the bot's STT model regardless of the DB config, when STT_MODEL_OVERRIDE is set.
+
+    Local dev has no GPU to run the Parakeet NIM (the prod default), so the local stack sets
+    STT_MODEL_OVERRIDE=whisper-base to transcribe in-process instead of depending on a sidecar.
+    Prod leaves it unset and uses the DB config (NIM). This is applied only to the running bot,
+    not to the /config store/API — those still reflect what's actually persisted.
+    """
+    override = (os.environ.get("STT_MODEL_OVERRIDE") or "").strip()
+    if override and override != bot_config.stt_model:
+        logger.info(f"STT_MODEL_OVERRIDE active: {bot_config.stt_model} → {override}")
+        return replace(bot_config, stt_model=override)
+    return bot_config
+
+
 def _build_stt(bot_config, openai_api_key: str, deepgram_api_key: str | None):
     """Instantiate the STT service based on stt_model prefix.
 
@@ -322,7 +338,7 @@ async def bot(runner_args: LiveKitRunnerArguments):
     openai_api_key = require(env_config.openai_api_key, "OPENAI_API_KEY")
     elevenlabs_api_key = require(env_config.elevenlabs_api_key, "ELEVENLABS_API_KEY")
 
-    bot_config = await load_bot_config(runner_args.room_name)
+    bot_config = _apply_stt_model_override(await load_bot_config(runner_args.room_name))
     logger.info(
         f"Loaded bot config for room '{runner_args.room_name}': "
         f"model={bot_config.llm_model} voice={bot_config.tts_voice} vad={bot_config.vad_stop_secs}s"

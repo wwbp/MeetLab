@@ -14,6 +14,7 @@ os.environ.setdefault("DEEPGRAM_API_KEY", "test-deepgram-key")
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from bot import (
+    _apply_stt_model_override,
     _build_stt,
     _build_stt_for_multi_speaker,
     _find_participant_by_sid,
@@ -346,35 +347,33 @@ class TestConfigLoaderDefaults(unittest.TestCase):
 
 
 class TestSTTModelOverride(unittest.TestCase):
-    """STT_MODEL_OVERRIDE forces the STT model (local dev → in-process whisper-base,
-    since there's no local GPU for the Parakeet NIM). Prod leaves it unset."""
+    """STT_MODEL_OVERRIDE forces the bot's STT model (local dev → in-process whisper-base,
+    since there's no local GPU for the Parakeet NIM). Prod leaves it unset. Applied to the
+    running bot only — never to the /config store/API, which reflects what's persisted."""
 
-    def setUp(self):
-        import db.config_loader as cl
-        self.cl = cl
+    def _cfg(self, stt_model="parakeet-tdt-0.6b-v2"):
+        return _FakeBotConfig(stt_model=stt_model)
 
-    def test_unset_returns_none(self):
-        import os
-        with unittest.mock.patch.dict(os.environ, {}, clear=False):
+    def test_unset_returns_config_unchanged(self):
+        with patch.dict(os.environ, {}, clear=False):
             os.environ.pop("STT_MODEL_OVERRIDE", None)
-            self.assertIsNone(self.cl._stt_model_override())
+            cfg = self._cfg()
+            self.assertIs(_apply_stt_model_override(cfg), cfg)
 
-    def test_empty_string_returns_none(self):
-        import os
-        with unittest.mock.patch.dict(os.environ, {"STT_MODEL_OVERRIDE": "  "}):
-            self.assertIsNone(self.cl._stt_model_override())
+    def test_empty_string_returns_config_unchanged(self):
+        with patch.dict(os.environ, {"STT_MODEL_OVERRIDE": "  "}):
+            cfg = self._cfg()
+            self.assertIs(_apply_stt_model_override(cfg), cfg)
 
-    def test_set_value_is_stripped(self):
-        import os
-        with unittest.mock.patch.dict(os.environ, {"STT_MODEL_OVERRIDE": " whisper-base "}):
-            self.assertEqual(self.cl._stt_model_override(), "whisper-base")
+    def test_set_value_overrides_stt_model_stripped(self):
+        with patch.dict(os.environ, {"STT_MODEL_OVERRIDE": " whisper-base "}):
+            out = _apply_stt_model_override(self._cfg("parakeet-tdt-0.6b-v2"))
+            self.assertEqual(out.stt_model, "whisper-base")
 
-    def test_load_bot_config_applies_override(self):
-        import inspect
-        src = inspect.getsource(self.cl.load_bot_config)
-        # The override must be applied to the returned config regardless of DB source.
-        self.assertIn("_stt_model_override()", src)
-        self.assertIn("stt_model=override", src)
+    def test_override_matching_current_is_noop(self):
+        with patch.dict(os.environ, {"STT_MODEL_OVERRIDE": "whisper-base"}):
+            cfg = self._cfg("whisper-base")
+            self.assertIs(_apply_stt_model_override(cfg), cfg)
 
 
 class TestSelfEchoHeuristic(unittest.TestCase):

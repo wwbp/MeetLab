@@ -1,21 +1,9 @@
-import os
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 
 from sqlalchemy import select
 
 from db.engine import AsyncSessionLocal
 from db.models import BotConfig
-
-
-def _stt_model_override() -> str | None:
-    """Force the STT model regardless of the DB config, when set.
-
-    Local dev has no GPU to run the Parakeet NIM (the prod default), so the local
-    stack sets STT_MODEL_OVERRIDE=whisper-base to transcribe in-process instead of
-    depending on a sidecar. Prod leaves it unset and uses the DB config (NIM).
-    """
-    val = (os.environ.get("STT_MODEL_OVERRIDE") or "").strip()
-    return val or None
 
 
 @dataclass
@@ -52,7 +40,7 @@ async def load_bot_config(room_name: str | None = None) -> EffectiveBotConfig:
 
         if row is None:
             # Fallback hardcoded defaults if the table is somehow empty
-            cfg = EffectiveBotConfig(
+            return EffectiveBotConfig(
                 system_prompt=(
                     "You are a helpful assistant in a WebRTC call. "
                     "Your output will be converted to audio so don't include special characters. "
@@ -69,22 +57,17 @@ async def load_bot_config(room_name: str | None = None) -> EffectiveBotConfig:
                 tts_aggregation_mode="sentence",
                 stt_endpointing_ms=100,
             )
-        else:
-            cfg = EffectiveBotConfig(
-                system_prompt=row.system_prompt,
-                greeting=row.greeting,
-                vad_stop_secs=row.vad_stop_secs,
-                llm_model=row.llm_model,
-                tts_voice=row.tts_voice,
-                stt_model=row.stt_model,
-                stt_vad_mode=row.stt_vad_mode,
-                stt_delay=getattr(row, "stt_delay", None),
-                tts_provider=getattr(row, "tts_provider", "elevenlabs"),
-                tts_aggregation_mode=getattr(row, "tts_aggregation_mode", "sentence"),
-                stt_endpointing_ms=getattr(row, "stt_endpointing_ms", 200),
-            )
 
-        override = _stt_model_override()
-        if override and override != cfg.stt_model:
-            cfg = replace(cfg, stt_model=override)
-        return cfg
+        return EffectiveBotConfig(
+            system_prompt=row.system_prompt,
+            greeting=row.greeting,
+            vad_stop_secs=row.vad_stop_secs,
+            llm_model=row.llm_model,
+            tts_voice=row.tts_voice,
+            stt_model=row.stt_model,
+            stt_vad_mode=row.stt_vad_mode,
+            stt_delay=getattr(row, "stt_delay", None),
+            tts_provider=getattr(row, "tts_provider", "elevenlabs"),
+            tts_aggregation_mode=getattr(row, "tts_aggregation_mode", "sentence"),
+            stt_endpointing_ms=getattr(row, "stt_endpointing_ms", 200),
+        )

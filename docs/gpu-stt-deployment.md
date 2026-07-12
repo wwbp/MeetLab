@@ -16,7 +16,7 @@ sidecar, and the standard NVIDIA deployment to move to.
   concurrency natively** and scales to hundreds of parallel streams. This is the fix for 10-room
   scale; a bigger GPU alone is not.
 
-## Status (as of 2026-07-07): NIM live in prod
+## Status (as of 2026-07-08): NIM live in prod
 
 - The Parakeet-TDT **NIM is deployed and serving prod** on the g6 (L4) via `infra/stt-nim/`.
   agent-runner points at it (`NEMOTRON_STT_URL=http://10.0.5.21:9000`); a real prod bot
@@ -31,11 +31,11 @@ sidecar, and the standard NVIDIA deployment to move to.
     NIM-only), and the old **T4 (`meetlab-stt-gpu`, `i-0f045aa6c337b55ab`) is terminated**.
     **Rollback is no longer a live env-flip** — it's a redeploy of a pre-cutover build.
 
-> **⚠ Licensing — action needed.** The prod cutover on **2026-07-07** uses an **NVIDIA Developer
+> **⚠ Licensing — action needed.** The prod cutover on **2026-07-08** uses an **NVIDIA Developer
 > Program** NGC key, which covers **development / testing / research** (≤16 GPUs) for free. If this
 > prod traffic counts as **production** (not academic research), it's governed by **NVIDIA AI
 > Enterprise**: a free **90-day evaluation**, then **~$4,500/GPU/yr**. **Decision owner: team;
-> deadline to start the eval or confirm the research exemption ≈ 2026-10-05** (90 days from
+> deadline to start the eval or confirm the research exemption ≈ 2026-10-06** (90 days from
 > cutover). Nothing tracks this clock but this note — reconcile before then. See
 > [reference: NIM licensing](../infra/stt-nim/README.md).
 

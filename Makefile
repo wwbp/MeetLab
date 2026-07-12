@@ -184,11 +184,11 @@ soak-sanity:
 # the STT server (no LiveKit/bot) and measure latency vs concurrency. Point STT_URL at a
 # reachable NIM (run from inside the VPC) to confirm it scales. The old-sidecar baseline
 # is recorded in docs/gpu-stt-deployment.md. See that doc for the before/after table.
-# Knobs: STT_URL (required), STT_API=openai|shadowfita, STT_MODEL, CONCURRENCIES, REQUESTS_PER.
+# Knobs: STT_URL (required), STT_MODEL, STT_LANGUAGE, CONCURRENCIES, REQUESTS_PER.
 bench-stt-concurrency:
 	$(COMPOSE) up -d --wait agent-runner
 	$(COMPOSE) exec -T agent-runner \
-		env STT_URL="$(STT_URL)" STT_API="$(or $(STT_API),openai)" \
+		env STT_URL="$(STT_URL)" \
 		STT_MODEL="$(STT_MODEL)" CONCURRENCIES="$(CONCURRENCIES)" REQUESTS_PER="$(REQUESTS_PER)" \
 		uv run python tests/bench_stt_concurrency.py
 

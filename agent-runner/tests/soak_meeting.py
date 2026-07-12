@@ -7,12 +7,13 @@ users in a room staggered so turns mostly alternate. At the end it reports aggre
 latency, backlog (queue depth), and a DB-consistency verdict (every session must reach
 a terminal status with ended_at — the hanging-status check at scale).
 
-Two run modes, same harness — just point the env at a different STT backend:
-  • Local stress:  the CPU stt-nemotron sidecar is a single serialized server, so ~20
-    concurrent streams WILL saturate it. Rising qdepth / spikes is the EXPECTED result
-    and the whole point — it stresses the backlog path, not real latency.
-  • Prod realism:  set AGENT_RUNNER_URL / LIVEKIT_URL / NEMOTRON_STT_URL at the deployed
-    stack (T4 sidecar) for true latency under load.
+Two run modes, same harness:
+  • Local stress:  local bots transcribe with in-process whisper-base (STT_MODEL_OVERRIDE),
+    which saturates under ~20 concurrent streams. Rising qdepth / spikes is the EXPECTED
+    result and the whole point — it stresses the backlog path, not real latency.
+  • Prod realism:  set AGENT_RUNNER_URL / LIVEKIT_URL at the deployed stack (Parakeet NIM)
+    with SOAK_LOAD_ONLY=1, and read latency from Grafana (the harness's DB checks only see
+    the local DB, not prod's RDS).
 
 Knobs (env): ROOMS=10, USERS_PER_ROOM=2, DURATION_MIN=20, STT_MODEL (default=bot default),
 ENDPOINTING_MS, MIN_GAP=3, MAX_GAP=8, SETTLE_SECS=4, STAGGER=4, COLLECT_TIMEOUT=30.

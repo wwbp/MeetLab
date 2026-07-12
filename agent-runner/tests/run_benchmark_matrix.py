@@ -57,7 +57,7 @@ _STT_MODELS = [
     "gpt-4o-mini-transcribe",
     # "whisper-turbo",  # local faster-whisper — GPU only. On CPU: stt_ms ≈ 9.7s and the
     # 3.2GB-per-bot model OOMs the dev Docker VM (Experiment 5). Uncomment on a GPU host.
-    # stt-nemotron sidecar (Parakeet-TDT 0.6B, NeMo) — CPU locally, GPU in cloud (Experiment 6)
+    # Parakeet NIM (Parakeet-TDT 0.6B) — self-hosted GPU via NEMOTRON_STT_URL (Experiments 6-7)
     "parakeet-tdt-0.6b-v2",
 ]
 

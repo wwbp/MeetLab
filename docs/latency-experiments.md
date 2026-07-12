@@ -602,6 +602,42 @@ sherpa-onnx streaming zipformer) if the team wants a second candidate.
 
 ---
 
+## Experiment 7 — Prod NIM concurrency benchmark (2026-07-12)
+
+Measured the deployed Parakeet-TDT NIM (g6.xlarge / L4, `10.0.5.21:9000`, `NEMOTRON_STT_API=openai`)
+directly, to quantify the concurrency fix vs the Shadowfita baseline and find the capacity ceiling.
+
+**Method:** `tests/bench_stt_concurrency.py` (aiohttp, async) run from inside the prod agent-runner
+container via SSM, pointed at the NIM (`STT_MODEL=parakeet-tdt-0.6b-multi-asr-offline`,
+`STT_LANGUAGE=multi` — the NIM's *served* model id, not our internal `stt_model`). Corroborated by
+an independent stdlib-threads probe run on the NIM box against `localhost:9000` (near-identical
+numbers, so the shape is server-side, not a client artifact). Fixture: `benchmark_prompt.wav` (~3s).
+
+| concurrency | p50 ms | p95 ms | throughput | errors |
+|---|---|---|---|---|
+| 1 | 35 | 36 | 29 req/s | 0 |
+| 2 | 64 | 67 | 31 req/s | 0 |
+| 4 | 130 | 137 | 31 req/s | 0 |
+| 8 | 252 | 261 | 31 req/s | 0 |
+| 16 | 403 | 516 | 31 req/s | 0 |
+| 32 | 767 | 770 | 31 req/s | 0 |
+
+**Verdict — two findings:**
+1. **The fix is real and large.** vs Shadowfita's serialized baseline (§6: ~1.4 req/s, p50 ~5,600 ms
+   at conc 8), the NIM is **~22× throughput and ~22× lower p50 at conc 8, errors=0**. End-to-end
+   correctness confirmed on prod (a 2×2 sanity soak: NIM transcribed real speech, bots replied).
+2. **But it is fast-*serial*, not concurrent-batched.** Throughput pins at **~30 req/s** and p50 grows
+   ~linearly with concurrency — the single L4 model instance processes ~one-at-a-time at ~34 ms each,
+   not dynamically batching independent short requests.
+
+**Capacity implication:** the 10-room target offers ~3–4 STT segments/s (≈10% of the 30/s ceiling),
+so real p50 sits in the ~35–64 ms band with large headroom — the original north star (10 rooms,
+latency must not climb) is **met comfortably**. The NIM becomes the bottleneck only above ~50 rooms.
+To scale further (Phase 3, if needed): raise the NIM model-instance count / try a batching-friendly
+profile, or run multiple NIM replicas behind a balancer. Not required for current scale.
+
+---
+
 ## Future ideas (not yet planned)
 
 - **SmartTurn analyzer**: `LocalSmartTurnAnalyzerV3` can trigger LLM before the full VAD

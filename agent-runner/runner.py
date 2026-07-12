@@ -223,8 +223,8 @@ _LLM_CHOICES = [
 ]
 
 _STT_MODEL_CHOICES = [
-    ("parakeet-tdt-0.6b-v2", "parakeet-tdt-0.6b-v2 (stt-nemotron sidecar) (default)"),
-    ("parakeet-unified-en-0.6b", "parakeet-unified-en-0.6b (stt-nemotron sidecar, offline)"),
+    ("parakeet-tdt-0.6b-v2", "parakeet-tdt-0.6b-v2 (Parakeet NIM) (default)"),
+    ("parakeet-unified-en-0.6b", "parakeet-unified-en-0.6b (Parakeet NIM, offline)"),
     ("nova-3-general", "nova-3-general (Deepgram)"),
     ("gpt-realtime-whisper", "gpt-realtime-whisper (OpenAI)"),
     ("gpt-4o-transcribe", "gpt-4o-transcribe (OpenAI)"),
@@ -538,8 +538,8 @@ async def update_config(request: Request, _=Depends(verify_api_key)):
             "nova-3-general", "gpt-realtime-whisper", "gpt-4o-transcribe", "gpt-4o-mini-transcribe",
             # local faster-whisper (whisper-<model_size>); CPU-only — see Experiment 5
             "whisper-turbo", "whisper-base", "whisper-small",
-            # stt-nemotron sidecar (Parakeet) — see Experiment 6. parakeet-unified-en-0.6b
-            # is NVIDIA's offline+streaming unified English model, served here in offline mode.
+            # Parakeet NIM (self-hosted GPU, NEMOTRON_STT_URL) — see Experiments 6-7.
+            # parakeet-unified-en-0.6b is NVIDIA's offline+streaming unified English model.
             "parakeet-tdt-0.6b-v2",
             "parakeet-unified-en-0.6b",
         }

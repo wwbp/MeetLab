@@ -1,13 +1,13 @@
-"""Pipecat STT service for the stt-nemotron sidecar (NVIDIA Parakeet-TDT, Experiment 6).
+"""Pipecat STT service for the self-hosted Parakeet-TDT NIM (NVIDIA Speech NIM).
 
-NemotronHTTPSTTService is a SegmentedSTTService: the in-chain VADProcessor cuts
-speech segments, SegmentedSTTService wraps each one as WAV bytes, and run_stt POSTs
-them to the sidecar's /transcribe endpoint (Shadowfita/parakeet-tdt-0.6b-v2-fastapi,
-running CPU locally and GPU in cloud — same HTTP API either way).
+NemotronHTTPSTTService is a SegmentedSTTService: the in-chain VADProcessor cuts speech
+segments, SegmentedSTTService wraps each one as WAV bytes, and run_stt POSTs them to the
+NIM's OpenAI-compatible endpoint (POST /v1/audio/transcriptions, Triton-backed, concurrent).
 
-Wired by _build_stt / _build_stt_for_multi_speaker in bot.py for stt_model values
-with the "parakeet-" prefix, reusing the (VADProcessor, tail) chain mechanism built
-for local whisper. Experiment log: docs/experiment-6-gpu-stt.md
+Wired by _build_stt / _build_stt_for_multi_speaker in bot.py for stt_model values with the
+"parakeet-" prefix, reusing the (VADProcessor, tail) chain mechanism built for local whisper.
+The NIM's private endpoint is set via NEMOTRON_STT_URL. Experiment log: docs/latency-experiments.md
+(Experiments 6–7); deployment: docs/gpu-stt-deployment.md.
 """
 import os
 from typing import AsyncGenerator
@@ -18,41 +18,27 @@ from pipecat.frames.frames import ErrorFrame, Frame, TranscriptionFrame
 from pipecat.services.stt_service import SegmentedSTTService
 from pipecat.utils.time import time_now_iso8601
 
-DEFAULT_NEMOTRON_STT_URL = "http://stt-nemotron:8000"
-
 
 def nemotron_stt_url() -> str:
-    return os.environ.get("NEMOTRON_STT_URL", DEFAULT_NEMOTRON_STT_URL).rstrip("/")
-
-
-def nemotron_stt_api() -> str:
-    """Which server API the sidecar speaks:
-
-    'shadowfita' (default) — the community FastAPI wrapper's POST /transcribe.
-    'openai'               — NVIDIA NIM / Riva OpenAI-compatible POST /v1/audio/transcriptions.
-
-    Flip NEMOTRON_STT_API=openai (and point NEMOTRON_STT_URL at the NIM) to migrate to the
-    concurrent Triton-backed server without any per-room config change.
-    """
-    return os.environ.get("NEMOTRON_STT_API", "shadowfita").strip().lower()
+    """Base URL of the Parakeet NIM (e.g. http://10.0.5.21:9000). Set on the agent-runner
+    env (NEMOTRON_STT_URL). No default — parakeet-* models require a reachable NIM."""
+    return os.environ.get("NEMOTRON_STT_URL", "").rstrip("/")
 
 
 class NemotronHTTPSTTService(SegmentedSTTService):
-    """Transcribes VAD-cut speech segments via the stt-nemotron sidecar."""
+    """Transcribes VAD-cut speech segments via the Parakeet NIM (OpenAI-compatible API)."""
 
-    def __init__(self, *, base_url: str, model: str, request_timeout_s: float = 30.0,
-                 api: str = "shadowfita", **kwargs):
+    def __init__(self, *, base_url: str, model: str, request_timeout_s: float = 30.0, **kwargs):
         super().__init__(**kwargs)
         self.base_url = base_url.rstrip("/")
         self._request_timeout_s = request_timeout_s
-        self._api = api.strip().lower()
         # model name's single source of truth is _settings.model (AIService)
         self._settings.model = model
         self._sync_model_name_to_metrics()
-        # The NIM (openai API) advertises its own model id + requires a language field —
-        # both differ from our internal stt_model. Env-overridable; defaults match the
-        # deployed Parakeet NIM (multilingual offline profile).
-        self._openai_model = os.environ.get("NEMOTRON_STT_MODEL", "parakeet-tdt-0.6b-multi-asr-offline")
+        # The NIM advertises its own served model id + requires a language field — both
+        # differ from our internal stt_model. Env-overridable; defaults match the deployed
+        # Parakeet NIM (multilingual offline profile).
+        self._served_model = os.environ.get("NEMOTRON_STT_MODEL", "parakeet-tdt-0.6b-multi-asr-offline")
         self._language = os.environ.get("NEMOTRON_STT_LANGUAGE", "multi")
 
     @property
@@ -60,27 +46,18 @@ class NemotronHTTPSTTService(SegmentedSTTService):
         return self._settings.model
 
     async def _transcribe(self, wav_bytes: bytes) -> str:
-        """POST a WAV segment to the STT server and return the transcript text.
+        """POST a WAV segment to the NIM's /v1/audio/transcriptions and return the text.
 
-        Both server flavors return an OpenAI-style {"text": ...} body; only the endpoint
-        and form fields differ.
+        The NIM validates both the served model id and a language code (it 400/404/500s
+        without them) and returns an OpenAI-style {"text": ...} body.
         """
         form = aiohttp.FormData()
         form.add_field("file", wav_bytes, filename="segment.wav", content_type="audio/wav")
-        if self._api == "openai":
-            # NVIDIA NIM / Riva OpenAI-compatible transcription endpoint. The NIM validates
-            # both the served model id and a language code (it 400/404/500s without them).
-            form.add_field("model", self._openai_model)
-            form.add_field("language", self._language)
-            path = "/v1/audio/transcriptions"
-        else:
-            # Segments are already VAD-cut single utterances — server-side chunking is
-            # redundant, and upstream's chunking path crashes (Shadowfita issue #16).
-            form.add_field("should_chunk", "false")
-            path = "/transcribe"
+        form.add_field("model", self._served_model)
+        form.add_field("language", self._language)
         timeout = aiohttp.ClientTimeout(total=self._request_timeout_s)
         async with aiohttp.ClientSession(timeout=timeout) as session:
-            async with session.post(f"{self.base_url}{path}", data=form) as resp:
+            async with session.post(f"{self.base_url}/v1/audio/transcriptions", data=form) as resp:
                 resp.raise_for_status()
                 payload = await resp.json()
         return (payload.get("text") or "").strip()

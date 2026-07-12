@@ -19,16 +19,17 @@ sidecar, and the standard NVIDIA deployment to move to.
 ## Status (as of 2026-07-07): NIM live in prod
 
 - The Parakeet-TDT **NIM is deployed and serving prod** on the g6 (L4) via `infra/stt-nim/`.
-  agent-runner points at it (`NEMOTRON_STT_API=openai`, `NEMOTRON_STT_URL=http://10.0.5.21:9000`);
-  a real prod bot transcribed correctly through it. The concurrency benchmark showed the fix:
-  ~22× throughput and ~11× lower p50 vs the serialized Shadowfita baseline, errors=0.
-- **Shadowfita is being removed in two phases** (tech-debt cleanup):
-  - **Phase 1 (done):** local dev no longer runs the Shadowfita CPU sidecar. The local stack
-    transcribes with **in-process whisper-base** via `STT_MODEL_OVERRIDE=whisper-base` (set in
+  agent-runner points at it (`NEMOTRON_STT_URL=http://10.0.5.21:9000`); a real prod bot
+  transcribed correctly through it. Prod concurrency benchmark (Experiment 7): **~22× throughput
+  and ~22× lower p50 at conc 8 vs the serialized Shadowfita baseline, errors=0**. The NIM is
+  *fast-serial* (~30 req/s ceiling), which is ~10% utilized at the 10-room target — big headroom.
+- **Shadowfita fully removed** (tech-debt cleanup, two phases, both done):
+  - **Phase 1:** local dev no longer runs the Shadowfita CPU sidecar. The local stack transcribes
+    with **in-process whisper-base** via `STT_MODEL_OVERRIDE=whisper-base` (set in
     `.devcontainer/docker-compose.yml`); prod leaves the override unset and uses the DB config (NIM).
-  - **Phase 2 (deferred ~1 week, after the NIM proves stable):** delete the `shadowfita` code path
-    + tests, terminate the T4, scrub remaining references. Until then, the `shadowfita` API branch
-    and the **stopped T4** are kept **only** as the fast prod rollback (step 7 below).
+  - **Phase 2:** the `shadowfita` client API branch + its tests are deleted (the client is now
+    NIM-only), and the old **T4 (`meetlab-stt-gpu`, `i-0f045aa6c337b55ab`) is terminated**.
+    **Rollback is no longer a live env-flip** — it's a redeploy of a pre-cutover build.
 
 > **⚠ Licensing — action needed.** The prod cutover on **2026-07-07** uses an **NVIDIA Developer
 > Program** NGC key, which covers **development / testing / research** (≤16 GPUs) for free. If this
@@ -106,10 +107,10 @@ STT)` chain is unchanged (segments are already VAD-cut WAVs). To migrate:
 2. `NEMOTRON_STT_URL=http://<nim-host>:9000` (NIM HTTP port).
 
 No per-room config or model-id change. Validate the fix:
-- `make bench-stt-concurrency STT_API=openai STT_URL=http://<nim>:9000` — expect p50 to stay
-  ~flat as concurrency climbs and throughput to scale (vs the serialized baseline above).
-- `make soak SOAK_LOAD_ONLY=1 … STT_MODEL=parakeet-tdt-0.6b-v2` against the NIM; re-read Grafana —
-  expect P50 to hold near the low-concurrency ~334ms across 10 rooms.
+- `make bench-stt-concurrency STT_URL=http://<nim>:9000` (run from inside the VPC) — see the
+  measured curve in Experiment 7 of `latency-experiments.md` (~30 req/s, errors=0, ~22× vs baseline).
+- `make soak SOAK_LOAD_ONLY=1 … STT_MODEL=parakeet-tdt-0.6b-v2` against the NIM; read latency from
+  Grafana (the harness's DB checks only see the local DB, not prod's RDS).
 
 ## Alternative: Riva / Triton (fully OSS)
 
@@ -119,39 +120,31 @@ OSS community tutorials: [nvidia-riva/tutorials](https://github.com/nvidia-riva/
 Triton concurrency/batching; more manual setup (build `.rmir` → `riva-build`/`riva-deploy` →
 `riva_start.sh`). gRPC streaming supported. This is the "standard NVIDIA OSS community" path.
 
-## Ops — the old T4 Shadowfita box (rollback only, pending Phase-2 decommission)
+## Ops — the NIM box
 
-Prod now serves from the NIM (see Status). The T4 below is kept **stopped** purely as the rollback
-target until Phase 2; start it only if executing the rollback in step 7.
+Prod serves STT from the NIM. The old T4 Shadowfita box (`meetlab-stt-gpu`, `i-0f045aa6c337b55ab`)
+was **terminated** in Phase 2 — there is no live-flip rollback anymore.
 
 | Task | How |
 |---|---|
-| Instance | EC2 `meetlab-stt-gpu` (`i-0f045aa6c337b55ab`), T4, vivaprox VPC, private `10.0.5.115` |
-| Start / stop | `aws ec2 start-instances --instance-ids i-0f045aa6c337b55ab` / `stop-instances …`. Keep stopped (~$0.53/hr when running). |
-| Wiring (rollback) | set `NEMOTRON_STT_API=shadowfita` + `NEMOTRON_STT_URL=http://10.0.5.115:8000` on the EB env |
-| Health (Shadowfita) | `GET :8000/healthz` |
+| Instance | EC2 `meetlab-stt-gpu-nim` (`i-0a5a5cb3bef4e4608`), g6.xlarge (L4), vivaprox VPC, private `10.0.5.21` |
+| Manage | Terraform (`infra/stt-nim/`) + the Deploy STT NIM workflow — do not hand-CLI the box |
+| Health | `GET :9000/v1/health/ready` (on-box; the private IP isn't reachable off-VPC) |
+| Rollback | redeploy a pre-cutover agent-runner build (no Shadowfita env-flip — that path is deleted) |
 
-## Migration plan (Shadowfita/T4 → NIM/g6)
+## Migration (completed — Shadowfita/T4 → NIM/g6)
 
-Bot-side client is already shipped; the sequence is deliberate so prod never points at a NIM that
-isn't up yet:
+The migration is done; kept as a record of the sequence used (prod never pointed at a NIM that
+wasn't up yet):
 
 1. **Prereqs** (one-time): `NGC_API_KEY` secret, TF state backend, repo vars, OIDC role perms,
-   licensing — see [infra/stt-nim/README.md](../infra/stt-nim/README.md).
-2. **Stand up the NIM:** Actions → **Deploy STT NIM** → `plan`, review, then `apply`. Confirm the
-   SSM health step reports ready.
-3. **Benchmark before cutover** (from agent-runner):
-   `make bench-stt-concurrency STT_API=openai STT_URL=http://stt-nim.vivaprox.internal:9000` — expect
-   p50 ~flat vs the serialized baseline. This is the headline before/after.
-4. **Cut over (separate PR — merge only after step 3 passes):** add
-   `agent-runner/.ebextensions/stt.config`, which the existing agent-runner CD deploys:
-   ```yaml
-   option_settings:
-     aws:elasticbeanstalk:application:environment:
-       NEMOTRON_STT_API: openai
-       NEMOTRON_STT_URL: http://stt-nim.vivaprox.internal:9000
-   ```
-5. **Verify in prod:** 10-room `make soak SOAK_LOAD_ONLY=1 STT_MODEL=parakeet-tdt-0.6b-v2` → Grafana
-   `meetlab_stt_latency_ms`; expect P50 to hold and turns-served ≈ turns-offered.
-6. **Decommission the T4** (`meetlab-stt-gpu`, not in Terraform): stop, then terminate once confident.
-7. **Rollback** anytime: revert the `.ebextensions` change → CD redeploys `NEMOTRON_STT_API=shadowfita`.
+   licensing — see [infra/stt-nim/README.md](../infra/stt-nim/README.md). ✓
+2. **Stood up the NIM:** Actions → **Deploy STT NIM** → `plan` → `apply`; SSM health reported ready. ✓
+3. **Benchmarked** (from inside the VPC): `make bench-stt-concurrency STT_URL=http://<nim>:9000` —
+   ~22× vs the serialized baseline, errors=0 (Experiment 7). ✓
+4. **Cut over** via `agent-runner/.ebextensions/stt.config` (`NEMOTRON_STT_URL` → the NIM), shipped by
+   the agent-runner CD. ✓
+5. **Verified in prod:** bots transcribe through the NIM end-to-end (sanity soak). ✓
+6. **Decommissioned the T4** (`meetlab-stt-gpu`, was not in Terraform): terminated in Phase 2. ✓
+7. **Rollback** (if ever needed): redeploy a pre-cutover agent-runner build. The Shadowfita
+   client path is deleted, so there is no `NEMOTRON_STT_API=shadowfita` env-flip anymore.

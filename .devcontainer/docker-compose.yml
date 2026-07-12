@@ -85,9 +85,8 @@ services:
       # and uses the DB config (NIM). Set STT_MODEL_OVERRIDE= (empty) to honor the DB.
       - STT_MODEL_OVERRIDE=${STT_MODEL_OVERRIDE-whisper-base}
       # Only used when STT_MODEL_OVERRIDE is cleared and a parakeet-* model is selected:
-      # point NEMOTRON_STT_URL at a reachable NIM and set NEMOTRON_STT_API=openai.
+      # point NEMOTRON_STT_URL at a reachable Parakeet NIM.
       - NEMOTRON_STT_URL=${NEMOTRON_STT_URL:-}
-      - NEMOTRON_STT_API=${NEMOTRON_STT_API:-openai}
       # Bot JWT lifetime (min). Default 15; soak/longevity runs raise it so 20-min+
       # sessions don't drop on token expiry. `make soak` passes 30 here.
       - BOT_TOKEN_TTL_MINUTES=${BOT_TOKEN_TTL_MINUTES:-15}

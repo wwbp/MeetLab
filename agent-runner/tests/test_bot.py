@@ -185,8 +185,8 @@ class TestBuildSttParakeetChain(unittest.TestCase):
     """parakeet-* models build a VADProcessor → NemotronHTTPSTTService chain.
 
     Same segmented-chain shape as the whisper path; the tail POSTs each VAD-cut
-    segment (WAV bytes) to the stt-nemotron sidecar's /transcribe endpoint.
-    Experiment log: docs/experiment-6-gpu-stt.md
+    segment (WAV bytes) to the Parakeet NIM's /v1/audio/transcriptions endpoint.
+    Experiment log: docs/latency-experiments.md
     """
 
     def test_parakeet_returns_vad_to_http_chain(self):

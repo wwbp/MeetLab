@@ -35,8 +35,9 @@ terraform init -backend-config="bucket=<b>" -backend-config="region=us-east-1" -
 terraform plan -var="vpc_id=<>" -var="subnet_id=<>" -var="agent_runner_sg_id=<>" -var="private_zone_id=<>"
 ```
 
-## Cutover / rollback
+## Cutover / rollback (completed)
 - Cut over: apply → NIM healthy → merge the `agent-runner/.ebextensions/stt.config` flip
-  (`NEMOTRON_STT_API=openai`) → confirm via `make bench-stt-concurrency STT_API=openai` + soak.
-- Rollback: revert the `.ebextensions` change (agent-runner CD redeploys `shadowfita`) — instant.
-- Decommission old T4 (`meetlab-stt-gpu`, not in TF): stop, then terminate once confident.
+  (`NEMOTRON_STT_URL` → the NIM) → confirm via `make bench-stt-concurrency STT_URL=…` + soak.
+- Rollback: redeploy a pre-cutover agent-runner build (the Shadowfita client path is deleted;
+  there is no `NEMOTRON_STT_API=shadowfita` env-flip anymore).
+- Old T4 (`meetlab-stt-gpu`, was not in TF): terminated in Phase 2.

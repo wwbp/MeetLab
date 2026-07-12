@@ -1,22 +1,19 @@
 """Direct STT-server concurrency benchmark.
 
-Fires transcription requests straight at the STT server (bypassing LiveKit and the bot)
+Fires transcription requests straight at the Parakeet NIM (bypassing LiveKit and the bot)
 and measures how per-request latency and throughput scale with concurrency. This isolates
 the SERVER's behavior — the thing that broke the 10-room soak:
 
-  • a serialized server (the Shadowfita FastAPI wrapper) → latency rises ~linearly with
-    concurrency and throughput plateaus (one request at a time);
-  • a batched/concurrent server (NVIDIA NIM / Riva on Triton) → latency stays roughly flat
-    as concurrency climbs and throughput scales.
+  • a serialized server → latency rises ~linearly with concurrency and throughput plateaus;
+  • a concurrent/batched server → latency stays flatter as concurrency climbs.
 
-Run it against the current sidecar to capture the baseline, then against the NIM/Riva
-server to quantify the fix — same tool, just point STT_URL / STT_API at each.
+Point STT_URL at a reachable NIM (run from inside the VPC). Results + the Shadowfita
+baseline are recorded in docs/latency-experiments.md (Experiments 6-7).
 
 Env:
-  STT_URL         base URL of the STT server (required, e.g. http://10.0.5.21:9000)
-  STT_API         openai     → POST /v1/audio/transcriptions (NIM / OpenAI-compatible, default)
-                  shadowfita → POST /transcribe (legacy sidecar)
-  STT_MODEL       model field for the openai API (default parakeet-tdt-0.6b-v2)
+  STT_URL         base URL of the Parakeet NIM (required, e.g. http://10.0.5.21:9000)
+  STT_MODEL       served model id sent as the `model` field (default: the NIM's served id)
+  STT_LANGUAGE    language code the NIM requires alongside the model (default multi)
   CONCURRENCIES   comma list of in-flight levels to sweep (default 1,2,4,8,16)
   REQUESTS_PER    requests sent per level (default 24)
   FIXTURE         WAV to send (default tests/fixtures/benchmark_prompt.wav)
@@ -34,9 +31,9 @@ from pathlib import Path
 import aiohttp
 
 STT_URL = os.getenv("STT_URL", "").rstrip("/")
-STT_API = os.getenv("STT_API", "openai").strip().lower()
-STT_MODEL = os.getenv("STT_MODEL", "parakeet-tdt-0.6b-v2")
-# NIM (openai API) requires a language code alongside the model.
+# The NIM's served model id (differs from our internal stt_model) + the language code
+# it requires alongside it. Defaults match the deployed Parakeet NIM.
+STT_MODEL = os.getenv("STT_MODEL", "parakeet-tdt-0.6b-multi-asr-offline")
 STT_LANGUAGE = os.getenv("STT_LANGUAGE", "multi")
 CONCURRENCIES = [int(x) for x in os.getenv("CONCURRENCIES", "1,2,4,8,16").split(",") if x.strip()]
 REQUESTS_PER = int(os.getenv("REQUESTS_PER", "24"))
@@ -53,21 +50,16 @@ def _pct(values: list[float], q: float) -> float | None:
 
 
 def _build_form(wav: bytes) -> aiohttp.FormData:
+    # OpenAI-compatible NIM /v1/audio/transcriptions (model + language required).
     form = aiohttp.FormData()
-    if STT_API == "openai":
-        # OpenAI-compatible (NVIDIA NIM /v1/audio/transcriptions)
-        form.add_field("file", wav, filename="segment.wav", content_type="audio/wav")
-        form.add_field("model", STT_MODEL)
-        form.add_field("language", STT_LANGUAGE)
-    else:
-        # Shadowfita /transcribe (segments are pre-cut → should_chunk=false)
-        form.add_field("file", wav, filename="segment.wav", content_type="audio/wav")
-        form.add_field("should_chunk", "false")
+    form.add_field("file", wav, filename="segment.wav", content_type="audio/wav")
+    form.add_field("model", STT_MODEL)
+    form.add_field("language", STT_LANGUAGE)
     return form
 
 
 def _endpoint() -> str:
-    return f"{STT_URL}/v1/audio/transcriptions" if STT_API == "openai" else f"{STT_URL}/transcribe"
+    return f"{STT_URL}/v1/audio/transcriptions"
 
 
 async def _one(session: aiohttp.ClientSession, wav: bytes) -> tuple[float, bool]:
@@ -113,7 +105,7 @@ async def main() -> None:
         sys.exit("STT_URL is required — point it at a reachable NIM, e.g. "
                  "make bench-stt-concurrency STT_URL=http://10.0.5.21:9000")
     wav = Path(FIXTURE).read_bytes()
-    print(f"[bench-stt] url={STT_URL} api={STT_API} model={STT_MODEL} "
+    print(f"[bench-stt] url={STT_URL} model={STT_MODEL} "
           f"fixture={Path(FIXTURE).name} ({len(wav)} bytes) requests/level={REQUESTS_PER}")
 
     # Warmup (model load / first-request cost shouldn't skew the level results).
@@ -130,7 +122,7 @@ async def main() -> None:
 
     bar = "─" * 74
     print(f"\n{bar}")
-    print(f"STT CONCURRENCY  ({STT_API} @ {STT_URL})")
+    print(f"STT CONCURRENCY  (Parakeet NIM @ {STT_URL})")
     print(bar)
     print(f"{'conc':>5}  {'p50 ms':>9}  {'p95 ms':>9}  {'req/s':>8}  {'errors':>6}")
     for r in rows:

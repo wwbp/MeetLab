@@ -296,7 +296,7 @@ class RunnerStartApiTests(unittest.TestCase):
         self.assertEqual(response.json().get("stt_model"), "whisper-turbo")
 
     def test_config_put_parakeet_stt_model_accepted(self):
-        # parakeet-* models run the stt-nemotron sidecar (Experiment 6)
+        # parakeet-* models run on the Parakeet NIM (Experiments 6-7)
         response = self.client.put(
             "/config",
             json={"scope": "test-runner-scope", "stt_model": "parakeet-tdt-0.6b-v2"},
@@ -306,7 +306,7 @@ class RunnerStartApiTests(unittest.TestCase):
 
     def test_config_put_parakeet_unified_stt_model_accepted(self):
         # parakeet-unified-en-0.6b: NVIDIA's offline+streaming unified English model,
-        # served (offline) by the stt-nemotron sidecar.
+        # served (offline) by the Parakeet NIM.
         response = self.client.put(
             "/config",
             json={"scope": "test-runner-scope", "stt_model": "parakeet-unified-en-0.6b"},

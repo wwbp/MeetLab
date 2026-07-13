@@ -11,7 +11,7 @@ BENCHMARK_WAV ?=
 
 MSG ?= migration
 
-.PHONY: up down start stop logs migrate migration test test-unit test-integration test-bot-longevity test-multi-speaker test-multi-speaker-audio test-session-lifecycle setup-livekit-cloud revert-livekit-local test-livekit-tooling scan scan-agent-runner scan-meet benchmark benchmark-audio benchmark-audio-long benchmark-full benchmark-exp2 benchmark-report simulate soak soak-sanity bench-stt-concurrency
+.PHONY: up down start stop logs migrate migration test test-unit test-integration test-bot-longevity test-multi-speaker test-multi-speaker-audio test-session-lifecycle setup-livekit-cloud revert-livekit-local test-livekit-tooling scan scan-agent-runner scan-meet benchmark benchmark-audio benchmark-audio-long benchmark-full benchmark-exp2 benchmark-report simulate soak soak-sanity bench-stt-concurrency bench-idle-room
 
 up:
 	$(COMPOSE) up --build -d
@@ -191,6 +191,18 @@ bench-stt-concurrency:
 		env STT_URL="$(STT_URL)" \
 		STT_MODEL="$(STT_MODEL)" CONCURRENCIES="$(CONCURRENCIES)" REQUESTS_PER="$(REQUESTS_PER)" \
 		uv run python tests/bench_stt_concurrency.py
+
+# Idle-room longevity: start a bot in a room, let NOBODY join, and measure how long the
+# room + bot stay up (expected ceiling ≈ BOT_TOKEN_TTL_MINUTES) and whether the session
+# finalizes cleanly at teardown. Free (no human → no STT/LLM/TTS). Knobs: MAX_SECONDS,
+# POLL_SECONDS, BOT_TOKEN_TTL_MINUTES.
+bench-idle-room:
+	BOT_TOKEN_TTL_MINUTES=$(or $(BOT_TOKEN_TTL_MINUTES),15) \
+		$(COMPOSE) up -d --wait transport-server agent-runner
+	$(COMPOSE) exec -T agent-runner uv run alembic upgrade head
+	$(COMPOSE) exec -T agent-runner \
+		env MAX_SECONDS="$(MAX_SECONDS)" POLL_SECONDS="$(POLL_SECONDS)" \
+		uv run python tests/bench_idle_room.py
 
 benchmark-exp2:
 	$(COMPOSE) up -d transport-server agent-runner

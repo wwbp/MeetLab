@@ -37,7 +37,8 @@ export function createBotIdentity(roomName: string): string {
 export async function callBotRunnerStart(
   roomName: string,
   botIdentity: string,
-  agentName?: string
+  agentName?: string,
+  customData?: Record<string, string>
 ): Promise<{
   ok: boolean;
   status: number;
@@ -54,13 +55,15 @@ export async function callBotRunnerStart(
     const body: {
       room_name: string;
       bot_identity: string;
-      custom_data: { requested_by: string };
+      custom_data: Record<string, string>;
       room_config?: { agents: Array<{ agent_name: string }> };
     } = {
       room_name: roomName,
       bot_identity: botIdentity,
+      // The runner persists custom_data on the Conversation row (queryable later).
       custom_data: {
         requested_by: 'concierge',
+        ...customData,
       },
     };
     if (agentName) {

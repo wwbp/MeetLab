@@ -16,6 +16,14 @@ export async function GET() {
   try {
     const res = await fetch(`${normalized}configs`, { headers, cache: 'no-store' });
     const data = await res.json();
+    if (res.ok && Array.isArray(data?.configs)) {
+      // Every start-link click materializes the picked config as scope=link-<room>
+      // (that's how the bot resolves it). Those are per-room copies, not reusable
+      // presets — hide them from the picker. They remain visible in DB Admin.
+      data.configs = data.configs.filter(
+        (c: { scope?: string }) => !(typeof c.scope === 'string' && c.scope.startsWith('link-'))
+      );
+    }
     return NextResponse.json(data, { status: res.status });
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Failed to list configs';

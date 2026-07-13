@@ -147,6 +147,24 @@ test('generate + click: fresh room, bot joins, config comes from the pool', asyn
   // The bot actually joins.
   const bots = await pollForBot(roomName);
   assert.ok(bots.length > 0, `no bot joined ${roomName} within timeout`);
+
+  // The conversation records WHICH config was assigned (custom_data → meta),
+  // and it agrees with the config that was materialized for the room.
+  const meetings = await jsonRequest('/api/meetings?limit=100');
+  assert.equal(meetings.response.status, 200, meetings.text);
+  const conv = meetings.json.conversations.find((c) => c.room_name === roomName);
+  assert.ok(conv, `conversation for ${roomName} not found`);
+  assert.equal(conv.meta?.requested_by, 'start-link');
+  const expectedScope = cfg.json.greeting === GREETING_A ? SCOPE_A : SCOPE_B;
+  assert.equal(conv.meta?.bot_config_scope, expectedScope);
+});
+
+test('picker list hides auto-created link-* room copies', async () => {
+  // The e2e test above created at least one link-* config row; it must not be pickable.
+  const { response, json, text } = await jsonRequest('/api/console/configs');
+  assert.equal(response.status, 200, text);
+  const linkScopes = json.configs.filter((c) => c.scope.startsWith('link-'));
+  assert.equal(linkScopes.length, 0, `picker must hide link-* scopes, saw ${linkScopes.length}`);
 });
 
 test('second click provisions a distinct room', async () => {

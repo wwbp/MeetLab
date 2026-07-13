@@ -341,6 +341,39 @@ class RunnerStartApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 400)
 
     # ------------------------------------------------------------------
+    # custom_data → Conversation.meta (which bot config ran this session)
+    # ------------------------------------------------------------------
+
+    def test_start_persists_custom_data_on_conversation(self):
+        import uuid as _uuid
+
+        marker = f"meta-{_uuid.uuid4().hex[:10]}"
+        response = self.client.post(
+            "/start",
+            json={
+                "room_name": f"room-{marker}",
+                "custom_data": {"requested_by": "start-link", "bot_config_scope": marker},
+            },
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        session_id = response.json()["session_id"]
+
+        convs = self.client.get("/conversations", params={"limit": 200}).json()["conversations"]
+        conv = next((c for c in convs if c["id"] == session_id), None)
+        self.assertIsNotNone(conv, "started conversation missing from /conversations")
+        self.assertEqual(conv["meta"].get("bot_config_scope"), marker)
+        self.assertEqual(conv["meta"].get("requested_by"), "start-link")
+
+    def test_start_without_custom_data_has_empty_meta(self):
+        response = self.client.post("/start", json={"room_name": "room-no-meta"})
+        self.assertEqual(response.status_code, 200, response.text)
+        session_id = response.json()["session_id"]
+        convs = self.client.get("/conversations", params={"limit": 200}).json()["conversations"]
+        conv = next((c for c in convs if c["id"] == session_id), None)
+        self.assertIsNotNone(conv)
+        self.assertEqual(conv["meta"], {})
+
+    # ------------------------------------------------------------------
     # GET /configs — list all bot_config rows by scope (start-link pool picker)
     # ------------------------------------------------------------------
 

@@ -11,7 +11,10 @@ import { generateStartRoomName, pickUniform, verifyStartLink } from '@/lib/start
 export const dynamic = 'force-dynamic';
 
 // Provisioning spins up a room + a GPU-backed bot — keep the public window tight.
-const RATE_LIMIT_MAX = 5;
+// Tunable per deployment: START_LINK_MAX_PER_MINUTE (default 5/min/IP). Note the IP
+// comes from X-Forwarded-For, trustworthy only behind a proxy that overwrites it
+// (EB/nginx in prod) — same trust model as /api/connection-details.
+const RATE_LIMIT_MAX = Number(process.env.START_LINK_MAX_PER_MINUTE) || 5;
 const RATE_LIMIT_WINDOW_MS = 60_000;
 
 function runnerConfigHeaders(secret?: string): HeadersInit {
@@ -79,7 +82,10 @@ export async function POST(request: Request) {
     // Fresh unique room → no contention; skip the concierge start-lock/409 dance but
     // register the claim/request/event so the console and webhook cleanup see it.
     const botIdentity = createBotIdentity(roomName);
-    const runnerCall = await callBotRunnerStart(roomName, botIdentity);
+    const runnerCall = await callBotRunnerStart(roomName, botIdentity, undefined, {
+      requested_by: 'start-link',
+      bot_config_scope: chosenScope,
+    });
     if (!runnerCall.ok) {
       throw new Error(runnerCall.errorText ?? `Bot runner returned ${runnerCall.status}`);
     }

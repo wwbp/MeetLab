@@ -365,6 +365,11 @@ async def start_bot(request: Request, background_tasks: BackgroundTasks, _=Depen
 
         session_id = str(uuid.uuid4())
 
+        # Persist the caller's custom_data (e.g. requested_by, bot_config_scope from a
+        # start link) on the conversation so "which config ran this session" is queryable.
+        custom_data = body.get("custom_data")
+        conv_meta = custom_data if isinstance(custom_data, dict) else {}
+
         async with AsyncSessionLocal() as session:
             async with session.begin():
                 await session.execute(
@@ -378,6 +383,7 @@ async def start_bot(request: Request, background_tasks: BackgroundTasks, _=Depen
                         room_name=room_name,
                         bot_identity=bot_identity,
                         status="running",
+                        meta=conv_meta,
                     )
                 )
 
@@ -642,6 +648,7 @@ def _conversation_json(conv: Conversation, utterance_count: int) -> dict:
         "ended_at": conv.ended_at.isoformat() if conv.ended_at else None,
         "status": conv.status,
         "utterance_count": utterance_count,
+        "meta": conv.meta or {},
         "media_files": [_media_file_json(mf) for mf in conv.media_files],
     }
 

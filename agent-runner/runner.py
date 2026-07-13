@@ -475,6 +475,27 @@ async def _handle_egress_event(body: dict) -> None:
         logger.warning(f"_handle_egress_event failed for {egress_id}: {exc}")
 
 
+@app.get("/configs")
+async def list_configs(_=Depends(verify_api_key)):
+    """List all bot_config rows by scope — feeds the console's start-link pool picker.
+
+    Scopes are free-text ('global', a room name, or an admin-chosen preset name like
+    'friendly'); they're indistinguishable by design, so list everything and let the
+    admin pick.
+    """
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            select(BotConfig.scope, BotConfig.updated_at).order_by(BotConfig.scope)
+        )
+        rows = result.all()
+    return {
+        "configs": [
+            {"scope": scope, "updated_at": updated_at.isoformat() if updated_at else None}
+            for scope, updated_at in rows
+        ]
+    }
+
+
 @app.get("/config")
 async def get_config(room: str | None = None, _=Depends(verify_api_key)):
     cfg = await load_bot_config(room)

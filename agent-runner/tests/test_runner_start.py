@@ -340,6 +340,33 @@ class RunnerStartApiTests(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 400)
 
+    # ------------------------------------------------------------------
+    # GET /configs — list all bot_config rows by scope (start-link pool picker)
+    # ------------------------------------------------------------------
+
+    def test_configs_list_contains_upserted_scope(self):
+        import uuid as _uuid
+
+        scope = f"cfglist-{_uuid.uuid4().hex[:10]}"
+        put = self.client.put("/config", json={"scope": scope, "greeting": "list me"})
+        self.assertEqual(put.status_code, 200, put.text)
+
+        response = self.client.get("/configs")
+        self.assertEqual(response.status_code, 200, response.text)
+        body = response.json()
+        self.assertIsInstance(body.get("configs"), list)
+        entry = next((c for c in body["configs"] if c.get("scope") == scope), None)
+        self.assertIsNotNone(entry, f"scope {scope} missing from /configs")
+
+    def test_configs_list_sorted_by_scope_with_shape(self):
+        response = self.client.get("/configs")
+        self.assertEqual(response.status_code, 200, response.text)
+        configs = response.json()["configs"]
+        scopes = [c["scope"] for c in configs]
+        self.assertEqual(scopes, sorted(scopes))
+        for c in configs:
+            self.assertEqual(set(c.keys()), {"scope", "updated_at"})
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -638,6 +638,33 @@ profile, or run multiple NIM replicas behind a balancer. Not required for curren
 
 ---
 
+## Experiment 8 — Idle bot-only room longevity (2026-07-13)
+
+**Question:** if a bot starts in a room and **nobody ever joins**, how long does the room stay up,
+and does the session finalize cleanly?
+
+**Method:** `tests/bench_idle_room.py` (`make bench-idle-room`) — start a bot via `/start`, join no
+one, poll room/participant state via the LiveKit server API until the bot drops, then poll the
+Conversation row for finalization. Local stack, `BOT_TOKEN_TTL_MINUTES=15`.
+
+**Result:** the bot-only room stayed up **~300s (5 min)**, then the bot dropped and the session
+finalized **cleanly** — `status=completed`, `ended_at` set, promptly (no reconciler needed).
+
+**Mechanism (from agent-runner logs):** **Pipecat's `PipelineTask` idle timeout** — with no
+participant publishing audio, no frames flow through the pipeline, so `_idle_timeout_detected` fires
+at the framework default (`idle_timeout_secs=300`, `cancel_on_idle_timeout=True`) → a graceful
+`CancelFrame(reason: idle timeout)` → the bot's `CancelledError` path records `completed`. **Not** the
+15-min bot JWT TTL, and **not** LiveKit's `empty_timeout` — those never come into play because the
+idle timeout fires first.
+
+**Takeaways:**
+- An orphaned bot (nobody joins, or everyone goes silent with no audio source) **self-terminates in
+  5 min and books the session cleanly** — good for cost/DB hygiene; no stuck `running` rows.
+- The 5-min grace is the Pipecat default; set `PipelineParams(idle_timeout_secs=…, cancel_on_idle_timeout=…)`
+  in `bot.py` to change it (e.g. shorter to reclaim orphaned bots faster, or disable for always-on bots).
+
+---
+
 ## Future ideas (not yet planned)
 
 - **SmartTurn analyzer**: `LocalSmartTurnAnalyzerV3` can trigger LLM before the full VAD

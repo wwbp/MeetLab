@@ -9,7 +9,7 @@
     "lint": "next lint",
     "lint:fix": "next lint --fix",
     "test": "vitest run",
-    "test:api": "node --test --test-concurrency=1 tests/concierge-api.test.mjs",
+    "test:api": "node --test --test-concurrency=1 tests/concierge-api.test.mjs tests/start-link.test.mjs",
     "test:load": "node --test --test-concurrency=1 tests/concierge-load.test.mjs",
     "format:check": "prettier --check \"**/*.{ts,tsx,md,json}\"",
     "format:write": "prettier --write \"**/*.{ts,tsx,md,json}\""

@@ -365,6 +365,11 @@ async def start_bot(request: Request, background_tasks: BackgroundTasks, _=Depen
 
         session_id = str(uuid.uuid4())
 
+        # Persist the caller's custom_data (e.g. requested_by, bot_config_scope from a
+        # start link) on the conversation so "which config ran this session" is queryable.
+        custom_data = body.get("custom_data")
+        conv_meta = custom_data if isinstance(custom_data, dict) else {}
+
         async with AsyncSessionLocal() as session:
             async with session.begin():
                 await session.execute(
@@ -378,6 +383,7 @@ async def start_bot(request: Request, background_tasks: BackgroundTasks, _=Depen
                         room_name=room_name,
                         bot_identity=bot_identity,
                         status="running",
+                        meta=conv_meta,
                     )
                 )
 
@@ -473,6 +479,27 @@ async def _handle_egress_event(body: dict) -> None:
             logger.info(f"egress {egress_id}: recording MediaFile {mf.id} → {new_status}")
     except Exception as exc:
         logger.warning(f"_handle_egress_event failed for {egress_id}: {exc}")
+
+
+@app.get("/configs")
+async def list_configs(_=Depends(verify_api_key)):
+    """List all bot_config rows by scope — feeds the console's start-link pool picker.
+
+    Scopes are free-text ('global', a room name, or an admin-chosen preset name like
+    'friendly'); they're indistinguishable by design, so list everything and let the
+    admin pick.
+    """
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            select(BotConfig.scope, BotConfig.updated_at).order_by(BotConfig.scope)
+        )
+        rows = result.all()
+    return {
+        "configs": [
+            {"scope": scope, "updated_at": updated_at.isoformat() if updated_at else None}
+            for scope, updated_at in rows
+        ]
+    }
 
 
 @app.get("/config")
@@ -621,6 +648,7 @@ def _conversation_json(conv: Conversation, utterance_count: int) -> dict:
         "ended_at": conv.ended_at.isoformat() if conv.ended_at else None,
         "status": conv.status,
         "utterance_count": utterance_count,
+        "meta": conv.meta or {},
         "media_files": [_media_file_json(mf) for mf in conv.media_files],
     }
 

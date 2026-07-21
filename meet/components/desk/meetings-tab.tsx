@@ -23,7 +23,7 @@ function formatDuration(startedAt: string, endedAt: string | null): string {
 
 function audioTrackLabel(track: MediaFileRecord): string {
   const raw = typeof track.meta.speaker_id === 'string' ? track.meta.speaker_id : '';
-  const name = raw.split('__')[0] || 'audio';
+  const name = raw.startsWith('bot_') ? 'bot' : raw.split('__')[0] || 'audio';
   const part = typeof track.meta.part === 'number' ? track.meta.part : 0;
   return part > 0 ? `Audio: ${name} (${part + 1})` : `Audio: ${name}`;
 }

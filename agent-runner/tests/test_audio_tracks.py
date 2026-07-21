@@ -18,6 +18,7 @@ from pipecat.frames.frames import (
     Frame,
     StartFrame,
     TranscriptionFrame,
+    TTSAudioRawFrame,
     UserAudioRawFrame,
 )
 from pipecat.processors.frame_processor import (
@@ -30,6 +31,7 @@ from unittest.mock import patch
 
 from audio_tracks import (
     AudioTrackSink,
+    BotAudioRecorder,
     PerSpeakerAudioRecorder,
     build_track_flush,
     get_sink,
@@ -151,6 +153,22 @@ class TestPerSpeakerAudioRecorder(unittest.IsolatedAsyncioTestCase):
         frame = _audio("sid-A")
         await _run(recorder, out, [frame])  # must not raise
         self.assertIn(frame, out.received)
+
+
+class TestBotAudioRecorder(unittest.IsolatedAsyncioTestCase):
+    async def test_offers_tts_audio_under_bot_sid_and_forwards(self):
+        sink, out = _FakeSink(), _Sink()
+        recorder = BotAudioRecorder(sink, "bot_room_x")
+        frame = TTSAudioRawFrame(audio=b"\x33\x44" * 8, sample_rate=24000, num_channels=1)
+        await _run(recorder, out, [frame])
+        self.assertEqual(sink.offers, [("bot_room_x", frame.audio, 24000, 1)])
+        self.assertIn(frame, out.received)  # TTS still flows to transport.output
+
+    async def test_ignores_user_audio(self):
+        sink, out = _FakeSink(), _Sink()
+        recorder = BotAudioRecorder(sink, "bot_room_x")
+        await _run(recorder, out, [_audio("PA_human")])
+        self.assertEqual(sink.offers, [])  # only the bot's TTS is its track
 
 
 class _FlushCapture:

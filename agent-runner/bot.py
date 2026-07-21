@@ -370,10 +370,12 @@ async def bot(runner_args: LiveKitRunnerArguments):
     # in-process recording endpoint can enable it. The recorder tap is inserted
     # before multi_stt (which consumes UserAudioRawFrame) and forwards frames on.
     audio_sink = build_audio_track_sink(
-        runner_args.room_name, runner_args.session_id, _sid_to_identity
+        runner_args.room_name, runner_args.session_id, _sid_to_identity,
+        bot_identity=runner_args.bot_identity,
     )
     audio_tracks.register_sink(runner_args.room_name, audio_sink)
     audio_recorder = audio_tracks.PerSpeakerAudioRecorder(audio_sink)
+    bot_audio_recorder = audio_tracks.BotAudioRecorder(audio_sink, runner_args.bot_identity)
     # Mock TTS (BOT_MOCK_TTS) swaps in zero-cost synthetic silence for load/soak
     # testing — no paid TTS calls. OFF by default; never enable in production. The LLM
     # is pinned to the cheapest model by the soak harness rather than mocked.
@@ -552,6 +554,7 @@ async def bot(runner_args: LiveKitRunnerArguments):
             context_aggregator.user(),
             llm,
             tts,
+            bot_audio_recorder,
             _TTSFirstTimer(),
             transport.output(),
             context_aggregator.assistant(),
@@ -945,13 +948,24 @@ def _build_stt_for_multi_speaker(bot_config, openai_api_key: str, deepgram_api_k
     )
 
 
-def build_audio_track_sink(room_name: str, session_id: str, sid_to_identity: dict) -> audio_tracks.AudioTrackSink:
+def build_audio_track_sink(
+    room_name: str, session_id: str, sid_to_identity: dict, bot_identity: str | None = None
+) -> audio_tracks.AudioTrackSink:
     """Assemble the per-speaker WAV sink for a session.
 
     Wires audio_tracks.build_track_flush to this conversation: speakers resolve
     through the live _sid_to_identity map, and each finished track is written to
     storage and recorded as an available MediaFile(type="audio_track").
+
+    The bot's own track (fed by BotAudioRecorder) is keyed by bot_identity, which
+    isn't in sid_to_identity — so the resolver maps that sid straight to the bot
+    identity, giving the bot a labelled track alongside the human participants.
     """
+    def _resolve(sid: str) -> str | None:
+        if bot_identity is not None and sid == bot_identity:
+            return bot_identity
+        return sid_to_identity.get(sid)
+
     async def _persist(fields: dict) -> None:
         async with AsyncSessionLocal() as db:
             async with db.begin():
@@ -959,7 +973,7 @@ def build_audio_track_sink(room_name: str, session_id: str, sid_to_identity: dic
 
     on_flush = audio_tracks.build_track_flush(
         room_name=room_name,
-        resolve_speaker=lambda sid: sid_to_identity.get(sid),
+        resolve_speaker=_resolve,
         persist=_persist,
     )
     return audio_tracks.AudioTrackSink(on_flush)

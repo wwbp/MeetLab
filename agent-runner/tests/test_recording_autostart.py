@@ -110,6 +110,37 @@ class BuildAudioTrackSinkTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(mf.meta["speaker_id"], "alice__abc123")
         self.assertEqual(mf.meta["part"], 0)
 
+    async def test_three_users_and_bot_produce_four_tracks(self):
+        # 3 human participants + the bot's own TTS = 4 source-separated WAVs.
+        room = f"tracksink-4way-{uuid.uuid4().hex[:8]}"
+        conv_id = await _make_running_conversation(room)
+        bot_identity = "bot_4way_abc"
+        sid_map = {
+            "PA_alice": "alice__a1",
+            "PA_bob": "bob__b2",
+            "PA_carol": "carol__c3",
+        }
+        sink = bot.build_audio_track_sink(room, conv_id, sid_map, bot_identity=bot_identity)
+        sink.enable()
+        # Each human's inbound audio (PerSpeakerAudioRecorder) ...
+        for sid in sid_map:
+            sink.offer(sid, b"\x01\x02" * 200, 16000, 1)
+        # ... and the bot's own TTS output (BotAudioRecorder), keyed by bot identity.
+        sink.offer(bot_identity, b"\x05\x06" * 200, 24000, 1)
+        await sink.flush_all()
+
+        async with AsyncSessionLocal() as db:
+            rows = (await db.execute(
+                select(MediaFile).where(
+                    MediaFile.conv_id == conv_id, MediaFile.type == "audio_track"
+                )
+            )).scalars().all()
+
+        self.assertEqual(len(rows), 4)
+        speakers = {r.meta["speaker_id"] for r in rows}
+        self.assertEqual(speakers, {"alice__a1", "bob__b2", "carol__c3", bot_identity})
+        self.assertTrue(all(r.status == "available" and r.path for r in rows))
+
     async def test_speaker_resolved_from_live_map_at_flush_time(self):
         # The sink resolves speaker_id at flush time against the live identity map
         # (by reference), so audio offered before a participant is mapped still

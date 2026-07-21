@@ -21,7 +21,7 @@ from collections.abc import Awaitable, Callable
 
 from loguru import logger
 
-from pipecat.frames.frames import Frame, UserAudioRawFrame
+from pipecat.frames.frames import Frame, TTSAudioRawFrame, UserAudioRawFrame
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
 import storage
@@ -64,6 +64,30 @@ class PerSpeakerAudioRecorder(FrameProcessor):
                 self._sink.offer(frame.user_id, frame.audio, frame.sample_rate, frame.num_channels)
             except Exception as e:
                 logger.warning(f"PerSpeakerAudioRecorder: sink.offer error: {e}")
+        await self.push_frame(frame, direction)
+
+
+class BotAudioRecorder(FrameProcessor):
+    """Taps the bot's own TTS output into the sink as one more speaker track.
+
+    Sits after the TTS service so it sees TTSAudioRawFrame; offers each chunk under
+    a fixed sid (the bot identity) so the bot gets its own source-separated WAV
+    alongside the human participants. Same non-blocking contract as
+    PerSpeakerAudioRecorder — one offer(), then forward unchanged.
+    """
+
+    def __init__(self, sink, bot_sid: str):
+        super().__init__()
+        self._sink = sink
+        self._bot_sid = bot_sid
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
+        await super().process_frame(frame, direction)
+        if direction == FrameDirection.DOWNSTREAM and isinstance(frame, TTSAudioRawFrame):
+            try:
+                self._sink.offer(self._bot_sid, frame.audio, frame.sample_rate, frame.num_channels)
+            except Exception as e:
+                logger.warning(f"BotAudioRecorder: sink.offer error: {e}")
         await self.push_frame(frame, direction)
 
 
@@ -193,9 +217,11 @@ def unregister_sink(room_name: str) -> None:
 
 # ── persistence handler (the real on_flush) ─────────────────────────────────
 
-def _track_filename(room_name: str, sid: str, part: int) -> str:
-    safe_sid = "".join(c if c.isalnum() or c in "-_" else "_" for c in sid)
-    return storage.build_filename(room_name, f"audiotrack-{safe_sid}-p{part}", "wav")
+def _track_filename(room_name: str, speaker: str, part: int) -> str:
+    """Human-readable WAV name: <ts>-<room>-audio-<speaker>[-<part>].wav."""
+    safe = "".join(c if c.isalnum() or c in "-_" else "_" for c in speaker)
+    label = f"audio-{safe}" if part == 0 else f"audio-{safe}-{part}"
+    return storage.build_filename(room_name, label, "wav")
 
 
 def build_track_flush(
@@ -214,14 +240,17 @@ def build_track_flush(
     """
     async def _on_flush(sid: str, wav_bytes: bytes, meta: dict) -> None:
         part = meta.get("part", 0)
-        filename = _track_filename(room_name, sid, part)
+        speaker = resolve_speaker(sid)
+        # Name the file by speaker identity (unique per participant, so no two
+        # tracks in a session collide on disk); fall back to the SID if unknown.
+        filename = _track_filename(room_name, speaker or sid, part)
         path = await storage.write_file(filename, wav_bytes)
         await persist({
             "type": "audio_track",
             "status": "available",
             "path": path,
-            "meta": {**meta, "speaker_id": resolve_speaker(sid)},
+            "meta": {**meta, "speaker_id": speaker},
         })
-        logger.info(f"audio_track: wrote speaker={sid} part={part} → {path}")
+        logger.info(f"audio_track: wrote speaker={speaker or sid} part={part} → {path}")
 
     return _on_flush

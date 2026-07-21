@@ -798,17 +798,18 @@ async def bot(runner_args: LiveKitRunnerArguments):
 
     @transport.event_handler("on_participant_disconnected")
     async def on_participant_disconnected(transport, participant_id: str):
+        # Flush this speaker's buffered audio to a WAV now that they've left —
+        # BEFORE popping the identity map, so the track resolves to the right speaker.
+        try:
+            await audio_sink.flush(participant_id)
+        except Exception as e:
+            logger.warning(f"audio_track flush on disconnect failed for {participant_id}: {e}")
         identity = _sid_to_identity.pop(participant_id, participant_id)
         _sid_to_name.pop(participant_id, None)
         # Clear current speaker if this participant just left.
         if _current_speaker_sid[0] == participant_id:
             _current_speaker_sid[0] = None
         await multi_stt.remove_participant(participant_id)
-        # Flush this speaker's buffered audio to a WAV now that they've left.
-        try:
-            await audio_sink.flush(participant_id)
-        except Exception as e:
-            logger.warning(f"audio_track flush on disconnect failed for {participant_id}: {e}")
         logger.info(f"Participant disconnected: {identity}")
         if not _sid_to_identity:
             logger.info("No participants remain — cancelling pipeline")

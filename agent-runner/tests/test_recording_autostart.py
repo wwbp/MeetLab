@@ -110,6 +110,49 @@ class BuildAudioTrackSinkTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(mf.meta["speaker_id"], "alice__abc123")
         self.assertEqual(mf.meta["part"], 0)
 
+    async def test_speaker_resolved_from_live_map_at_flush_time(self):
+        # The sink resolves speaker_id at flush time against the live identity map
+        # (by reference), so audio offered before a participant is mapped still
+        # tags correctly once the map is populated.
+        room = f"tracksink-live-{uuid.uuid4().hex[:8]}"
+        conv_id = await _make_running_conversation(room)
+        sid_map: dict = {}  # empty when the sink is built
+        sink = bot.build_audio_track_sink(room, conv_id, sid_map)
+        sink.enable()
+        sink.offer("PA_y", b"\x01\x02" * 400, 16000, 1)
+        sid_map["PA_y"] = "carol__def456"  # mapped later (on_participant_connected)
+        await sink.flush("PA_y")
+
+        async with AsyncSessionLocal() as db:
+            mf = (await db.execute(
+                select(MediaFile).where(
+                    MediaFile.conv_id == conv_id, MediaFile.type == "audio_track"
+                )
+            )).scalars().one()
+        self.assertEqual(mf.meta["speaker_id"], "carol__def456")
+
+    async def test_flush_after_identity_dropped_loses_speaker(self):
+        # Regression guard for the on_participant_disconnected ordering bug: if the
+        # identity is removed from the map BEFORE the flush, speaker_id resolves to
+        # null. bot.on_participant_disconnected must therefore flush BEFORE popping
+        # _sid_to_identity — this test documents why that order is load-bearing.
+        room = f"tracksink-drop-{uuid.uuid4().hex[:8]}"
+        conv_id = await _make_running_conversation(room)
+        sid_map = {"PA_z": "dave__ghi789"}
+        sink = bot.build_audio_track_sink(room, conv_id, sid_map)
+        sink.enable()
+        sink.offer("PA_z", b"\x01\x02" * 400, 16000, 1)
+        del sid_map["PA_z"]  # WRONG order: identity gone before flush
+        await sink.flush("PA_z")
+
+        async with AsyncSessionLocal() as db:
+            mf = (await db.execute(
+                select(MediaFile).where(
+                    MediaFile.conv_id == conv_id, MediaFile.type == "audio_track"
+                )
+            )).scalars().one()
+        self.assertIsNone(mf.meta["speaker_id"])
+
 
 if __name__ == "__main__":
     unittest.main()

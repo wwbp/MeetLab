@@ -1133,7 +1133,7 @@ async def download_media_file(file_id: str, _=Depends(verify_api_key)):
         return JSONResponse({"error": "file not found on disk"}, status_code=404)
 
     ext = file_path.suffix.lower()
-    media_types = {".mp4": "video/mp4", ".md": "text/markdown", ".txt": "text/plain"}
+    media_types = {".mp4": "video/mp4", ".md": "text/markdown", ".txt": "text/plain", ".wav": "audio/wav"}
     media_type = media_types.get(ext, "application/octet-stream")
     return FileResponse(path=str(file_path), media_type=media_type, filename=file_path.name)
 

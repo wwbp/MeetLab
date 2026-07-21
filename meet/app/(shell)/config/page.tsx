@@ -13,6 +13,7 @@ type BotConfig = {
   vad_stop_secs: number;
   stt_vad_mode: string;
   stt_delay: string | null;
+  auto_record: boolean;
 };
 
 const EMPTY_CONFIG: Omit<BotConfig, 'scope'> = {
@@ -25,6 +26,7 @@ const EMPTY_CONFIG: Omit<BotConfig, 'scope'> = {
   vad_stop_secs: 0.6,
   stt_vad_mode: 'local',
   stt_delay: null,
+  auto_record: false,
 };
 
 const STT_MODELS = [
@@ -79,6 +81,7 @@ export default function ConfigPage() {
         vad_stop_secs: data.vad_stop_secs ?? 0.6,
         stt_vad_mode: data.stt_vad_mode ?? 'local',
         stt_delay: data.stt_delay ?? null,
+        auto_record: data.auto_record ?? false,
       });
     } catch {
       setError('Network error loading config');
@@ -246,6 +249,25 @@ export default function ConfigPage() {
                 />
               </Field>
             </div>
+          </Section>
+
+          {/* ── Recording ── */}
+          <Section label="Recording">
+            <label className="flex items-start gap-3">
+              <input
+                type="checkbox"
+                checked={form.auto_record}
+                onChange={(e) => setForm((f) => ({ ...f, auto_record: e.target.checked }))}
+                className="mt-0.5 h-4 w-4"
+              />
+              <span className="text-sm">
+                Auto-record sessions
+                <span className="text-muted-foreground block text-xs">
+                  Start recording (composite mp4 + per-speaker audio tracks) automatically
+                  when the first participant joins. Ensure participants have consented.
+                </span>
+              </span>
+            </label>
           </Section>
 
           {error && <p className="text-destructive text-sm">{error}</p>}

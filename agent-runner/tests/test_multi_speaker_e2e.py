@@ -74,6 +74,16 @@ def _post(path: str, body: dict) -> dict:
         return json.loads(resp.read())
 
 
+def _put(path: str, body: dict) -> dict:
+    url = f"{RUNNER_URL}{path}"
+    data = json.dumps(body).encode()
+    req = urllib.request.Request(
+        url, data=data, headers={"Content-Type": "application/json"}, method="PUT"
+    )
+    with urllib.request.urlopen(req, timeout=10) as resp:
+        return json.loads(resp.read())
+
+
 async def _send_message(room: rtc.Room, text: str) -> None:
     """Inject text via LiveKit data channel — triggers on_data_received in bot.py.
 
@@ -257,6 +267,45 @@ class TestMultiSpeakerE2E(unittest.IsolatedAsyncioTestCase):
                 bot_utts[0]["reply_to"], user_utts[0]["id"],
                 "First bot utterance should reply_to first user utterance",
             )
+
+    # -- test 10: greeting timing ---------------------------------------------
+
+    async def test_10_greeting_timing_with_auto_record(self):
+        """The bot greets promptly after a user joins, even with auto_record on.
+
+        Regression guard for the startup-lag bug: auto-record's LiveKit egress
+        round-trip must run in the background, not block the greeting. No audio is
+        published, so this isolates the greeting path from the local Whisper model
+        load (which blocks the loop on the first audio frame — a separate, known
+        local-dev STT concern, absent in prod's HTTP Parakeet path).
+        """
+        room_name = f"ms-greet-{uuid4().hex[:8]}"
+        uid = f"greeter_{uuid4().hex[:6]}"
+        # Enable auto_record for this room scope so the join path starts recording.
+        _put("/config", {"scope": room_name, "auto_record": True})
+
+        session = self._start_session(room_name)
+        session_id = session["session_id"]
+        print(f"\n[test_10] room={room_name} bot={session['bot_identity']}", flush=True)
+
+        await asyncio.sleep(BOT_JOIN_WAIT)  # let the bot join first
+        t_join = time.monotonic()
+        rooms = await self._connect_users(room_name, [uid])
+        try:
+            # First bot utterance == the greeting (no user message sent).
+            utts = await _poll_utterances(session_id, min_count=1, timeout=TURN_TIMEOUT)
+            bot_utts = [u for u in utts if u["role"] == "bot"]
+            self.assertTrue(bot_utts, "Bot never greeted after the user joined")
+            greet_secs = time.monotonic() - t_join
+            print(f"[test_10] greeting after {greet_secs:.1f}s: {bot_utts[0]['text']!r}", flush=True)
+            # Greeting is a fixed TTS line (no LLM); with egress backgrounded it
+            # should land within seconds. Generous bound catches a blocking regression.
+            self.assertLess(
+                greet_secs, 20.0,
+                f"Greeting took {greet_secs:.1f}s — recording likely blocking the greeting path",
+            )
+        finally:
+            await self._disconnect_all(rooms)
 
     # -- test 02: two users ---------------------------------------------------
 

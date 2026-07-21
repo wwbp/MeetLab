@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 
 from sqlalchemy import (
     BigInteger,
+    Boolean,
     DateTime,
     Float,
     ForeignKey,
@@ -180,6 +181,11 @@ class BotConfig(Base):
     tts_provider: Mapped[str] = mapped_column(String(32), default="elevenlabs")
     tts_aggregation_mode: Mapped[str] = mapped_column(String(16), default="sentence")
     stt_endpointing_ms: Mapped[int] = mapped_column(BigInteger, default=100, server_default="100")
+    # When true, the bot auto-starts recording (composite mp4 + per-speaker WAV)
+    # once the first participant joins. Off by default — opt in per room/global.
+    auto_record: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default="false", nullable=False
+    )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_now, onupdate=_now
     )

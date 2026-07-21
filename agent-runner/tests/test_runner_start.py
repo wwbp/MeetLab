@@ -239,7 +239,7 @@ class RunnerStartApiTests(unittest.TestCase):
         for key in (
             "scope", "system_prompt", "greeting", "vad_stop_secs",
             "llm_model", "tts_voice", "tts_provider",
-            "stt_model", "stt_vad_mode", "stt_delay",
+            "stt_model", "stt_vad_mode", "stt_delay", "auto_record",
         ):
             self.assertIn(key, body, f"GET /config response missing field: {key}")
         self.assertEqual(body["scope"], "global")
@@ -277,6 +277,28 @@ class RunnerStartApiTests(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 200, response.text)
         self.assertIsNone(response.json().get("stt_delay"))
+
+    def test_config_put_auto_record_true_then_false(self):
+        on = self.client.put(
+            "/config",
+            json={"scope": "test-runner-scope", "auto_record": True},
+        )
+        self.assertEqual(on.status_code, 200, on.text)
+        self.assertEqual(on.json().get("auto_record"), True)
+        off = self.client.put(
+            "/config",
+            json={"scope": "test-runner-scope", "auto_record": False},
+        )
+        self.assertEqual(off.status_code, 200, off.text)
+        self.assertEqual(off.json().get("auto_record"), False)
+
+    def test_config_put_invalid_auto_record_returns_400(self):
+        response = self.client.put(
+            "/config",
+            json={"scope": "test-runner-scope", "auto_record": "yes"},
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("auto_record", response.json().get("error", ""))
 
     def test_config_put_invalid_stt_model_returns_400(self):
         response = self.client.put(

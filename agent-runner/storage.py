@@ -69,6 +69,26 @@ def _write_local(filename: str, content: bytes, cfg: dict) -> str:
     return str(path)
 
 
+async def read_bytes(path: str) -> bytes:
+    """Read a stored file's bytes from the configured backend (local path or S3 key)."""
+    cfg = _cfg()
+    if cfg["backend"] != "s3":
+        return Path(path).read_bytes()
+
+    def _sync_get() -> bytes:
+        import boto3
+        s3 = boto3.client(
+            "s3",
+            aws_access_key_id=cfg["key_id"],
+            aws_secret_access_key=cfg["key_secret"],
+            region_name=cfg["region"],
+            **({"endpoint_url": cfg["endpoint"]} if cfg["endpoint"] else {}),
+        )
+        return s3.get_object(Bucket=cfg["bucket"], Key=path)["Body"].read()
+
+    return await asyncio.get_event_loop().run_in_executor(None, _sync_get)
+
+
 async def _upload_s3(filename: str, content: bytes, cfg: dict) -> str:
     missing = [k for k in ("key_id", "key_secret", "bucket", "region") if not cfg[k]]
     if missing:

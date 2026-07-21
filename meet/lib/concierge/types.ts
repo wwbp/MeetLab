@@ -99,7 +99,7 @@ export type StartBotResponse = {
 export type MediaFileRecord = {
   id: string;
   conv_id: string;
-  type: 'recording' | 'transcript' | 'audio_clip';
+  type: 'recording' | 'transcript' | 'audio_clip' | 'audio_track';
   status: 'pending' | 'available' | 'failed';
   path: string | null;
   created_at: string;

@@ -32,6 +32,9 @@ function FileActions({
 }) {
   const recording = conv.media_files.find((f) => f.type === 'recording');
   const transcript = conv.media_files.find((f) => f.type === 'transcript');
+  const audioTrackCount = conv.media_files.filter(
+    (f) => f.type === 'audio_track' && f.status === 'available',
+  ).length;
   const isRunning = conv.status === 'running';
 
   return (
@@ -71,6 +74,18 @@ function FileActions({
           className="text-muted-foreground"
         >
           + Transcript
+        </Button>
+      )}
+
+      {/* Per-speaker audio tracks (source-separated WAV), bundled into one zip */}
+      {audioTrackCount > 0 && (
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => window.open(`/api/meetings/${conv.id}/audio-tracks/download`, '_blank')}
+          title="Download all per-speaker audio tracks as a zip"
+        >
+          Audio ({audioTrackCount})
         </Button>
       )}
     </div>

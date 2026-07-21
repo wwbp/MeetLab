@@ -19,6 +19,7 @@ class EffectiveBotConfig:
     tts_provider: str  # "elevenlabs" | "openai"
     tts_aggregation_mode: str  # "sentence" | "token"
     stt_endpointing_ms: int  # 200 | 100 | 50
+    auto_record: bool  # auto-start recording when the first participant joins
 
 
 async def load_bot_config(room_name: str | None = None) -> EffectiveBotConfig:
@@ -56,6 +57,7 @@ async def load_bot_config(room_name: str | None = None) -> EffectiveBotConfig:
                 tts_provider="elevenlabs",
                 tts_aggregation_mode="sentence",
                 stt_endpointing_ms=100,
+                auto_record=False,
             )
 
         return EffectiveBotConfig(
@@ -70,4 +72,5 @@ async def load_bot_config(room_name: str | None = None) -> EffectiveBotConfig:
             tts_provider=getattr(row, "tts_provider", "elevenlabs"),
             tts_aggregation_mode=getattr(row, "tts_aggregation_mode", "sentence"),
             stt_endpointing_ms=getattr(row, "stt_endpointing_ms", 200),
+            auto_record=bool(getattr(row, "auto_record", False)),
         )

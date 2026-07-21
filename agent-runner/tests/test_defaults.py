@@ -18,6 +18,11 @@ class TestBotConfigDefaults(unittest.TestCase):
         self.assertEqual(col.default.arg, 100)
         self.assertEqual(str(col.server_default.arg), "100")
 
+    def test_auto_record_default_is_false(self):
+        col = BotConfig.__table__.c.auto_record
+        self.assertEqual(col.default.arg, False)
+        self.assertEqual(str(col.server_default.arg).lower(), "false")
+
 
 if __name__ == "__main__":
     unittest.main()

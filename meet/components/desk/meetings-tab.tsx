@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
-import type { ConversationRecord, ConversationsResponse, MediaFileRecord } from '@/lib/concierge/types';
+import type { ConversationRecord, ConversationsResponse } from '@/lib/concierge/types';
 
 const POLL_INTERVAL_MS = 10_000;
 const PAGE_SIZE = 10;
@@ -21,13 +21,6 @@ function formatDuration(startedAt: string, endedAt: string | null): string {
   return m > 0 ? `${m}m ${s}s` : `${s}s`;
 }
 
-function audioTrackLabel(track: MediaFileRecord): string {
-  const raw = typeof track.meta.speaker_id === 'string' ? track.meta.speaker_id : '';
-  const name = raw.startsWith('bot_') ? 'bot' : raw.split('__')[0] || 'audio';
-  const part = typeof track.meta.part === 'number' ? track.meta.part : 0;
-  return part > 0 ? `Audio: ${name} (${part + 1})` : `Audio: ${name}`;
-}
-
 function FileActions({
   conv,
   onGenerate,
@@ -39,9 +32,9 @@ function FileActions({
 }) {
   const recording = conv.media_files.find((f) => f.type === 'recording');
   const transcript = conv.media_files.find((f) => f.type === 'transcript');
-  const audioTracks = conv.media_files
-    .filter((f) => f.type === 'audio_track' && f.status === 'available')
-    .sort((a, b) => audioTrackLabel(a).localeCompare(audioTrackLabel(b)));
+  const audioTrackCount = conv.media_files.filter(
+    (f) => f.type === 'audio_track' && f.status === 'available',
+  ).length;
   const isRunning = conv.status === 'running';
 
   return (
@@ -84,18 +77,17 @@ function FileActions({
         </Button>
       )}
 
-      {/* Per-speaker audio tracks (source-separated WAV) */}
-      {audioTracks.map((track) => (
+      {/* Per-speaker audio tracks (source-separated WAV), bundled into one zip */}
+      {audioTrackCount > 0 && (
         <Button
-          key={track.id}
           variant="outline"
           size="sm"
-          onClick={() => onDownload(conv.id, track.id)}
-          title="Download this speaker's audio track (WAV)"
+          onClick={() => window.open(`/api/meetings/${conv.id}/audio-tracks/download`, '_blank')}
+          title="Download all per-speaker audio tracks as a zip"
         >
-          {audioTrackLabel(track)}
+          Audio ({audioTrackCount})
         </Button>
-      ))}
+      )}
     </div>
   );
 }

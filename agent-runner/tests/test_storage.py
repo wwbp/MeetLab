@@ -65,6 +65,14 @@ class TestWriteFileLocal(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(path.startswith(tmpdir))
 
 
+class TestReadBytesLocal(unittest.IsolatedAsyncioTestCase):
+    async def test_reads_bytes_from_disk(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch.dict(os.environ, {"STORAGE_BACKEND": "local", "RECORDINGS_PATH": tmpdir}):
+                path = await storage.write_file("blob.wav", b"\x00\x01\x02\x03")
+                self.assertEqual(await storage.read_bytes(path), b"\x00\x01\x02\x03")
+
+
 class TestWriteFileS3(unittest.IsolatedAsyncioTestCase):
     async def test_calls_put_object(self):
         mock_s3 = MagicMock()

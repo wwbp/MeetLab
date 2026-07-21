@@ -321,6 +321,9 @@ async def bot(runner_args: LiveKitRunnerArguments):
     # last utterance ids for reply_to chaining
     _last_user_utt_id: list[str | None] = [None]
     _last_bot_utt_id: list[str | None] = [None]
+    # Strong refs to fire-and-forget background tasks (e.g. auto-record start), so
+    # they aren't garbage-collected mid-flight.
+    _bg_tasks: set = set()
 
     transport = LiveKitTransport(
         url=runner_args.url,
@@ -821,15 +824,21 @@ async def bot(runner_args: LiveKitRunnerArguments):
     @transport.event_handler("on_first_participant_joined")
     async def on_first_participant_joined(transport, participant_id):
         logger.info(f"First participant joined: {participant_id}")
-        # Auto-start recording (composite mp4 + per-speaker WAV) when configured.
-        # Best-effort: a recording failure must never block the greeting or the call.
+        # Auto-start recording when configured — in the BACKGROUND. start_recording_for_room
+        # does a LiveKit egress round-trip (composite recording spin-up) that can take a few
+        # seconds; awaiting it here would delay the greeting and make the bot look slow to join.
+        # Fire-and-forget so the greeting fires on the normal timeline; recording catches up.
         if bot_config.auto_record:
-            try:
-                from runner import start_recording_for_room
-                status, payload = await start_recording_for_room(runner_args.room_name)
-                logger.info(f"auto_record: start_recording_for_room → {status} {payload}")
-            except Exception as e:
-                logger.warning(f"auto_record failed for {runner_args.room_name}: {e}")
+            async def _auto_record():
+                try:
+                    from runner import start_recording_for_room
+                    status, payload = await start_recording_for_room(runner_args.room_name)
+                    logger.info(f"auto_record: start_recording_for_room → {status} {payload}")
+                except Exception as e:
+                    logger.warning(f"auto_record failed for {runner_args.room_name}: {e}")
+            rec_task = asyncio.create_task(_auto_record())
+            _bg_tasks.add(rec_task)
+            rec_task.add_done_callback(_bg_tasks.discard)
         await asyncio.sleep(1)
         await task.queue_frame(TTSSpeakFrame(bot_config.greeting))
 

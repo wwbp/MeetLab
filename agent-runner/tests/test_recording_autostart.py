@@ -25,6 +25,9 @@ os.environ.setdefault("OPENAI_API_KEY", "test-key")
 os.environ.setdefault("ELEVENLABS_API_KEY", "test-key")
 os.environ.setdefault("DEEPGRAM_API_KEY", "test-deepgram-key")
 
+import io
+import zipfile
+
 import audio_tracks
 import bot
 import runner
@@ -183,6 +186,38 @@ class BuildAudioTrackSinkTests(unittest.IsolatedAsyncioTestCase):
                 )
             )).scalars().one()
         self.assertIsNone(mf.meta["speaker_id"])
+
+
+class DownloadAudioTracksZipTests(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        await engine.dispose(close=False)
+        self.addAsyncCleanup(engine.dispose, close=False)
+
+    async def test_bundles_all_speaker_tracks_into_one_zip(self):
+        room = f"zip-{uuid.uuid4().hex[:8]}"
+        conv_id = await _make_running_conversation(room)
+        sink = bot.build_audio_track_sink(
+            room, conv_id, {"PA_a": "alice__a1", "PA_b": "bob__b2"}, bot_identity="bot_z"
+        )
+        sink.enable()
+        sink.offer("PA_a", b"\x01\x02" * 200, 16000, 1)
+        sink.offer("PA_b", b"\x03\x04" * 200, 16000, 1)
+        sink.offer("bot_z", b"\x05\x06" * 200, 24000, 1)
+        await sink.flush_all()
+
+        resp = await runner.download_audio_tracks(conv_id)
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.media_type, "application/zip")
+        with zipfile.ZipFile(io.BytesIO(resp.body)) as zf:
+            names = zf.namelist()
+        self.assertEqual(len(names), 3)  # alice, bob, bot — one download
+        self.assertTrue(all(n.endswith(".wav") for n in names))
+
+    async def test_no_tracks_returns_404(self):
+        room = f"zip-empty-{uuid.uuid4().hex[:8]}"
+        conv_id = await _make_running_conversation(room)
+        resp = await runner.download_audio_tracks(conv_id)
+        self.assertEqual(resp.status_code, 404)
 
 
 if __name__ == "__main__":

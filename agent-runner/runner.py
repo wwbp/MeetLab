@@ -1,7 +1,9 @@
 import asyncio
+import io
 import os
 import traceback
 import uuid
+import zipfile
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional
 
@@ -18,7 +20,7 @@ from starlette.middleware.sessions import SessionMiddleware
 from starlette.requests import Request as StarletteRequest
 from starlette.responses import Response as StarletteResponse
 
-from fastapi.responses import FileResponse, RedirectResponse
+from fastapi.responses import FileResponse, RedirectResponse, Response
 from sqlalchemy import func, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import selectinload
@@ -1136,6 +1138,58 @@ async def download_media_file(file_id: str, _=Depends(verify_api_key)):
     media_types = {".mp4": "video/mp4", ".md": "text/markdown", ".txt": "text/plain", ".wav": "audio/wav"}
     media_type = media_types.get(ext, "application/octet-stream")
     return FileResponse(path=str(file_path), media_type=media_type, filename=file_path.name)
+
+
+def _zip_entries(entries: list[tuple[str, bytes]]) -> bytes:
+    """Bundle (filename, bytes) pairs into an in-memory zip archive."""
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for name, data in entries:
+            zf.writestr(name, data)
+    return buf.getvalue()
+
+
+@app.get("/conversations/{conv_id}/audio-tracks/download")
+async def download_audio_tracks(conv_id: str, _=Depends(verify_api_key)):
+    """Bundle all per-speaker audio tracks for a conversation into one zip.
+
+    One download for the whole meeting's source-separated audio, instead of a
+    file-per-speaker. Built in memory (WAVs are modest and this is an admin
+    action); for very long multi-speaker sessions this holds the archive in RAM.
+    """
+    async with AsyncSessionLocal() as db:
+        conv = (await db.execute(
+            select(Conversation).where(Conversation.id == conv_id)
+        )).scalar_one_or_none()
+        if not conv:
+            return JSONResponse({"error": "conversation not found"}, status_code=404)
+        rows = (await db.execute(
+            select(MediaFile).where(
+                MediaFile.conv_id == conv_id,
+                MediaFile.type == "audio_track",
+                MediaFile.status == "available",
+            )
+        )).scalars().all()
+
+    entries: list[tuple[str, bytes]] = []
+    for mf in rows:
+        if not mf.path:
+            continue
+        try:
+            entries.append((os.path.basename(mf.path), await storage.read_bytes(mf.path)))
+        except Exception as exc:
+            logger.warning(f"audio-tracks zip: skipping {mf.path}: {exc}")
+
+    if not entries:
+        return JSONResponse({"error": "no audio tracks for this conversation"}, status_code=404)
+
+    safe_room = "".join(c if c.isalnum() or c in "-_" else "_" for c in conv.room_name)
+    filename = f"{safe_room}-audio-tracks.zip"
+    return Response(
+        content=_zip_entries(entries),
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 # ── conversations / meetings endpoints ────────────────────────────────────────

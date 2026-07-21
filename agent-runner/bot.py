@@ -46,10 +46,11 @@ from pipecat.transports.livekit.transport import LiveKitParams, LiveKitTransport
 from sqlalchemy import select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
+import audio_tracks
 from config import load_config, require
 from db.config_loader import load_bot_config
 from db.engine import AsyncSessionLocal
-from db.models import Conversation, Speaker, Utterance
+from db.models import Conversation, MediaFile, Speaker, Utterance
 from interruption import InterruptionTracker
 from multi_speaker_stt import MultiSpeakerSTT, SpeakerLabelInjector
 from runner_types import LiveKitRunnerArguments
@@ -362,6 +363,17 @@ async def bot(runner_args: LiveKitRunnerArguments):
     logger.info(
         f"STT: model={bot_config.stt_model} mode=per-participant delay={bot_config.stt_delay}"
     )
+
+    # Per-speaker audio capture. The sink buffers each participant's PCM and writes
+    # one WAV per speaker on flush; it stays disabled until recording is requested
+    # (POST /recordings/start or auto_record). Registered by room name so the
+    # in-process recording endpoint can enable it. The recorder tap is inserted
+    # before multi_stt (which consumes UserAudioRawFrame) and forwards frames on.
+    audio_sink = build_audio_track_sink(
+        runner_args.room_name, runner_args.session_id, _sid_to_identity
+    )
+    audio_tracks.register_sink(runner_args.room_name, audio_sink)
+    audio_recorder = audio_tracks.PerSpeakerAudioRecorder(audio_sink)
     # Mock TTS (BOT_MOCK_TTS) swaps in zero-cost synthetic silence for load/soak
     # testing — no paid TTS calls. OFF by default; never enable in production. The LLM
     # is pinned to the cheapest model by the soak harness rather than mocked.
@@ -533,6 +545,7 @@ async def bot(runner_args: LiveKitRunnerArguments):
         [
             transport.input(),
             _AudioTimestampRecorder(),
+            audio_recorder,
             multi_stt,
             _SpeakerTracker(),
             SpeakerLabelInjector(_sid_to_identity, _sid_to_name),
@@ -791,6 +804,11 @@ async def bot(runner_args: LiveKitRunnerArguments):
         if _current_speaker_sid[0] == participant_id:
             _current_speaker_sid[0] = None
         await multi_stt.remove_participant(participant_id)
+        # Flush this speaker's buffered audio to a WAV now that they've left.
+        try:
+            await audio_sink.flush(participant_id)
+        except Exception as e:
+            logger.warning(f"audio_track flush on disconnect failed for {participant_id}: {e}")
         logger.info(f"Participant disconnected: {identity}")
         if not _sid_to_identity:
             logger.info("No participants remain — cancelling pipeline")
@@ -799,6 +817,15 @@ async def bot(runner_args: LiveKitRunnerArguments):
     @transport.event_handler("on_first_participant_joined")
     async def on_first_participant_joined(transport, participant_id):
         logger.info(f"First participant joined: {participant_id}")
+        # Auto-start recording (composite mp4 + per-speaker WAV) when configured.
+        # Best-effort: a recording failure must never block the greeting or the call.
+        if bot_config.auto_record:
+            try:
+                from runner import start_recording_for_room
+                status, payload = await start_recording_for_room(runner_args.room_name)
+                logger.info(f"auto_record: start_recording_for_room → {status} {payload}")
+            except Exception as e:
+                logger.warning(f"auto_record failed for {runner_args.room_name}: {e}")
         await asyncio.sleep(1)
         await task.queue_frame(TTSSpeakFrame(bot_config.greeting))
 
@@ -858,6 +885,15 @@ async def bot(runner_args: LiveKitRunnerArguments):
     except Exception as e:
         logger.error(f"Bot pipeline error in room {runner_args.room_name}: {e}")
     finally:
+        # Flush any audio still buffered (speakers who never fired a disconnect, or
+        # the final drain). Shielded so end-of-call cancellation can't abort a write
+        # mid-flight; then deregister the sink from the in-process registry.
+        try:
+            await asyncio.shield(asyncio.ensure_future(audio_sink.flush_all()))
+        except Exception as e:
+            logger.warning(f"audio_track flush_all on shutdown failed: {e}")
+        finally:
+            audio_tracks.unregister_sink(runner_args.room_name)
         await _finalize_conversation(runner_args.session_id, status)
         _isum = interruptions.summary()
         logger.info(
@@ -906,6 +942,26 @@ def _build_stt_for_multi_speaker(bot_config, openai_api_key: str, deepgram_api_k
             endpointing=endpointing_ms,
         ),
     )
+
+
+def build_audio_track_sink(room_name: str, session_id: str, sid_to_identity: dict) -> audio_tracks.AudioTrackSink:
+    """Assemble the per-speaker WAV sink for a session.
+
+    Wires audio_tracks.build_track_flush to this conversation: speakers resolve
+    through the live _sid_to_identity map, and each finished track is written to
+    storage and recorded as an available MediaFile(type="audio_track").
+    """
+    async def _persist(fields: dict) -> None:
+        async with AsyncSessionLocal() as db:
+            async with db.begin():
+                db.add(MediaFile(id=_new_id(), conv_id=session_id, **fields))
+
+    on_flush = audio_tracks.build_track_flush(
+        room_name=room_name,
+        resolve_speaker=lambda sid: sid_to_identity.get(sid),
+        persist=_persist,
+    )
+    return audio_tracks.AudioTrackSink(on_flush)
 
 
 def _find_participant_by_sid(remote_participants: dict, sid: str):

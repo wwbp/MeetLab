@@ -328,6 +328,7 @@ class TestConfigLoaderDefaults(unittest.TestCase):
             stt_model="parakeet-tdt-0.6b-v2", stt_vad_mode="local",
             stt_delay=None, tts_provider="elevenlabs",
             tts_aggregation_mode="sentence", stt_endpointing_ms=100,
+            auto_record=False,
         )
         self.assertEqual(cfg.stt_model, "parakeet-tdt-0.6b-v2")
         self.assertEqual(cfg.llm_model, "gpt-5.4-nano")

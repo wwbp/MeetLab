@@ -23,6 +23,7 @@ from sqlalchemy import func, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import selectinload
 
+import audio_tracks
 import metrics
 import storage
 import transcript as transcript_mod
@@ -518,6 +519,7 @@ async def get_config(room: str | None = None, _=Depends(verify_api_key)):
         "stt_vad_mode": cfg.stt_vad_mode,
         "stt_delay": cfg.stt_delay,
         "stt_endpointing_ms": cfg.stt_endpointing_ms,
+        "auto_record": cfg.auto_record,
     }
 
 
@@ -590,6 +592,10 @@ async def update_config(request: Request, _=Depends(verify_api_key)):
         if body["stt_endpointing_ms"] not in (50, 100, 200):
             return JSONResponse({"error": "stt_endpointing_ms must be 50, 100, or 200"}, status_code=400)
         fields["stt_endpointing_ms"] = int(body["stt_endpointing_ms"])
+    if "auto_record" in body:
+        if not isinstance(body["auto_record"], bool):
+            return JSONResponse({"error": "auto_record must be a boolean"}, status_code=400)
+        fields["auto_record"] = body["auto_record"]
 
     async with AsyncSessionLocal() as session:
         async with session.begin():
@@ -617,6 +623,7 @@ async def update_config(request: Request, _=Depends(verify_api_key)):
         "stt_vad_mode": cfg.stt_vad_mode,
         "stt_delay": cfg.stt_delay,
         "stt_endpointing_ms": cfg.stt_endpointing_ms,
+        "auto_record": cfg.auto_record,
     }
 
 
@@ -750,8 +757,24 @@ async def start_recording(request: Request, _=Depends(verify_api_key)):
     room_name = body.get("room_name")
     if not isinstance(room_name, str) or not room_name.strip():
         return JSONResponse({"error": "room_name is required"}, status_code=400)
-    room_name = room_name.strip()
 
+    status, payload = await start_recording_for_room(room_name.strip())
+    if status == 200:
+        return payload
+    return JSONResponse(payload, status_code=status)
+
+
+async def start_recording_for_room(room_name: str) -> tuple[int, dict]:
+    """Start composite egress + per-speaker WAV capture for a room.
+
+    Returns (status_code, payload) so both the HTTP endpoint and the bot's
+    auto-start path (on_first_participant_joined) can share one implementation:
+    the endpoint maps the tuple to a JSONResponse; the bot logs on non-200.
+
+    Per-speaker WAV capture is enabled as soon as a running session is confirmed —
+    before composite egress — so it still records even if egress fails (e.g. no S3
+    on LiveKit Cloud, or the room isn't in LiveKit yet).
+    """
     # Look up current conversation for this room
     async with AsyncSessionLocal() as db:
         result = await db.execute(
@@ -762,7 +785,7 @@ async def start_recording(request: Request, _=Depends(verify_api_key)):
         )
         conv = result.scalar_one_or_none()
         if not conv:
-            return JSONResponse({"error": "no active session for this room"}, status_code=404)
+            return 404, {"error": "no active session for this room"}
 
         # Reject if a recording is already pending/available for this session
         result = await db.execute(
@@ -772,8 +795,16 @@ async def start_recording(request: Request, _=Depends(verify_api_key)):
                 MediaFile.status.in_(["pending", "available"]),
             )
         )
-        if result.scalar_one_or_none():
-            return JSONResponse({"error": "recording already active for this session"}, status_code=409)
+        already_recording = result.scalar_one_or_none() is not None
+
+    # Turn on per-speaker WAV capture for the running bot (no-op if none is
+    # registered). Idempotent, so a duplicate request just re-enables it.
+    sink = audio_tracks.get_sink(room_name)
+    if sink is not None:
+        sink.enable()
+
+    if already_recording:
+        return 409, {"error": "recording already active for this session"}
 
     filepath = storage.build_recording_path(room_name)
     filename = filepath.split("/")[-1]
@@ -791,21 +822,18 @@ async def start_recording(request: Request, _=Depends(verify_api_key)):
     lk_url = _lk_http_url()
     is_cloud_livekit = "livekit.cloud" in lk_url or "livekit.io" in lk_url
     if is_cloud_livekit and cfg["backend"] != "s3":
-        return JSONResponse(
-            {
-                "error": (
-                    "LiveKit Cloud requires S3 storage for recordings. "
-                    "Set STORAGE_BACKEND=s3 and configure S3_KEY_ID, S3_KEY_SECRET, "
-                    "S3_BUCKET, S3_REGION in the environment."
-                )
-            },
-            status_code=400,
-        )
+        return 400, {
+            "error": (
+                "LiveKit Cloud requires S3 storage for recordings. "
+                "Set STORAGE_BACKEND=s3 and configure S3_KEY_ID, S3_KEY_SECRET, "
+                "S3_BUCKET, S3_REGION in the environment."
+            )
+        }
 
     if cfg["backend"] == "s3":
         missing = [k for k in ("key_id", "key_secret", "bucket", "region") if not cfg[k]]
         if missing:
-            return JSONResponse({"error": f"S3 not fully configured: {missing}"}, status_code=500)
+            return 500, {"error": f"S3 not fully configured: {missing}"}
         file_output = EncodedFileOutput(
             filepath=f"recordings/{filename}",
             s3=S3Upload(
@@ -833,7 +861,7 @@ async def start_recording(request: Request, _=Depends(verify_api_key)):
             existing = await lk.egress.list_egress(ListEgressRequest(room_name=room_name))
             active = [e for e in existing.items if e.status < 2]
             if active:
-                return JSONResponse({"error": "room already has an active recording egress"}, status_code=409)
+                return 409, {"error": "room already has an active recording egress"}
 
             egress_info = await _start_room_composite_egress(lk, room_name, file_output)
             egress_id = egress_info.egress_id
@@ -841,7 +869,7 @@ async def start_recording(request: Request, _=Depends(verify_api_key)):
         logger.error(f"recording start LiveKit error: room={room_name} error={exc}")
         msg = str(exc)
         status = 404 if "not_found" in msg or "does not exist" in msg else 502
-        return JSONResponse({"error": f"LiveKit: {msg}"}, status_code=status)
+        return status, {"error": f"LiveKit: {msg}"}
 
     media_file_id = str(uuid.uuid4())
     async with AsyncSessionLocal() as db:
@@ -856,7 +884,7 @@ async def start_recording(request: Request, _=Depends(verify_api_key)):
             ))
 
     logger.info(f"recording started: room={room_name} egress={egress_id} file={filepath}")
-    return {"media_file_id": media_file_id, "egress_id": egress_id, "path": filepath}
+    return 200, {"media_file_id": media_file_id, "egress_id": egress_id, "path": filepath}
 
 
 @app.post("/recordings/stop")

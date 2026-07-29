@@ -1,6 +1,7 @@
 import { randomString } from '@/lib/client-utils';
 import { getLiveKitURL } from '@/lib/getLiveKitURL';
 import { checkRateLimit, getClientIp } from '@/lib/rate-limit';
+import { sessionLimitSecondsFromConfig } from '@/lib/session-limit';
 import { ConnectionDetails } from '@/lib/types';
 import { validateLiveKitPublicUrlForRequestHost } from '@/lib/validateLiveKitPublicUrl';
 import { AccessToken, AccessTokenOptions, VideoGrant } from 'livekit-server-sdk';
@@ -8,6 +9,11 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getServerConfig, requireEnv } from '@/lib/config/server';
 
 const COOKIE_KEY = 'random-participant-postfix';
+
+// The bot runner is not on the critical path for joining — if the config lookup
+// is slow or fails, the participant joins with no session limit rather than not
+// at all. Kept short for the same reason.
+const SESSION_LIMIT_LOOKUP_TIMEOUT_MS = 2_000;
 
 // 20 token requests per minute per IP — sufficient for legitimate users,
 // blocks automated token farming.
@@ -91,22 +97,26 @@ export async function GET(request: NextRequest) {
       randomParticipantPostfix = randomString(4);
     }
 
-    const participantToken = await createParticipantToken(
-      {
-        identity: `${participantName}__${randomParticipantPostfix}`,
-        name: participantName,
-        metadata,
-      },
-      roomName,
-      apiKey,
-      apiSecret,
-    );
+    const [participantToken, sessionLimitSeconds] = await Promise.all([
+      createParticipantToken(
+        {
+          identity: `${participantName}__${randomParticipantPostfix}`,
+          name: participantName,
+          metadata,
+        },
+        roomName,
+        apiKey,
+        apiSecret,
+      ),
+      fetchSessionLimitSeconds(roomName),
+    ]);
 
     const data: ConnectionDetails = {
       serverUrl: livekitServerUrl,
       roomName,
       participantToken,
       participantName,
+      sessionLimitSeconds,
     };
     return new NextResponse(JSON.stringify(data), {
       headers: {
@@ -115,9 +125,36 @@ export async function GET(request: NextRequest) {
       },
     });
   } catch (error) {
-    if (error instanceof Error) {
-      return new NextResponse(error.message, { status: 500 });
-    }
+    // Unconditional: falling off the end of a route handler returns undefined,
+    // which Next cannot serve.
+    const message = error instanceof Error ? error.message : 'Internal Server Error';
+    return new NextResponse(message, { status: 500 });
+  }
+}
+
+/**
+ * Ask the bot runner for this room's session limit. Never throws: any failure
+ * (runner down, no BOT_RUNNER_URL, timeout, junk payload) means "no limit".
+ */
+async function fetchSessionLimitSeconds(roomName: string): Promise<number> {
+  const { botRunnerUrl, botRunnerSecret } = getServerConfig();
+  if (!botRunnerUrl) return 0;
+
+  const base = botRunnerUrl.endsWith('/') ? botRunnerUrl : `${botRunnerUrl}/`;
+  const headers: HeadersInit = botRunnerSecret
+    ? { Authorization: `Bearer ${botRunnerSecret}` }
+    : {};
+
+  try {
+    const res = await fetch(`${base}config?room=${encodeURIComponent(roomName)}`, {
+      headers,
+      cache: 'no-store',
+      signal: AbortSignal.timeout(SESSION_LIMIT_LOOKUP_TIMEOUT_MS),
+    });
+    if (!res.ok) return 0;
+    return sessionLimitSecondsFromConfig(await res.json());
+  } catch {
+    return 0;
   }
 }
 

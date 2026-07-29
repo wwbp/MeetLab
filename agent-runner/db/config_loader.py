@@ -20,6 +20,9 @@ class EffectiveBotConfig:
     tts_aggregation_mode: str  # "sentence" | "token"
     stt_endpointing_ms: int  # 200 | 100 | 50
     auto_record: bool  # auto-start recording when the first participant joins
+    # Advisory session cap in minutes, measured from the first human join; 0 = unlimited.
+    # Defaulted so callers predating the field keep the old (uncapped) behaviour.
+    session_limit_minutes: int = 0
 
 
 async def load_bot_config(room_name: str | None = None) -> EffectiveBotConfig:
@@ -58,6 +61,7 @@ async def load_bot_config(room_name: str | None = None) -> EffectiveBotConfig:
                 tts_aggregation_mode="sentence",
                 stt_endpointing_ms=100,
                 auto_record=False,
+                session_limit_minutes=0,
             )
 
         return EffectiveBotConfig(
@@ -73,4 +77,5 @@ async def load_bot_config(room_name: str | None = None) -> EffectiveBotConfig:
             tts_aggregation_mode=getattr(row, "tts_aggregation_mode", "sentence"),
             stt_endpointing_ms=getattr(row, "stt_endpointing_ms", 200),
             auto_record=bool(getattr(row, "auto_record", False)),
+            session_limit_minutes=int(getattr(row, "session_limit_minutes", 0) or 0),
         )

@@ -14,6 +14,7 @@ type BotConfig = {
   stt_vad_mode: string;
   stt_delay: string | null;
   auto_record: boolean;
+  session_limit_minutes: number;
 };
 
 const EMPTY_CONFIG: Omit<BotConfig, 'scope'> = {
@@ -27,6 +28,7 @@ const EMPTY_CONFIG: Omit<BotConfig, 'scope'> = {
   stt_vad_mode: 'local',
   stt_delay: null,
   auto_record: false,
+  session_limit_minutes: 0,
 };
 
 const STT_MODELS = [
@@ -82,6 +84,7 @@ export default function ConfigPage() {
         stt_vad_mode: data.stt_vad_mode ?? 'local',
         stt_delay: data.stt_delay ?? null,
         auto_record: data.auto_record ?? false,
+        session_limit_minutes: data.session_limit_minutes ?? 0,
       });
     } catch {
       setError('Network error loading config');
@@ -268,6 +271,36 @@ export default function ConfigPage() {
                 </span>
               </span>
             </label>
+          </Section>
+
+          {/* ── Session limit ── */}
+          <Section label="Session Limit">
+            <Field label="Minutes (0 = unlimited)">
+              <input
+                type="number"
+                step="1"
+                min="0"
+                max="1440"
+                value={form.session_limit_minutes}
+                onChange={(e) =>
+                  setForm((f) => ({
+                    ...f,
+                    session_limit_minutes: Math.max(
+                      0,
+                      Math.min(1440, Math.floor(Number(e.target.value) || 0)),
+                    ),
+                  }))
+                }
+                className={inp}
+                required
+              />
+            </Field>
+            <p className="text-muted-foreground text-xs">
+              The countdown starts when the first person joins (not when the room is created or
+              the bot starts) and is shared by everyone in the room. Participants see a timer, a
+              warning three quarters of the way through, and a final reminder near the end. The
+              limit is advisory — nobody is disconnected.
+            </p>
           </Section>
 
           {error && <p className="text-destructive text-sm">{error}</p>}

@@ -240,6 +240,7 @@ class RunnerStartApiTests(unittest.TestCase):
             "scope", "system_prompt", "greeting", "vad_stop_secs",
             "llm_model", "tts_voice", "tts_provider",
             "stt_model", "stt_vad_mode", "stt_delay", "auto_record",
+            "session_limit_minutes",
         ):
             self.assertIn(key, body, f"GET /config response missing field: {key}")
         self.assertEqual(body["scope"], "global")
@@ -291,6 +292,84 @@ class RunnerStartApiTests(unittest.TestCase):
         )
         self.assertEqual(off.status_code, 200, off.text)
         self.assertEqual(off.json().get("auto_record"), False)
+
+    def test_config_put_session_limit_minutes_roundtrip(self):
+        on = self.client.put(
+            "/config",
+            json={"scope": "test-runner-scope", "session_limit_minutes": 30},
+        )
+        self.assertEqual(on.status_code, 200, on.text)
+        self.assertEqual(on.json().get("session_limit_minutes"), 30)
+        # 0 clears the limit (unlimited) — must be accepted, not treated as "unset".
+        off = self.client.put(
+            "/config",
+            json={"scope": "test-runner-scope", "session_limit_minutes": 0},
+        )
+        self.assertEqual(off.status_code, 200, off.text)
+        self.assertEqual(off.json().get("session_limit_minutes"), 0)
+
+    def test_config_put_session_limit_minutes_accepts_the_upper_bound(self):
+        response = self.client.put(
+            "/config",
+            json={"scope": "test-runner-scope", "session_limit_minutes": 1440},
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json().get("session_limit_minutes"), 1440)
+
+    def test_config_room_scope_can_override_a_global_limit_with_unlimited(self):
+        """A room row set to 0 means unlimited — it must not inherit global's cap.
+
+        Guards against resolving this field with a falsy-fallback (`row.value or
+        global.value`), which would silently re-impose the global limit on a room
+        deliberately set to unlimited.
+        """
+        original_global = self.client.get("/config").json()["session_limit_minutes"]
+        self.addCleanup(
+            self.client.put,
+            "/config",
+            json={"scope": "global", "session_limit_minutes": original_global},
+        )
+        room = "test-limit-override-room"
+        self.addCleanup(
+            self.client.put, "/config", json={"scope": room, "session_limit_minutes": 0}
+        )
+
+        self.client.put("/config", json={"scope": "global", "session_limit_minutes": 30})
+        self.client.put("/config", json={"scope": room, "session_limit_minutes": 0})
+
+        self.assertEqual(self.client.get("/config").json()["session_limit_minutes"], 30)
+        self.assertEqual(
+            self.client.get(f"/config?room={room}").json()["session_limit_minutes"],
+            0,
+            "a room set to unlimited must not fall back to the global limit",
+        )
+
+    def test_config_unknown_room_falls_back_to_the_global_limit(self):
+        original_global = self.client.get("/config").json()["session_limit_minutes"]
+        self.addCleanup(
+            self.client.put,
+            "/config",
+            json={"scope": "global", "session_limit_minutes": original_global},
+        )
+
+        self.client.put("/config", json={"scope": "global", "session_limit_minutes": 25})
+        self.assertEqual(
+            self.client.get("/config?room=room-with-no-config-row").json()[
+                "session_limit_minutes"
+            ],
+            25,
+        )
+
+    def test_config_put_session_limit_minutes_rejects_bad_values(self):
+        # bool is a subclass of int in Python — True must NOT sneak through as 1.
+        for bad in ("30", True, -1, 1441, 2.5, None):
+            with self.subTest(bad=bad):
+                response = self.client.put(
+                    "/config",
+                    json={"scope": "test-runner-scope", "session_limit_minutes": bad},
+                )
+                self.assertEqual(response.status_code, 400, f"{bad!r} was accepted")
+                self.assertIn("session_limit_minutes", response.json().get("error", ""))
 
     def test_config_put_invalid_auto_record_returns_400(self):
         response = self.client.put(

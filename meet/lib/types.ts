@@ -25,4 +25,6 @@ export type ConnectionDetails = {
   roomName: string;
   participantName: string;
   participantToken: string;
+  /** Advisory session cap for this room, in seconds. 0 = unlimited. */
+  sessionLimitSeconds: number;
 };

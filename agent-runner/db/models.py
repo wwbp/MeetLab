@@ -186,6 +186,12 @@ class BotConfig(Base):
     auto_record: Mapped[bool] = mapped_column(
         Boolean, default=False, server_default="false", nullable=False
     )
+    # Wall-clock cap on a session, in minutes, measured from the moment the first
+    # human joins (not room creation, not bot start). 0 = unlimited. Advisory only:
+    # the browser counts down and warns; nobody is disconnected.
+    session_limit_minutes: Mapped[int] = mapped_column(
+        BigInteger, default=0, server_default="0", nullable=False
+    )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_now, onupdate=_now
     )

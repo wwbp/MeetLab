@@ -330,6 +330,9 @@ class TestConfigLoaderDefaults(unittest.TestCase):
             tts_aggregation_mode="sentence", stt_endpointing_ms=100,
             auto_record=False,
         )
+        # A caller that predates the session-limit field gets no limit, not a
+        # crash and not an accidental cap.
+        self.assertEqual(cfg.session_limit_minutes, 0)
         self.assertEqual(cfg.stt_model, "parakeet-tdt-0.6b-v2")
         self.assertEqual(cfg.llm_model, "gpt-5.4-nano")
         self.assertEqual(cfg.tts_provider, "elevenlabs")

@@ -522,6 +522,7 @@ async def get_config(room: str | None = None, _=Depends(verify_api_key)):
         "stt_delay": cfg.stt_delay,
         "stt_endpointing_ms": cfg.stt_endpointing_ms,
         "auto_record": cfg.auto_record,
+        "session_limit_minutes": cfg.session_limit_minutes,
     }
 
 
@@ -598,6 +599,16 @@ async def update_config(request: Request, _=Depends(verify_api_key)):
         if not isinstance(body["auto_record"], bool):
             return JSONResponse({"error": "auto_record must be a boolean"}, status_code=400)
         fields["auto_record"] = body["auto_record"]
+    if "session_limit_minutes" in body:
+        v = body["session_limit_minutes"]
+        # bool is a subclass of int in Python — reject it explicitly so True
+        # can't be stored as a 1-minute limit.
+        if isinstance(v, bool) or not isinstance(v, int) or not 0 <= v <= 1440:
+            return JSONResponse(
+                {"error": "session_limit_minutes must be an integer between 0 and 1440 (0 = unlimited)"},
+                status_code=400,
+            )
+        fields["session_limit_minutes"] = v
 
     async with AsyncSessionLocal() as session:
         async with session.begin():
@@ -626,6 +637,7 @@ async def update_config(request: Request, _=Depends(verify_api_key)):
         "stt_delay": cfg.stt_delay,
         "stt_endpointing_ms": cfg.stt_endpointing_ms,
         "auto_record": cfg.auto_record,
+        "session_limit_minutes": cfg.session_limit_minutes,
     }
 
 

@@ -23,6 +23,13 @@ class TestBotConfigDefaults(unittest.TestCase):
         self.assertEqual(col.default.arg, False)
         self.assertEqual(str(col.server_default.arg).lower(), "false")
 
+    def test_session_limit_minutes_default_is_zero(self):
+        """0 = unlimited, so an unconfigured room behaves exactly as it did before."""
+        col = BotConfig.__table__.c.session_limit_minutes
+        self.assertEqual(col.default.arg, 0)
+        self.assertEqual(str(col.server_default.arg), "0")
+        self.assertFalse(col.nullable)
+
 
 if __name__ == "__main__":
     unittest.main()

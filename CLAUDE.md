@@ -108,6 +108,7 @@ Key per-service variables:
 - Tailwind v4 configured via `@tailwindcss/postcss`; theme scoped to agent/desk via nested layout CSS imports
 - `output: 'standalone'` in `next.config.js` — `meet/Dockerfile` is the single file for dev and prod; stages: `deps → dev → builder → runner`; docker-compose builds the `dev` target (alpine, hot-reload, source bind-mounted); production targets `runner` (non-root `nextjs` user, standalone output)
 - Integration tests use Node's built-in test runner (`node --test`); unit tests use Vitest (`pnpm test`)
+- `lib/session-limit.ts` — advisory session time cap (`bot_config.session_limit_minutes`, 0 = unlimited); all logic is pure and unit-tested, `lib/SessionTimer.tsx` is a 1s tick over it. No stored deadline and no server timer: the countdown is derived from the earliest non-bot `joinedAt` LiveKit reports, so late joiners share one clock and an emptied room resets it. `/api/connection-details` hands the limit to the browser and degrades to unlimited if agent-runner is unreachable. See `docs/session-limits.md`
 
 ## Browser & device support
 

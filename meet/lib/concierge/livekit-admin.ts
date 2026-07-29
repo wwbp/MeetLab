@@ -150,7 +150,7 @@ export function mapRoom(room: RoomLike): ConciergeRoom {
   };
 }
 
-export function mapWebhookEvent(event: unknown): Omit<ConciergeEvent, 'id'> {
+export function mapWebhookEvent(event: unknown): Omit<ConciergeEvent, 'id' | 'severity'> {
   const eventRecord =
     typeof event === 'object' && event !== null ? (event as Record<string, unknown>) : {};
   const maybeRoom = eventRecord.room as { name?: string } | undefined;

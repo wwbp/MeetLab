@@ -29,10 +29,14 @@ export type ConciergeParticipant = {
   tracks: ConciergeTrack[];
 };
 
+export type EventSeverity = 'info' | 'warning' | 'error';
+
 export type ConciergeEvent = {
   id: string;
-  source: 'concierge' | 'webhook';
+  /** Which part of the pipeline emitted it. 'runner'/'bot' rows are mirrored logs. */
+  source: 'concierge' | 'webhook' | 'runner' | 'bot';
   event: string;
+  severity: EventSeverity;
   receivedAt: string;
   roomName?: string;
   participantIdentity?: string;

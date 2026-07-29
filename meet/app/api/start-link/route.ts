@@ -7,6 +7,7 @@ import { getRoomServiceClient } from '@/lib/concierge/livekit-admin';
 import { getServerConfig, requireEnv } from '@/lib/config/server';
 import { checkRateLimit, getClientIp } from '@/lib/rate-limit';
 import { generateStartRoomName, pickUniform, verifyStartLink } from '@/lib/start-link';
+import { noteRouteError } from '@/lib/concierge/event-log';
 
 export const dynamic = 'force-dynamic';
 
@@ -106,6 +107,7 @@ export async function POST(request: Request) {
 
     return NextResponse.json({ url: `/rooms/${encodeURIComponent(roomName)}`, roomName });
   } catch (err) {
+    noteRouteError('POST /api/start-link', err);
     const message = err instanceof Error ? err.message : 'Failed to start meeting';
     return NextResponse.json({ error: message }, { status: 502 });
   }

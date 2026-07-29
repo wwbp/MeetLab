@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getServerConfig, requireEnv } from '@/lib/config/server';
+import { noteRouteError } from '@/lib/concierge/event-log';
 
 export const dynamic = 'force-dynamic';
 
@@ -29,6 +30,7 @@ export async function GET(request: Request) {
     const data = await res.json();
     return NextResponse.json(data, { status: res.status });
   } catch (err) {
+    noteRouteError('GET /api/console/config', err);
     const message = err instanceof Error ? err.message : 'Failed to fetch config';
     return NextResponse.json({ error: message }, { status: 502 });
   }
@@ -49,6 +51,7 @@ export async function PUT(request: Request) {
     const data = await res.json();
     return NextResponse.json(data, { status: res.status });
   } catch (err) {
+    noteRouteError('PUT /api/console/config', err);
     const message = err instanceof Error ? err.message : 'Failed to update config';
     return NextResponse.json({ error: message }, { status: 502 });
   }

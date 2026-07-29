@@ -4,6 +4,7 @@ import { getLatestBotTrackSubscriptionSignal } from '@/lib/concierge/bot-track-s
 import { noStoreHeaders } from '@/lib/concierge/http-utils';
 import { getRoomServiceClient, isBotParticipant, mapParticipant, mapRoom } from '@/lib/concierge/livekit-admin';
 import type { ConciergeBotHealthStatus, ConciergeRoomHealthStatus } from '@/lib/concierge/types';
+import { noteRouteError } from '@/lib/concierge/event-log';
 
 export const dynamic = 'force-dynamic';
 const SUBSCRIPTION_SIGNAL_MAX_AGE_MS = 15 * 60 * 1000;
@@ -120,6 +121,7 @@ export async function GET(_request: Request, context: { params: Promise<{ roomNa
       { headers: noStoreHeaders() }
     );
   } catch (error) {
+    noteRouteError('GET /api/concierge/rooms/[roomName]/health', error);
     const message = error instanceof Error ? error.message : 'Failed to evaluate room health';
     return NextResponse.json({ error: message }, { status: 500, headers: noStoreHeaders() });
   }

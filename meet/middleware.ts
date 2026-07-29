@@ -7,8 +7,13 @@ export const config = {
   matcher: [
     '/',
     '/config',
+    '/events',
+    '/meetings',
     '/start-links',
     '/db/:path*',
+    // Session records: metadata, transcripts and recording downloads. Console-only
+    // (the only caller is components/desk/meetings-tab.tsx).
+    '/api/meetings/:path*',
     '/api/concierge/:path*',
     '/api/console/logout',
     '/api/console/config',

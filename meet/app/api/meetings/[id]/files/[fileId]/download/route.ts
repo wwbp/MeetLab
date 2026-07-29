@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerConfig } from '@/lib/config/server';
 import { noStoreHeaders } from '@/lib/concierge/http-utils';
+import { noteRouteError } from '@/lib/concierge/event-log';
 
 export const dynamic = 'force-dynamic';
 
@@ -49,6 +50,7 @@ export async function GET(
       },
     });
   } catch (error) {
+    noteRouteError('GET /api/meetings/[id]/files/[fileId]/download', error);
     const message = error instanceof Error ? error.message : 'Download failed';
     return NextResponse.json({ error: message }, { status: 500, headers: noStoreHeaders() });
   }

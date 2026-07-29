@@ -9,6 +9,7 @@ import { noStoreHeaders } from '@/lib/concierge/http-utils';
 import { getWebhookReceiver, mapWebhookEvent } from '@/lib/concierge/livekit-admin';
 import type { ConciergeEvent } from '@/lib/concierge/types';
 import { getServerConfig } from '@/lib/config/server';
+import { webhookSeverity } from '@/lib/concierge/event-log';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -103,7 +104,7 @@ export async function POST(request: Request) {
     const receiver = getWebhookReceiver();
     const event = await receiver.receive(body, authHeader);
 
-    const storedEvent = pushConciergeEvent(mapWebhookEvent(event));
+    const storedEvent = pushConciergeEvent(mapWebhookEvent(event), webhookSeverity(event));
     maybeRecordTrackSubscriptionSignal(storedEvent);
     maybeReconcileBotClaim(storedEvent);
 

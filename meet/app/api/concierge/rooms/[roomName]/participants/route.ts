@@ -3,6 +3,7 @@ import { pushConciergeEvent } from '@/lib/concierge/events-store';
 import { noStoreHeaders } from '@/lib/concierge/http-utils';
 import { getRoomServiceClient, mapParticipant } from '@/lib/concierge/livekit-admin';
 import { diffRoomPresence } from '@/lib/concierge/participant-presence-store';
+import { noteRouteError } from '@/lib/concierge/event-log';
 
 export const dynamic = 'force-dynamic';
 
@@ -50,6 +51,7 @@ export async function GET(_request: Request, context: { params: Promise<{ roomNa
       { headers: noStoreHeaders() }
     );
   } catch (error) {
+    noteRouteError('GET /api/concierge/rooms/[roomName]/participants', error);
     const message = error instanceof Error ? error.message : 'Failed to list participants';
     return NextResponse.json({ error: message }, { status: 500, headers: noStoreHeaders() });
   }

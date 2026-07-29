@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerConfig } from '@/lib/config/server';
 import { noStoreHeaders } from '@/lib/concierge/http-utils';
+import { noteRouteError } from '@/lib/concierge/event-log';
 
 export const dynamic = 'force-dynamic';
 
@@ -28,6 +29,7 @@ export async function GET(req: NextRequest) {
     const data = await res.json();
     return NextResponse.json(data, { headers: noStoreHeaders() });
   } catch (error) {
+    noteRouteError('GET /api/meetings', error);
     const message = error instanceof Error ? error.message : 'Failed to fetch conversations';
     return NextResponse.json({ error: message }, { status: 500, headers: noStoreHeaders() });
   }

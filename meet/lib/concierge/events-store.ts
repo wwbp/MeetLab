@@ -1,38 +1,32 @@
-import type { ConciergeEvent } from '@/lib/concierge/types';
+import { deferWrite, recordEvent } from '@/lib/concierge/event-log';
 import { randomId } from '@/lib/concierge/http-utils';
+import type { ConciergeEvent, EventSeverity } from '@/lib/concierge/types';
 
-const MAX_EVENTS = 250;
-const STORE_KEY = '__concierge_events_store__';
-
-type ConciergeStore = ConciergeEvent[];
-
-function getStore(): ConciergeStore {
-  const globalState = globalThis as typeof globalThis & { [STORE_KEY]?: ConciergeStore };
-  if (!globalState[STORE_KEY]) {
-    globalState[STORE_KEY] = [];
-  }
-  return globalState[STORE_KEY];
-}
-
+/**
+ * Concierge events, recorded durably.
+ *
+ * This used to be a capped in-memory ring keyed off `globalThis`, which meant
+ * every admin action and webhook vanished on each deploy or restart — exactly
+ * when you most want the history. Events now go to agent-runner's `events`
+ * table, alongside the runner's and the bot's own mirrored warnings and errors.
+ *
+ * The function stays synchronous and still returns the event, because callers
+ * (the LiveKit webhook route in particular) act on it in the same tick. The
+ * write is deferred: `after()` runs it once the response is flushed, so nothing
+ * on the request path waits on it, and a failed write cannot fail the request.
+ */
 export function pushConciergeEvent(
-  event: Omit<ConciergeEvent, 'id' | 'receivedAt'> & { receivedAt?: string }
+  event: Omit<ConciergeEvent, 'id' | 'receivedAt' | 'severity'> & { receivedAt?: string },
+  severity: EventSeverity = 'info',
 ): ConciergeEvent {
   const entry: ConciergeEvent = {
     id: randomId(),
     receivedAt: event.receivedAt ?? new Date().toISOString(),
+    severity,
     ...event,
   };
 
-  const store = getStore();
-  store.unshift(entry);
-  if (store.length > MAX_EVENTS) {
-    store.length = MAX_EVENTS;
-  }
+  deferWrite(() => recordEvent(event, severity));
 
   return entry;
-}
-
-export function listConciergeEvents(limit = 50): ConciergeEvent[] {
-  const boundedLimit = Number.isFinite(limit) ? Math.min(Math.max(limit, 1), 200) : 50;
-  return getStore().slice(0, boundedLimit);
 }

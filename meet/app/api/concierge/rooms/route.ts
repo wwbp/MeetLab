@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { pushConciergeEvent } from '@/lib/concierge/events-store';
 import { noStoreHeaders } from '@/lib/concierge/http-utils';
 import { getRoomServiceClient, mapRoom } from '@/lib/concierge/livekit-admin';
+import { noteRouteError } from '@/lib/concierge/event-log';
 
 export const dynamic = 'force-dynamic';
 const ROOM_NAME_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$/;
@@ -17,6 +18,7 @@ export async function GET() {
     const mappedRooms = rooms.map(mapRoom).sort((a, b) => a.name.localeCompare(b.name));
     return NextResponse.json({ rooms: mappedRooms }, { headers: noStoreHeaders() });
   } catch (error) {
+    noteRouteError('GET /api/concierge/rooms', error);
     const message = error instanceof Error ? error.message : 'Failed to list rooms';
     return NextResponse.json({ error: message }, { status: 500, headers: noStoreHeaders() });
   }

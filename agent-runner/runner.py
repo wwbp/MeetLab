@@ -31,6 +31,7 @@ import storage
 import transcript as transcript_mod
 from config import load_config, require
 from db.config_loader import load_bot_config
+from event_log import EVENT_SEVERITIES, install_error_event_sink, record_event
 from db.engine import AsyncSessionLocal, engine
 from db.models import BotConfig, Conversation, Event, MediaFile, Speaker, Utterance
 from runner_types import LiveKitRunnerArguments
@@ -194,14 +195,16 @@ class UtteranceAdmin(ModelView, model=Utterance):
 class EventAdmin(ModelView, model=Event):
     column_list = [
         Event.id,
+        Event.created_at,
+        Event.severity,
         Event.type,
         Event.room_name,
         Event.conv_id,
         Event.payload,
-        Event.created_at,
     ]
-    column_searchable_list = [Event.type, Event.room_name]
-    column_sortable_list = [Event.created_at]
+    column_searchable_list = [Event.type, Event.room_name, Event.severity]
+    column_sortable_list = [Event.created_at, Event.severity]
+    column_default_sort = [(Event.created_at, True)]
     can_create = False
     can_edit = False
     can_delete = False
@@ -416,6 +419,60 @@ async def start_bot(request: Request, background_tasks: BackgroundTasks, _=Depen
         return JSONResponse({"error": str(e)}, status_code=500)
 
 
+# Reads are for a human scrolling a console, not for bulk export.
+EVENTS_MAX_LIMIT = 500
+EVENTS_DEFAULT_LIMIT = 100
+
+
+def _event_json(ev: Event) -> dict:
+    return {
+        "id": ev.id,
+        "type": ev.type,
+        "severity": getattr(ev, "severity", "info"),
+        "room_name": ev.room_name,
+        "conv_id": ev.conv_id,
+        "payload": ev.payload or {},
+        "created_at": ev.created_at.isoformat(),
+    }
+
+
+@app.get("/events")
+async def list_events(
+    severity: str | None = None,
+    room: str | None = None,
+    conv_id: str | None = None,
+    type: str | None = None,
+    limit: str | None = None,
+    _=Depends(verify_api_key),
+):
+    """Newest-first event log, filterable — this is what the admin console reads."""
+    if severity is not None and severity not in EVENT_SEVERITIES:
+        return JSONResponse(
+            {"error": f"severity must be one of: {', '.join(sorted(EVENT_SEVERITIES))}"},
+            status_code=400,
+        )
+
+    try:
+        bounded_limit = int(limit) if limit is not None else EVENTS_DEFAULT_LIMIT
+    except (TypeError, ValueError):
+        bounded_limit = EVENTS_DEFAULT_LIMIT
+    bounded_limit = max(1, min(EVENTS_MAX_LIMIT, bounded_limit))
+
+    stmt = select(Event).order_by(Event.created_at.desc(), Event.id.desc()).limit(bounded_limit)
+    if severity:
+        stmt = stmt.where(Event.severity == severity)
+    if room:
+        stmt = stmt.where(Event.room_name == room)
+    if conv_id:
+        stmt = stmt.where(Event.conv_id == conv_id)
+    if type:
+        stmt = stmt.where(Event.type == type)
+
+    async with AsyncSessionLocal() as session:
+        rows = (await session.execute(stmt)).scalars().all()
+    return {"events": [_event_json(ev) for ev in rows]}
+
+
 @app.post("/events", status_code=202)
 async def log_event(request: Request, _=Depends(verify_api_key)):
     try:
@@ -429,16 +486,23 @@ async def log_event(request: Request, _=Depends(verify_api_key)):
     if not isinstance(event_type, str) or not event_type.strip():
         return JSONResponse({"error": "type is required"}, status_code=400)
 
-    async with AsyncSessionLocal() as session:
-        async with session.begin():
-            session.add(
-                Event(
-                    type=event_type.strip(),
-                    room_name=body.get("room_name"),
-                    conv_id=body.get("conv_id"),
-                    payload={k: v for k, v in body.items() if k not in ("type", "room_name", "conv_id")},
-                )
-            )
+    severity = body.get("severity", "info")
+    if severity not in EVENT_SEVERITIES:
+        return JSONResponse(
+            {"error": f"severity must be one of: {', '.join(sorted(EVENT_SEVERITIES))}"},
+            status_code=400,
+        )
+
+    await record_event(
+        event_type=event_type.strip(),
+        severity=severity,
+        room_name=body.get("room_name"),
+        conv_id=body.get("conv_id"),
+        payload={
+            k: v for k, v in body.items()
+            if k not in ("type", "room_name", "conv_id", "severity")
+        },
+    )
 
     # Flip pending recording MediaFile to available when egress finishes
     if event_type.strip().lower() in ("egress_ended", "egress_updated"):
@@ -986,6 +1050,13 @@ async def reconcile_conversations(_=Depends(verify_api_key)):
     """Manually trigger the stale-conversation sweep (also runs on a timer)."""
     closed = await reconcile_stale_conversations()
     return {"closed": closed}
+
+
+@app.on_event("startup")
+async def _install_event_log_sink() -> None:
+    """Mirror WARNING+ logs from the runner and every bot into the event log."""
+    install_error_event_sink(asyncio.get_running_loop())
+    logger.info("event-log sink installed (WARNING+ mirrored to events table)")
 
 
 @app.on_event("startup")

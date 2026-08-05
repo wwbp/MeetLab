@@ -1,0 +1,153 @@
+# Change an environment's instance type and autoscaling range.
+#
+# Why this is not in .ebextensions
+# --------------------------------
+# EB option-setting precedence puts settings applied directly to the environment
+# ABOVE anything in .ebextensions. Both environments already have InstanceType,
+# MinSize and MaxSize set at environment level, so an .ebextensions block is
+# silently ignored for those namespaces — and worse, partially ignored: on
+# 2026-08-05 a config setting MinSize=2/MaxSize=6 had its MaxSize overridden by the
+# environment's existing MaxSize=1, producing MinSize > MaxSize. EB rejected the
+# whole deploy ("Failed to deploy application") and the app never shipped.
+#
+# update-environment applies all option settings in a single atomic call, so
+# MinSize and MaxSize move together and the intermediate invalid state never
+# exists. It also runs through Actions, so prod still changes only via CI/CD.
+#
+# This is deliberately manual (workflow_dispatch) rather than part of every deploy:
+# capacity changes replace instances and should be a decision, not a side effect of
+# merging. Note that replacing `meet` instances clears all in-memory concierge state
+# and strands sessions in flight — run it during a quiet window.
+#
+# Sizing rationale lives in docs/scale-readiness-plan.md.
+
+name: Capacity
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Which environment to resize
+        required: true
+        type: choice
+        options: [agent-runner, meeting-client]
+      instance_type:
+        description: EC2 instance type (c6i.xlarge for agent-runner, c6i.large for meet)
+        required: true
+        type: string
+      min_size:
+        description: ASG minimum
+        required: true
+        type: string
+      max_size:
+        description: >-
+          ASG maximum. Keep meeting-client at 1 — the concierge stores are
+          in-process Maps, so a second instance puts two bots in one room.
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  resize:
+    name: Resize ${{ inputs.environment }}
+    runs-on: ubuntu-latest
+    environment: production
+    concurrency:
+      group: eb-capacity-${{ inputs.environment }}
+      cancel-in-progress: false
+
+    env:
+      AWS_REGION: us-east-1
+
+    steps:
+      - name: Guard against a multi-instance meeting-client
+        if: inputs.environment == 'meeting-client' && inputs.max_size != '1'
+        run: |
+          echo "::error::meeting-client must stay at MaxSize=1 until the concierge" \
+               "stores move out of process (see docs/scale-readiness-plan.md C6)." \
+               "Two instances means two independent bot-room claim stores."
+          exit 1
+
+      - name: Validate sizes
+        run: |
+          set -euo pipefail
+          if [ "${{ inputs.min_size }}" -gt "${{ inputs.max_size }}" ]; then
+            echo "::error::min_size must not exceed max_size"; exit 1
+          fi
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/${{ secrets.AWS_ROLE_NAME }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Show current settings
+        run: |
+          set -euo pipefail
+          aws elasticbeanstalk describe-configuration-settings \
+            --application-name "${{ secrets.AWS_APPLICATION_NAME }}" \
+            --environment-name "${{ inputs.environment }}" \
+            --query "ConfigurationSettings[0].OptionSettings[?OptionName=='InstanceType'||OptionName=='MinSize'||OptionName=='MaxSize'].{Name:OptionName,Value:Value}" \
+            --output table
+
+      - name: Apply capacity
+        run: |
+          set -euo pipefail
+          # One atomic call: MinSize and MaxSize are validated together, so raising
+          # Min above the current Max is fine.
+          aws elasticbeanstalk update-environment \
+            --environment-name "${{ inputs.environment }}" \
+            --option-settings \
+              "Namespace=aws:autoscaling:launchconfiguration,OptionName=InstanceType,Value=${{ inputs.instance_type }}" \
+              "Namespace=aws:autoscaling:asg,OptionName=MinSize,Value=${{ inputs.min_size }}" \
+              "Namespace=aws:autoscaling:asg,OptionName=MaxSize,Value=${{ inputs.max_size }}" \
+            --query 'EnvironmentName' --output text
+
+      - name: Wait for the environment to settle, then verify
+        run: |
+          set -euo pipefail
+          status=""
+          for i in $(seq 1 80); do
+            status=$(aws elasticbeanstalk describe-environments \
+              --environment-names "${{ inputs.environment }}" \
+              --query 'Environments[0].Status' --output text)
+            echo "poll ${i}: status=${status}"
+            [ "${status}" = "Ready" ] && [ "${i}" -gt 2 ] && break
+            sleep 15
+          done
+
+          echo "--- resulting settings ---"
+          aws elasticbeanstalk describe-configuration-settings \
+            --application-name "${{ secrets.AWS_APPLICATION_NAME }}" \
+            --environment-name "${{ inputs.environment }}" \
+            --query "ConfigurationSettings[0].OptionSettings[?OptionName=='InstanceType'||OptionName=='MinSize'||OptionName=='MaxSize'].{Name:OptionName,Value:Value}" \
+            --output table
+
+          # Verify against what is actually running, not what EB says it intends.
+          echo "--- running instances ---"
+          aws ec2 describe-instances \
+            --filters "Name=tag:elasticbeanstalk:environment-name,Values=${{ inputs.environment }}" \
+                      "Name=instance-state-name,Values=running" \
+            --query 'Reservations[].Instances[].InstanceType' --output text
+
+          actual=$(aws ec2 describe-instances \
+            --filters "Name=tag:elasticbeanstalk:environment-name,Values=${{ inputs.environment }}" \
+                      "Name=instance-state-name,Values=running" \
+            --query 'Reservations[].Instances[].InstanceType' --output text)
+          for t in $actual; do
+            if [ "$t" != "${{ inputs.instance_type }}" ]; then
+              echo "::error::an instance is still ${t}, expected ${{ inputs.instance_type }}"
+              exit 1
+            fi
+          done
+
+      - name: Report EB errors if anything failed
+        if: failure()
+        run: |
+          aws elasticbeanstalk describe-events \
+            --environment-name "${{ inputs.environment }}" \
+            --max-items 20 --severity ERROR \
+            --query 'Events[].[EventDate,Message]' --output text || true

@@ -8,10 +8,13 @@ BENCHMARK_SAMPLES ?= 10
 BENCHMARK_TIMEOUT ?= 25
 BENCHMARK_CONFIGS ?=
 BENCHMARK_WAV ?=
+# Rooms run concurrently per config. Lower it on a memory-constrained Docker VM:
+# concurrent bots contend for RAM and the resulting numbers are unattributable.
+BENCHMARK_PARALLEL ?= 3
 
 MSG ?= migration
 
-.PHONY: up down start stop logs migrate migration test test-unit test-integration test-bot-longevity test-multi-speaker test-multi-speaker-audio test-session-lifecycle setup-livekit-cloud revert-livekit-local test-livekit-tooling scan scan-agent-runner scan-meet benchmark benchmark-audio benchmark-audio-long benchmark-full benchmark-exp2 benchmark-report simulate soak soak-sanity bench-stt-concurrency bench-idle-room
+.PHONY: up down start stop logs migrate migration test test-unit test-integration test-bot-longevity test-multi-speaker test-multi-speaker-audio test-session-lifecycle setup-livekit-cloud revert-livekit-local test-livekit-tooling scan scan-agent-runner scan-meet benchmark benchmark-audio benchmark-audio-long benchmark-audio-paused benchmark-full benchmark-exp2 benchmark-report simulate soak soak-sanity bench-stt-concurrency bench-idle-room
 
 up:
 	$(COMPOSE) up --build -d
@@ -106,6 +109,17 @@ benchmark-audio:
 
 benchmark-audio-long: benchmark-audio
 
+# Paused-speech fixture: one question delivered in clauses with PAUSE_MS gaps, so
+# the turn arrives fragmented like real meeting speech. The standard fixtures are
+# single clean phrases and can never reproduce the 5s turn-commit stall (RC1).
+# See docs/pilot-postmortem-2026-08.md.
+PAUSE_MS ?= 400
+benchmark-audio-paused:
+	$(COMPOSE) up -d agent-runner
+	$(COMPOSE) exec -T agent-runner \
+		env PAUSE_MS=$(PAUSE_MS) \
+		uv run python tests/generate_paused_speech_audio.py
+
 benchmark:
 	$(COMPOSE) up -d transport-server agent-runner
 	$(COMPOSE) exec -T agent-runner uv run alembic upgrade head
@@ -123,6 +137,7 @@ benchmark-full:
 		BENCHMARK_TIMEOUT=$(BENCHMARK_TIMEOUT) \
 		BENCHMARK_CONFIGS="$(BENCHMARK_CONFIGS)" \
 		BENCHMARK_WAV="$(BENCHMARK_WAV)" \
+		BENCHMARK_PARALLEL=$(BENCHMARK_PARALLEL) \
 		uv run python tests/run_benchmark_matrix.py
 
 # Meeting simulation: reproduce STT/VAD failure modes locally and read the

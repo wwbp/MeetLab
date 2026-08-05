@@ -41,6 +41,44 @@ Two rules of thumb:
    ElevenLabs) are slower at busy hours; a Tuesday-afternoon run and a Sunday-morning
    run can differ by 200ms for reasons that have nothing to do with our code.
 
+## ⚠️ A good score here does not mean users are happy
+
+The Jul/Aug 2026 pilot shipped with benchmark numbers around 1s and users still
+reported severe lag — nearly half of all turns took over three seconds. The
+benchmark could not have caught it.
+
+Every standard fixture is **one continuous phrase** ("What is the capital of
+France?"). Real people pause mid-sentence, and with `stt_endpointing_ms` at 100ms
+each pause splits the turn into fragments. In production, a one-fragment turn
+answered in **390ms** while a five-fragment turn took **5198ms** — because
+Pipecat's `user_turn_stop_timeout` (5.0s, never overridden) is what finally ends
+a fragmented turn. Our fixtures only ever exercised the fast case.
+
+Use the paused-speech fixture for anything turn-taking related:
+
+```bash
+make benchmark-audio-paused                    # 5 clauses, 400ms pauses (PAUSE_MS to tune)
+make benchmark-full BENCHMARK_SAMPLES=10 \
+    BENCHMARK_WAV=tests/fixtures/benchmark_prompt_paused.wav \
+    BENCHMARK_CONFIGS="<label>"
+```
+
+Other things to know before trusting a local run:
+
+- **Serialise on a small machine.** `BENCHMARK_PARALLEL=1` — concurrent bots
+  contend for RAM and the numbers become unattributable.
+- **Restart agent-runner first.** It holds ~150 MB per completed bot session and
+  never gives it back (241 MiB fresh → 4.9 GiB after ~30 sessions), which
+  eventually OOM-kills the run with `Error 137`.
+- **The DB-default STT has no local NIM** and falls back to in-process Whisper,
+  which loads a model per participant and OOMs the dev VM (Experiment 5).
+  Pick an explicit config label.
+
+As of 2026-08-05 the local harness reports TTS timings but `— no data` for
+STT/LLM/E2E, so it cannot currently measure the stages that matter. Until that
+is fixed, production telemetry (Grafana + the `utterances.meta` timings) is the
+authoritative source. See `docs/pilot-postmortem-2026-08.md`.
+
 ## Current best result (2026-06-10, local Docker)
 
 Configuration: Deepgram `nova-3-general` (STT) + OpenAI `gpt-5.4-nano` (LLM) +

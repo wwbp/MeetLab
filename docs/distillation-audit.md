@@ -95,8 +95,8 @@ today for `vad_stop_secs`, a field that does nothing.
 | `GET /conversations/{id}/audio-tracks/download` | ~4 | lightly used |
 | `POST /conversations/{id}/transcript` | ~4 | lightly used |
 | `POST /recordings/start` | 2 | manual path; auto-record calls it in-process |
-| `POST /recordings/stop` | **0** | dead surface |
-| `POST /conversations/reconcile` | **0** | dead surface |
+| `POST /recordings/stop` | **0** | **live, not dead** — `NEXT_PUBLIC_LK_RECORD_ENDPOINT=/api/record` is set in prod, so every participant's room renders a record button that calls this. Nobody has clicked *stop*. Needs auth, not deletion. |
+| `POST /conversations/reconcile` | **0** | **deleted 2026-08-05** — manual trigger only; the same sweep runs on a 120s timer that is untouched |
 | `PATCH /media-files/{file_id}` | **0** | dead — *see below* |
 
 `PATCH /media-files/{file_id}` is documented as "called by the meet webhook on
@@ -407,7 +407,14 @@ Nothing here is removed yet.
 
 - `bot_config.vad_stop_secs` — column, API validation, console slider *(dead)*
 - `bot_config.stt_vad_mode`, `bot_config.stt_delay` — with the `gpt-*` path *(D1)*
-- `POST /recordings/stop`, `POST /conversations/reconcile` — zero traffic in 30 days
+- ~~`POST /recordings/stop`~~ — **withdrawn.** Zero traffic, but it is a live
+  feature: `NEXT_PUBLIC_LK_RECORD_ENDPOINT=/api/record` is set in prod, so every
+  participant sees a record button that calls it. Nobody has clicked *stop*.
+  Fix its auth instead.
+- ~~`POST /conversations/reconcile`~~ — **deleted 2026-08-05.** Manual trigger
+  only; the sweep runs on a 120s timer that is untouched.
+- ~~`agent-runner/soak-results-*.json`~~ — **withdrawn.** Already gitignored
+  (`.gitignore:17`); never committed.
 - `PATCH /media-files/{file_id}` — decide *after* fixing the egress webhook; it is
   dead only because its caller is broken
 - `agent-runner/soak-results-*.json` — 3 committed result artifacts

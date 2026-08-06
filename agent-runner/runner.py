@@ -981,13 +981,6 @@ async def reconcile_stale_conversations(min_age_seconds: int = 60) -> int:
     return len(stale)
 
 
-@app.post("/conversations/reconcile")
-async def reconcile_conversations(_=Depends(verify_api_key)):
-    """Manually trigger the stale-conversation sweep (also runs on a timer)."""
-    closed = await reconcile_stale_conversations()
-    return {"closed": closed}
-
-
 @app.on_event("startup")
 async def _start_conversation_reconcile_loop() -> None:
     if os.environ.get("DISABLE_CONVERSATION_RECONCILE", "").lower() in ("1", "true", "yes"):

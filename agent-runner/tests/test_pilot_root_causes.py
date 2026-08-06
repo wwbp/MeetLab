@@ -43,6 +43,17 @@ AGENT_RUNNER_DIR = Path(__file__).resolve().parent.parent
 BOT_PY = AGENT_RUNNER_DIR / "bot.py"
 
 
+def _prod_user_aggregator_params():
+    """The user-aggregator params bot.py actually builds in production.
+
+    Goes through the real builder rather than reconstructing it, so the test
+    cannot drift from what ships.
+    """
+    import bot
+
+    return bot.build_user_aggregator_params()
+
+
 def call_sites(source_path: Path, callee: str) -> list[set[str]]:
     """Keyword-argument names used at every call site of ``callee`` in a file.
 
@@ -82,41 +93,61 @@ class RC1TurnCommitTimeoutTests(unittest.TestCase):
 
         self.assertEqual(LLMUserAggregatorParams().user_turn_stop_timeout, 5.0)
 
-    def test_production_aggregator_waits_5s_with_no_vad_to_end_a_turn_sooner(self):
-        """Reproduces the exact params bot.py builds — the effective prod config.
+    def test_pipecat_default_stop_strategy_needs_audio_we_never_deliver(self):
+        """The precise mechanism, and why the fix is not just a smaller timeout.
 
-        With ``vad_analyzer=None`` the aggregator has no voice signal to detect
-        the end of a turn, so the wall-clock timeout is the *only* thing that
-        commits it.
+        Pipecat's default stop strategy is TurnAnalyzerUserTurnStopStrategy — an
+        ONNX smart-turn model that decides the user has finished by analysing
+        *audio*. But `multi_speaker_stt.py` consumes every UserAudioRawFrame to
+        route it to a per-participant STT and explicitly does not forward it
+        ("Audio consumed by per-participant STT; do not push downstream
+        directly"). So the analyzer is starved and never fires, and every turn
+        falls through to the wall-clock fallback.
 
-        FIX: once bot.py passes a real analyzer and an explicit timeout, assert
-        ``user_turn_stop_timeout <= 1.2`` and ``vad_analyzer is not None``.
+        This is a standing property of upstream + our pipeline shape, so it stays
+        as a guard: if the default ever changes, our reasoning needs revisiting.
         """
-        from pipecat.processors.aggregators.llm_response_universal import (
-            LLMUserAggregatorParams,
+        from pipecat.turns.user_turn_strategies import UserTurnStrategies
+
+        defaults = UserTurnStrategies()
+        self.assertEqual(
+            [type(s).__name__ for s in defaults.stop],
+            ["TurnAnalyzerUserTurnStopStrategy"],
         )
 
-        params = LLMUserAggregatorParams(vad_analyzer=None)
+    def test_bot_uses_a_stop_strategy_that_works_without_audio(self):
+        """The fix: a strategy driven by VAD-stop frames and transcript inactivity.
 
-        self.assertIsNone(params.vad_analyzer)
-        self.assertEqual(params.user_turn_stop_timeout, 5.0)
-
-    def test_bot_does_not_override_the_turn_stop_timeout(self):
-        """bot.py never passes the knob, so the 5.0s default wins.
-
-        FIX: invert to ``assertIn("user_turn_stop_timeout", kwargs)``.
+        SpeechTimeoutUserTurnStopStrategy ends the turn a short pause after the
+        user stops, and falls back to inactivity-since-last-transcript when no
+        VAD stop frame arrives — both signals our pipeline actually delivers.
         """
-        sites = call_sites(BOT_PY, "LLMUserAggregatorParams")
-        self.assertEqual(len(sites), 1, "expected exactly one aggregator-params call site")
-        kwargs = sites[0]
+        params = _prod_user_aggregator_params()
 
-        self.assertIn("vad_analyzer", kwargs)
-        self.assertNotIn("user_turn_stop_timeout", kwargs)
+        names = [type(s).__name__ for s in params.user_turn_strategies.stop]
+        self.assertIn("SpeechTimeoutUserTurnStopStrategy", names)
+        self.assertNotIn(
+            "TurnAnalyzerUserTurnStopStrategy", names,
+            "the audio-based analyzer cannot work here — the aggregator gets no audio",
+        )
 
-    def test_bot_builds_the_aggregator_without_a_vad_analyzer(self):
-        """FIX: invert once a real VAD analyzer is passed instead of None."""
-        source = BOT_PY.read_text()
-        self.assertIn("LLMUserAggregatorParams(vad_analyzer=None)", source)
+    def test_a_pause_ends_the_turn_in_well_under_a_second(self):
+        """What the user actually feels. The pilot's median was 5198ms."""
+        params = _prod_user_aggregator_params()
+        strategy = next(
+            s for s in params.user_turn_strategies.stop
+            if type(s).__name__ == "SpeechTimeoutUserTurnStopStrategy"
+        )
+        self.assertLessEqual(strategy._user_speech_timeout, 0.8)
+
+    def test_the_wall_clock_fallback_is_no_longer_five_seconds(self):
+        """Belt and braces: even if every strategy fails, the ceiling is sane.
+
+        5.0s is upstream's default and was the entire pilot failure. The fallback
+        should be a backstop, not the primary path.
+        """
+        params = _prod_user_aggregator_params()
+        self.assertLessEqual(params.user_turn_stop_timeout, 2.0)
 
 
 # ── RC2 — 100ms endpointing, and a knob that does nothing ─────────────────────
@@ -154,19 +185,30 @@ class RC2EndpointingTests(unittest.TestCase):
 
         return captured["stop_secs"]
 
-    def test_endpointing_100ms_yields_a_100ms_silence_window(self):
-        """The pilot value. 100ms is shorter than a normal conversational pause.
-
-        FIX: once the default moves to 400-600ms, assert the new value here and
-        update ``test_defaults.test_endpointing_default_is_100`` to match.
-        """
+    def test_configured_endpointing_still_drives_the_vad_window(self):
+        """The mapping itself is correct and must stay that way."""
         self.assertAlmostEqual(
-            self._captured_stop_secs(stt_endpointing_ms=100, vad_stop_secs=0.1), 0.1
+            self._captured_stop_secs(stt_endpointing_ms=450, vad_stop_secs=0.1), 0.45
         )
 
-    def test_endpointing_falls_back_to_200ms_when_unset(self):
-        self.assertAlmostEqual(
-            self._captured_stop_secs(stt_endpointing_ms=None, vad_stop_secs=0.1), 0.2
+    def test_the_default_endpointing_tolerates_a_thinking_pause(self):
+        """100ms was the pilot value and it shredded natural speech.
+
+        A person pausing mid-sentence to think is silent for far longer than
+        100ms; treating that as "finished" is what split one participant's
+        sentence 31 ways. The default must be long enough to survive an ordinary
+        pause and short enough to stay responsive.
+        """
+        from db.models import BotConfig
+
+        default_ms = BotConfig.__table__.c.stt_endpointing_ms.default.arg
+        self.assertGreaterEqual(default_ms, 300, "too eager — will cut people off mid-thought")
+        self.assertLessEqual(default_ms, 700, "too slow — the bot will feel sluggish")
+
+    def test_endpointing_falls_back_safely_when_unset(self):
+        """An unset value must not silently revert to the aggressive old default."""
+        self.assertGreaterEqual(
+            self._captured_stop_secs(stt_endpointing_ms=None, vad_stop_secs=0.1), 0.3
         )
 
     def test_vad_stop_secs_has_no_effect_on_the_pipeline(self):

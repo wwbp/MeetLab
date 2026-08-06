@@ -57,6 +57,16 @@ from runner_types import LiveKitRunnerArguments
 
 _STT_DELAY_VALUES = frozenset({"minimal", "low", "medium", "high", "xhigh"})
 
+# Silence, in ms, after which a participant's VAD closes a speech segment. This is
+# the knob that actually governs turn-taking — `vad_stop_secs` in bot_config does
+# nothing (see docs/distillation-audit.md).
+#
+# The pilot ran at 100ms, which is far shorter than an ordinary thinking pause, so
+# a single sentence was chopped into as many as 31 fragments and the bot cut people
+# off mid-thought. 450ms survives a normal pause while still feeling responsive.
+# Used when a config row has no explicit value; the DB column default matches.
+_DEFAULT_ENDPOINTING_MS = 450
+
 # ── Phase 1 diagnostics tunables ─────────────────────────────────────────────
 # stt_ms above this is logged + counted as a spike so we can capture the
 # conditions (queue depth, model, content) when extreme latency occurs.
@@ -154,9 +164,60 @@ def _build_vad_processor(bot_config):
     from pipecat.audio.vad.vad_analyzer import VADParams
     from pipecat.processors.audio.vad_processor import VADProcessor
 
-    endpointing_ms = getattr(bot_config, "stt_endpointing_ms", 200) or 200
+    endpointing_ms = getattr(bot_config, "stt_endpointing_ms", _DEFAULT_ENDPOINTING_MS) or _DEFAULT_ENDPOINTING_MS
     return VADProcessor(
         vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=endpointing_ms / 1000))
+    )
+
+
+def build_user_aggregator_params():
+    """User-turn aggregation params — how the bot decides you have finished talking.
+
+    This is the single most consequential setting in the pipeline. Getting it
+    wrong cost us the Jul/Aug 2026 pilot: 49% of turns took over three seconds
+    and the median substantive answer waited 5.2s. See
+    docs/pilot-postmortem-2026-08.md (RC1).
+
+    Why the defaults cannot work here
+    ---------------------------------
+    Pipecat's default stop strategy is TurnAnalyzerUserTurnStopStrategy, an ONNX
+    smart-turn model that decides the user has finished by analysing *audio*. Our
+    pipeline never gives the aggregator any: MultiSpeakerSTT consumes every
+    UserAudioRawFrame to route it to a per-participant STT and deliberately does
+    not forward it downstream. So the analyzer is starved, never fires, and every
+    single turn falls through to `user_turn_stop_timeout` — 5.0s by default.
+
+    That is why the fix is a different *strategy*, not merely a smaller timeout,
+    and why passing a `vad_analyzer` here would not help either: the VADController
+    it builds would be starved of the same audio.
+
+    What we use instead
+    -------------------
+    SpeechTimeoutUserTurnStopStrategy ends the turn a short pause after the user
+    stops speaking, driven by signals this pipeline does deliver — the
+    VADUserStoppedSpeakingFrame emitted by each per-participant VAD chain, with a
+    fallback that measures inactivity since the last transcript and rearms on each
+    new one. A mid-sentence pause therefore extends the turn instead of ending it.
+
+    `user_turn_stop_timeout` stays as a backstop for the case where no strategy
+    fires at all, but at 1.5s rather than 5.0s: it should be an emergency exit,
+    not the normal path it silently became.
+    """
+    from pipecat.turns.user_stop import SpeechTimeoutUserTurnStopStrategy
+    from pipecat.turns.user_turn_strategies import (
+        UserTurnStrategies,
+        default_user_turn_start_strategies,
+    )
+
+    return LLMUserAggregatorParams(
+        # Deliberately None: the aggregator receives no audio, so a VAD analyzer
+        # here would build a controller that never sees a sample.
+        vad_analyzer=None,
+        user_turn_strategies=UserTurnStrategies(
+            start=default_user_turn_start_strategies(),
+            stop=[SpeechTimeoutUserTurnStopStrategy(user_speech_timeout=0.6)],
+        ),
+        user_turn_stop_timeout=1.5,
     )
 
 
@@ -413,11 +474,9 @@ async def bot(runner_args: LiveKitRunnerArguments):
     )
 
     context = LLMContext([{"role": "system", "content": bot_config.system_prompt}])
-    # VAD is handled per-participant inside each dedicated STT instance, so the
-    # context aggregator does not need its own VAD analyzer.
     context_aggregator = LLMContextAggregatorPair(
         context,
-        user_params=LLMUserAggregatorParams(vad_analyzer=None),
+        user_params=build_user_aggregator_params(),
     )
 
     # Per-turn timing — stt_done/tts_first anchors for E2E (stt_done → tts_first).

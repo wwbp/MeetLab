@@ -180,7 +180,7 @@ class BotConfig(Base):
     stt_delay: Mapped[str | None] = mapped_column(String(32), nullable=True)
     tts_provider: Mapped[str] = mapped_column(String(32), default="elevenlabs")
     tts_aggregation_mode: Mapped[str] = mapped_column(String(16), default="sentence")
-    stt_endpointing_ms: Mapped[int] = mapped_column(BigInteger, default=100, server_default="100")
+    stt_endpointing_ms: Mapped[int] = mapped_column(BigInteger, default=450, server_default="450")
     # When true, the bot auto-starts recording (composite mp4 + per-speaker WAV)
     # once the first participant joins. Off by default — opt in per room/global.
     auto_record: Mapped[bool] = mapped_column(

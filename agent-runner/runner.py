@@ -592,9 +592,20 @@ async def update_config(request: Request, _=Depends(verify_api_key)):
             return JSONResponse({"error": "tts_aggregation_mode must be 'sentence' or 'token'"}, status_code=400)
         fields["tts_aggregation_mode"] = body["tts_aggregation_mode"]
     if "stt_endpointing_ms" in body:
-        if body["stt_endpointing_ms"] not in (50, 100, 200):
-            return JSONResponse({"error": "stt_endpointing_ms must be 50, 100, or 200"}, status_code=400)
-        fields["stt_endpointing_ms"] = int(body["stt_endpointing_ms"])
+        # A duration, so range-checked rather than enumerated. It was previously
+        # an allow-list of (50, 100, 200), which silently became a landmine the
+        # moment the default moved outside it: /api/start-link materialises a room
+        # config by GETting a pool config and PUTting it back, so an unaccepted
+        # default makes every start link fail with a 502. Bounds are wide enough
+        # to tune within (see docs/pilot-postmortem-2026-08.md RC2) and tight
+        # enough to catch nonsense.
+        v = body["stt_endpointing_ms"]
+        if isinstance(v, bool) or not isinstance(v, int) or not (50 <= v <= 2000):
+            return JSONResponse(
+                {"error": "stt_endpointing_ms must be an integer between 50 and 2000"},
+                status_code=400,
+            )
+        fields["stt_endpointing_ms"] = int(v)
     if "auto_record" in body:
         if not isinstance(body["auto_record"], bool):
             return JSONResponse({"error": "auto_record must be a boolean"}, status_code=400)

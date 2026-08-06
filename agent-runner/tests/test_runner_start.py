@@ -3,6 +3,7 @@ import os
 import sys
 import types
 import unittest
+import uuid
 
 from fastapi.testclient import TestClient
 
@@ -274,6 +275,45 @@ class RunnerStartApiTests(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 200, response.text)
         self.assertEqual(response.json().get("llm_model"), "gpt-4o-mini")
+
+    def test_every_column_default_survives_a_config_round_trip(self):
+        """GET a config, PUT it back under a new scope — start-link's exact flow.
+
+        Regression: the stt_endpointing_ms validator was an allow-list of
+        (50, 100, 200). When the column default moved to 450 to fix RC2, every
+        round-trip started returning 400 — so /api/start-link answered 502 and
+        no participant could join through a link. Unit tests all passed; only the
+        integration suite caught it.
+
+        This asserts the invariant that was violated: a config the API hands out
+        must be one the API accepts back. It holds for every field at once, so a
+        future default that drifts outside its validator fails here.
+        """
+        from db.models import BotConfig
+
+        source = f"rt-src-{uuid.uuid4().hex[:8]}"
+        # Materialise a row carrying the column defaults.
+        created = self.client.put("/config", json={"scope": source})
+        self.assertEqual(created.status_code, 200, created.text)
+
+        fetched = self.client.get(f"/config?scope={source}")
+        self.assertEqual(fetched.status_code, 200, fetched.text)
+        fields = fetched.json()
+
+        # start-link copies everything it got, minus the scope, under a new one.
+        fields.pop("scope", None)
+        fields.pop("updated_at", None)
+        echoed = self.client.put("/config", json={**fields, "scope": f"rt-dst-{uuid.uuid4().hex[:8]}"})
+
+        self.assertEqual(
+            echoed.status_code, 200,
+            f"a config the API returned was rejected on write back: {echoed.text}",
+        )
+        # And specifically the field that broke: the default must be writable.
+        self.assertEqual(
+            echoed.json().get("stt_endpointing_ms"),
+            BotConfig.__table__.c.stt_endpointing_ms.default.arg,
+        )
 
     def test_config_put_valid_stt_delay_accepted(self):
         response = self.client.put(

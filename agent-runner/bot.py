@@ -67,6 +67,27 @@ _STT_DELAY_VALUES = frozenset({"minimal", "low", "medium", "high", "xhigh"})
 # Used when a config row has no explicit value; the DB column default matches.
 _DEFAULT_ENDPOINTING_MS = 450
 
+# Extra silence the turn aggregator waits after VAD reports the speaker stopped,
+# before committing the turn. This ADDS to the endpointing window — a turn ends
+# after roughly _DEFAULT_ENDPOINTING_MS + USER_SPEECH_TIMEOUT of quiet.
+#
+# Calibrated against real pilot audio rather than guessed. Running production's
+# own Silero analyzer over three participants from 2026-07-30 (407 intra-speaker
+# silences) and comparing predicted segments against the 80 turns they actually
+# took:
+#
+#     effective silence   segments   vs 80 real turns
+#              450 ms         107        1.34x   over-splits
+#              600 ms          91        1.14x
+#              750 ms          78        0.97x   <- matches reality
+#             1050 ms          61        0.76x   merges separate turns
+#
+# 450 + 300 = 750ms. Over-splitting is cheap here (the aggregator rejoins
+# fragments); under-splitting is not, because merging two turns makes the bot
+# answer both at once — the "chained answers" complaint. See
+# tests/test_turn_calibration.py and scripts/analyze-pause-distribution.py.
+USER_SPEECH_TIMEOUT_SECS = 0.3
+
 # ── Phase 1 diagnostics tunables ─────────────────────────────────────────────
 # stt_ms above this is logged + counted as a spike so we can capture the
 # conditions (queue depth, model, content) when extreme latency occurs.
@@ -215,7 +236,9 @@ def build_user_aggregator_params():
         vad_analyzer=None,
         user_turn_strategies=UserTurnStrategies(
             start=default_user_turn_start_strategies(),
-            stop=[SpeechTimeoutUserTurnStopStrategy(user_speech_timeout=0.6)],
+            stop=[SpeechTimeoutUserTurnStopStrategy(
+                user_speech_timeout=USER_SPEECH_TIMEOUT_SECS
+            )],
         ),
         user_turn_stop_timeout=1.5,
     )

@@ -58,8 +58,9 @@ from runner_types import LiveKitRunnerArguments
 _STT_DELAY_VALUES = frozenset({"minimal", "low", "medium", "high", "xhigh"})
 
 # Silence, in ms, after which a participant's VAD closes a speech segment. This is
-# the knob that actually governs turn-taking — `vad_stop_secs` in bot_config does
-# nothing (see docs/distillation-audit.md).
+# the first half of the turn-end window; user_speech_timeout_ms is the second.
+# (A `vad_stop_secs` column used to sit here doing nothing at all; removed
+# 2026-08-10, see docs/distillation-audit.md.)
 #
 # The pilot ran at 100ms, which is far shorter than an ordinary thinking pause, so
 # a single sentence was chopped into as many as 31 fragments and the bot cut people
@@ -86,7 +87,18 @@ _DEFAULT_ENDPOINTING_MS = 450
 # fragments); under-splitting is not, because merging two turns makes the bot
 # answer both at once — the "chained answers" complaint. See
 # tests/test_turn_calibration.py and scripts/analyze-pause-distribution.py.
-USER_SPEECH_TIMEOUT_SECS = 0.3
+_DEFAULT_USER_SPEECH_TIMEOUT_MS = 300
+
+
+def _user_speech_timeout_secs(bot_config) -> float:
+    """Aggregator wait, in seconds, from config — falling back to the default.
+
+    Config-driven so the turn-end window can be tuned against live conversations
+    without a deploy. Remember it ADDS to stt_endpointing_ms; judge changes by the
+    sum, not this value alone (tests/test_turn_calibration.py).
+    """
+    ms = getattr(bot_config, "user_speech_timeout_ms", None) or _DEFAULT_USER_SPEECH_TIMEOUT_MS
+    return ms / 1000.0
 
 # ── Phase 1 diagnostics tunables ─────────────────────────────────────────────
 # stt_ms above this is logged + counted as a spike so we can capture the
@@ -234,7 +246,7 @@ def make_speech_onset_handler(tracker, enqueue_frame):
     return _on_speech_onset
 
 
-def build_user_aggregator_params():
+def build_user_aggregator_params(bot_config=None):
     """User-turn aggregation params — how the bot decides you have finished talking.
 
     This is the single most consequential setting in the pipeline. Getting it
@@ -280,7 +292,7 @@ def build_user_aggregator_params():
         user_turn_strategies=UserTurnStrategies(
             start=default_user_turn_start_strategies(),
             stop=[SpeechTimeoutUserTurnStopStrategy(
-                user_speech_timeout=USER_SPEECH_TIMEOUT_SECS
+                user_speech_timeout=_user_speech_timeout_secs(bot_config)
             )],
         ),
         user_turn_stop_timeout=1.5,
@@ -470,7 +482,8 @@ async def bot(runner_args: LiveKitRunnerArguments):
     bot_config = _apply_stt_model_override(await load_bot_config(runner_args.room_name))
     logger.info(
         f"Loaded bot config for room '{runner_args.room_name}': "
-        f"model={bot_config.llm_model} voice={bot_config.tts_voice} vad={bot_config.vad_stop_secs}s"
+        f"model={bot_config.llm_model} voice={bot_config.tts_voice} "
+        f"turn_window={bot_config.stt_endpointing_ms}+{bot_config.user_speech_timeout_ms}ms"
     )
 
     # Per-participant STT: each participant gets a dedicated STT instance so
@@ -553,7 +566,7 @@ async def bot(runner_args: LiveKitRunnerArguments):
     context = LLMContext([{"role": "system", "content": bot_config.system_prompt}])
     context_aggregator = LLMContextAggregatorPair(
         context,
-        user_params=build_user_aggregator_params(),
+        user_params=build_user_aggregator_params(bot_config),
     )
 
     # Per-turn timing — stt_done/tts_first anchors for E2E (stt_done → tts_first).

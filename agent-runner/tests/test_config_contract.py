@@ -46,11 +46,11 @@ NOT_PIPELINE_FIELDS = {
 # Known-dead fields. Each entry is a standing bug, not an exemption: the test
 # asserts these are *still* dead so the cleanup is tracked, and fails loudly if
 # one is quietly resurrected without removing it from here.
-KNOWN_DEAD_FIELDS = {
-    "vad_stop_secs": (
-        "Read once, into a log f-string. Exposed as a console slider that does "
-        "nothing. Scheduled for removal end-to-end — column, API validation, UI."
-    ),
+KNOWN_DEAD_FIELDS: dict[str, str] = {
+    # Empty, and that is the goal. vad_stop_secs lived here — a full-stack knob
+    # (column, API validation, console slider) whose only reader was a log string.
+    # Removed end-to-end 2026-08-10 once the console exposed the knobs that do work.
+    # Anything added here is a standing bug with a deadline, not an exemption.
 }
 
 
@@ -89,6 +89,39 @@ def _config_reads(source_path: Path) -> dict[str, list[bool]]:
         if field:
             reads.setdefault(field, []).append(id(node) in in_fstring)
     return reads
+
+
+class FallbackDefaultsTests(unittest.TestCase):
+    """``load_bot_config`` has a hardcoded fallback for an empty table.
+
+    It is a second, invisible copy of every default, and it drifted: after RC2
+    raised the ``stt_endpointing_ms`` column default 100 -> 450, the fallback still
+    said 100 — so an empty ``bot_config`` table silently reinstated the exact
+    behaviour that cut participants off mid-sentence. Nothing caught it, because
+    the fallback only runs when the table is empty, which never happens in a
+    healthy environment.
+
+    This pins the two copies together for the fields where a mismatch changes how
+    the bot behaves.
+    """
+
+    BEHAVIOURAL_FIELDS = ("stt_endpointing_ms", "user_speech_timeout_ms", "auto_record")
+
+    def test_the_empty_table_fallback_matches_the_column_defaults(self):
+        import inspect
+
+        from db import config_loader
+        from db.models import BotConfig
+
+        source = inspect.getsource(config_loader.load_bot_config)
+        for field in self.BEHAVIOURAL_FIELDS:
+            expected = BotConfig.__table__.c[field].default.arg
+            self.assertIn(
+                f"{field}={expected!r}".replace("'", '"') if isinstance(expected, str)
+                else f"{field}={expected}",
+                source,
+                f"the fallback disagrees with the {field} column default ({expected!r})",
+            )
 
 
 class ConfigContractTests(unittest.TestCase):

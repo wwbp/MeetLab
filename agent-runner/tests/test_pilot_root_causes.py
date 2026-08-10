@@ -5,8 +5,8 @@ Full analysis and the production evidence behind each one:
 
     RC1  Pipecat's ``user_turn_stop_timeout`` left at its 5.0s default while the
          aggregator is built with ``vad_analyzer=None``  → lag + chained answers
-    RC2  ``stt_endpointing_ms=100`` ends a turn after 100ms of silence, and the
-         ``vad_stop_secs`` knob that operators actually turned does nothing
+    RC2  ``stt_endpointing_ms=100`` ends a turn after 100ms of silence, while the
+         ``vad_stop_secs`` knob operators actually turned did nothing (removed)
     RC3  Interruption is measured but never enforced — the bot cannot yield
     RC4  Egress quota (429) kills a recording with no retry and leaves no trace
 
@@ -188,7 +188,7 @@ class RC2EndpointingTests(unittest.TestCase):
     def test_configured_endpointing_still_drives_the_vad_window(self):
         """The mapping itself is correct and must stay that way."""
         self.assertAlmostEqual(
-            self._captured_stop_secs(stt_endpointing_ms=450, vad_stop_secs=0.1), 0.45
+            self._captured_stop_secs(stt_endpointing_ms=450), 0.45
         )
 
     def test_the_default_endpointing_tolerates_a_thinking_pause(self):
@@ -208,51 +208,8 @@ class RC2EndpointingTests(unittest.TestCase):
     def test_endpointing_falls_back_safely_when_unset(self):
         """An unset value must not silently revert to the aggressive old default."""
         self.assertGreaterEqual(
-            self._captured_stop_secs(stt_endpointing_ms=None, vad_stop_secs=0.1), 0.3
+            self._captured_stop_secs(stt_endpointing_ms=None), 0.3
         )
-
-    def test_vad_stop_secs_has_no_effect_on_the_pipeline(self):
-        """``vad_stop_secs`` is a fully-plumbed knob that changes nothing.
-
-        DB column -> API validation in runner.py -> a slider in the console at
-        meet/app/(shell)/config/page.tsx. All 42 pilot config rows had it set to
-        0.1 by someone trying to fix responsiveness. Its only appearance in the
-        pipeline is inside a log string (bot.py, "vad={...}s").
-
-        Two wildly different values must produce an identical VAD window — that
-        identity *is* the bug.
-
-        FIX: either wire this field to the aggregator (then these two must
-        differ) or delete it end-to-end — column, API, and console slider.
-        """
-        tiny = self._captured_stop_secs(stt_endpointing_ms=100, vad_stop_secs=0.1)
-        huge = self._captured_stop_secs(stt_endpointing_ms=100, vad_stop_secs=5.0)
-
-        self.assertEqual(tiny, huge)
-
-    def test_vad_stop_secs_is_only_ever_logged_never_applied(self):
-        """FIX: delete this test when the field is wired up or removed."""
-        tree = ast.parse(BOT_PY.read_text())
-        uses = [
-            node
-            for node in ast.walk(tree)
-            if isinstance(node, ast.Attribute) and node.attr == "vad_stop_secs"
-        ]
-        self.assertEqual(len(uses), 1, "vad_stop_secs should appear exactly once in bot.py")
-
-        # ...and that one use is inside an f-string being logged, not a call argument.
-        in_fstring = [
-            node
-            for node in ast.walk(tree)
-            if isinstance(node, ast.JoinedStr)
-            and any(
-                isinstance(v, ast.Attribute) and v.attr == "vad_stop_secs"
-                for f in node.values
-                if isinstance(f, ast.FormattedValue)
-                for v in ast.walk(f)
-            )
-        ]
-        self.assertEqual(len(in_fstring), 1)
 
 
 # ── RC3 — interruption measured, never enforced ───────────────────────────────

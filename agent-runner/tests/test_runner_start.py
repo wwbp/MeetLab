@@ -250,7 +250,8 @@ class RunnerStartApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         body = response.json()
         for key in (
-            "scope", "system_prompt", "greeting", "vad_stop_secs",
+            "scope", "system_prompt", "greeting",
+            "stt_endpointing_ms", "user_speech_timeout_ms",
             "llm_model", "tts_voice", "tts_provider",
             "stt_model", "stt_vad_mode", "stt_delay", "auto_record",
             "session_limit_minutes",
@@ -485,17 +486,6 @@ class RunnerStartApiTests(unittest.TestCase):
     def test_config_put_non_object_body_returns_400(self):
         response = self.client.put("/config", json=[])
         self.assertEqual(response.status_code, 400)
-
-    def test_config_put_invalid_vad_stop_secs_type_returns_400(self):
-        response = self.client.put(
-            "/config",
-            json={"scope": "test-runner-scope", "vad_stop_secs": "fast"},
-        )
-        self.assertEqual(response.status_code, 400)
-
-    # ------------------------------------------------------------------
-    # custom_data → Conversation.meta (which bot config ran this session)
-    # ------------------------------------------------------------------
 
     def test_start_persists_custom_data_on_conversation(self):
         import uuid as _uuid

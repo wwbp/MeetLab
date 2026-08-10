@@ -10,7 +10,8 @@ type BotConfig = {
   llm_model: string;
   tts_provider: string;
   tts_voice: string;
-  vad_stop_secs: number;
+  stt_endpointing_ms: number;
+  user_speech_timeout_ms: number;
   stt_vad_mode: string;
   stt_delay: string | null;
   auto_record: boolean;
@@ -24,7 +25,8 @@ const EMPTY_CONFIG: Omit<BotConfig, 'scope'> = {
   llm_model: 'gpt-5.4-nano',
   tts_provider: 'elevenlabs',
   tts_voice: 'WhMcMcvXQ8T2QfmQmlYh',
-  vad_stop_secs: 0.6,
+  stt_endpointing_ms: 450,
+  user_speech_timeout_ms: 300,
   stt_vad_mode: 'local',
   stt_delay: null,
   auto_record: false,
@@ -80,7 +82,8 @@ export default function ConfigPage() {
         llm_model: LLM_MODELS.includes(loadedLlm) ? loadedLlm : LLM_MODELS[0],
         tts_provider: data.tts_provider ?? 'elevenlabs',
         tts_voice: data.tts_voice ?? '',
-        vad_stop_secs: data.vad_stop_secs ?? 0.6,
+        stt_endpointing_ms: data.stt_endpointing_ms ?? 450,
+        user_speech_timeout_ms: data.user_speech_timeout_ms ?? 300,
         stt_vad_mode: data.stt_vad_mode ?? 'local',
         stt_delay: data.stt_delay ?? null,
         auto_record: data.auto_record ?? false,
@@ -195,19 +198,45 @@ export default function ConfigPage() {
                   ))}
                 </select>
               </Field>
-              <Field label="VAD Stop (s)">
+              {/* These two ADD together to form the turn-end window: the bot
+                  commits a turn after roughly stt_endpointing_ms +
+                  user_speech_timeout_ms of silence. 450+300=750ms is calibrated
+                  against real pilot audio — judge any change by the sum, not
+                  either field alone. Too low cuts people off mid-thought; too
+                  high merges two separate points into one answer. */}
+              <Field label="Endpointing (ms)">
                 <input
                   type="number"
-                  step="0.1"
-                  min="0.1"
-                  max="5"
-                  value={form.vad_stop_secs}
+                  step="50"
+                  min="50"
+                  max="2000"
+                  value={form.stt_endpointing_ms}
                   onChange={(e) =>
-                    setForm((f) => ({ ...f, vad_stop_secs: parseFloat(e.target.value) }))
+                    setForm((f) => ({ ...f, stt_endpointing_ms: parseInt(e.target.value, 10) }))
                   }
                   className={inp}
                   required
                 />
+              </Field>
+              <Field label="Turn-end wait (ms)">
+                <input
+                  type="number"
+                  step="50"
+                  min="50"
+                  max="2000"
+                  value={form.user_speech_timeout_ms}
+                  onChange={(e) =>
+                    setForm((f) => ({ ...f, user_speech_timeout_ms: parseInt(e.target.value, 10) }))
+                  }
+                  className={inp}
+                  required
+                />
+              </Field>
+              <Field label={`Turn ends after ${form.stt_endpointing_ms + form.user_speech_timeout_ms}ms of silence`}>
+                <p className="text-xs opacity-70">
+                  Sum of the two fields above. 750ms is the calibrated default; the
+                  Jul/Aug pilot effectively ran at ~5100ms.
+                </p>
               </Field>
             </div>
           </Section>

@@ -246,7 +246,8 @@ class BotConfigAdmin(ModelView, model=BotConfig):
         BotConfig.llm_model,
         BotConfig.tts_provider,
         BotConfig.tts_voice,
-        BotConfig.vad_stop_secs,
+        BotConfig.stt_endpointing_ms,
+        BotConfig.user_speech_timeout_ms,
         BotConfig.updated_at,
     ]
     form_overrides = {
@@ -257,6 +258,7 @@ class BotConfigAdmin(ModelView, model=BotConfig):
         "tts_provider": SelectField,
         "tts_aggregation_mode": SelectField,
         "stt_endpointing_ms": SelectField,
+        "user_speech_timeout_ms": SelectField,
     }
     form_args = {
         "llm_model": {"choices": _LLM_CHOICES},
@@ -265,7 +267,25 @@ class BotConfigAdmin(ModelView, model=BotConfig):
         "stt_delay": {"choices": [("", "— (none)")]},
         "tts_provider": {"choices": [("elevenlabs", "elevenlabs"), ("openai", "openai")]},
         "tts_aggregation_mode": {"choices": [("sentence", "sentence (default)"), ("token", "token (lower latency)")]},
-        "stt_endpointing_ms": {"choices": [("100", "100ms (default)"), ("200", "200ms"), ("50", "50ms (aggressive)")]},
+        # These two ADD together to form the turn-end window; 450+300=750ms is
+        # calibrated against real pilot audio (tests/test_turn_calibration.py).
+        # Judge any change by the sum. Choices are kept inside the range PUT
+        # /config accepts, and a test asserts the current defaults appear here —
+        # this list previously still said 100/200/50 after the default moved to
+        # 450, so saving any row would have silently regressed it.
+        "stt_endpointing_ms": {"choices": [
+            ("200", "200ms (aggressive — cuts people off)"),
+            ("300", "300ms"),
+            ("450", "450ms (default, calibrated)"),
+            ("600", "600ms"),
+            ("800", "800ms (patient)"),
+        ]},
+        "user_speech_timeout_ms": {"choices": [
+            ("150", "150ms (snappy)"),
+            ("300", "300ms (default, calibrated)"),
+            ("450", "450ms"),
+            ("600", "600ms (patient — may merge turns)"),
+        ]},
     }
     name = "Bot Config"
     name_plural = "Bot Configs"
@@ -512,7 +532,6 @@ async def get_config(room: str | None = None, _=Depends(verify_api_key)):
         "scope": room or "global",
         "system_prompt": cfg.system_prompt,
         "greeting": cfg.greeting,
-        "vad_stop_secs": cfg.vad_stop_secs,
         "llm_model": cfg.llm_model,
         "tts_voice": cfg.tts_voice,
         "tts_provider": cfg.tts_provider,
@@ -521,6 +540,7 @@ async def get_config(room: str | None = None, _=Depends(verify_api_key)):
         "stt_vad_mode": cfg.stt_vad_mode,
         "stt_delay": cfg.stt_delay,
         "stt_endpointing_ms": cfg.stt_endpointing_ms,
+        "user_speech_timeout_ms": cfg.user_speech_timeout_ms,
         "auto_record": cfg.auto_record,
         "session_limit_minutes": cfg.session_limit_minutes,
     }
@@ -549,10 +569,6 @@ async def update_config(request: Request, _=Depends(verify_api_key)):
         if not isinstance(body["greeting"], str):
             return JSONResponse({"error": "greeting must be a string"}, status_code=400)
         fields["greeting"] = body["greeting"]
-    if "vad_stop_secs" in body:
-        if not isinstance(body["vad_stop_secs"], (int, float)):
-            return JSONResponse({"error": "vad_stop_secs must be a number"}, status_code=400)
-        fields["vad_stop_secs"] = float(body["vad_stop_secs"])
     if "llm_model" in body:
         if not isinstance(body["llm_model"], str) or not body["llm_model"].strip():
             return JSONResponse({"error": "llm_model must be a non-empty string"}, status_code=400)
@@ -606,6 +622,16 @@ async def update_config(request: Request, _=Depends(verify_api_key)):
                 status_code=400,
             )
         fields["stt_endpointing_ms"] = int(v)
+    if "user_speech_timeout_ms" in body:
+        # Same shape as stt_endpointing_ms: a duration, range-checked rather than
+        # enumerated, so moving the default never puts it outside its own validator.
+        v = body["user_speech_timeout_ms"]
+        if isinstance(v, bool) or not isinstance(v, int) or not (50 <= v <= 2000):
+            return JSONResponse(
+                {"error": "user_speech_timeout_ms must be an integer between 50 and 2000"},
+                status_code=400,
+            )
+        fields["user_speech_timeout_ms"] = int(v)
     if "auto_record" in body:
         if not isinstance(body["auto_record"], bool):
             return JSONResponse({"error": "auto_record must be a boolean"}, status_code=400)
@@ -638,7 +664,6 @@ async def update_config(request: Request, _=Depends(verify_api_key)):
         "scope": scope,
         "system_prompt": cfg.system_prompt,
         "greeting": cfg.greeting,
-        "vad_stop_secs": cfg.vad_stop_secs,
         "llm_model": cfg.llm_model,
         "tts_voice": cfg.tts_voice,
         "tts_provider": cfg.tts_provider,
@@ -647,6 +672,7 @@ async def update_config(request: Request, _=Depends(verify_api_key)):
         "stt_vad_mode": cfg.stt_vad_mode,
         "stt_delay": cfg.stt_delay,
         "stt_endpointing_ms": cfg.stt_endpointing_ms,
+        "user_speech_timeout_ms": cfg.user_speech_timeout_ms,
         "auto_record": cfg.auto_record,
         "session_limit_minutes": cfg.session_limit_minutes,
     }

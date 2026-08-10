@@ -323,11 +323,11 @@ class TestConfigLoaderDefaults(unittest.TestCase):
     def test_default_stt_is_parakeet(self):
         from db.config_loader import EffectiveBotConfig
         cfg = EffectiveBotConfig(
-            system_prompt="", greeting="", vad_stop_secs=0.6,
+            system_prompt="", greeting="",
             llm_model="gpt-5.4-nano", tts_voice="WhMcMcvXQ8T2QfmQmlYh",
             stt_model="parakeet-tdt-0.6b-v2", stt_vad_mode="local",
             stt_delay=None, tts_provider="elevenlabs",
-            tts_aggregation_mode="sentence", stt_endpointing_ms=100,
+            tts_aggregation_mode="sentence", stt_endpointing_ms=450,
             auto_record=False,
         )
         # A caller that predates the session-limit field gets no limit, not a
@@ -343,9 +343,13 @@ class TestConfigLoaderDefaults(unittest.TestCase):
         import db.config_loader as cl
         import inspect
         src = inspect.getsource(cl.load_bot_config)
-        # Ensure the hardcoded fallback uses the promoted default (Experiment 6).
+        # Model/provider choices only. This test used to also assert
+        # "stt_endpointing_ms=100", which pinned the pilot value that cut
+        # participants off mid-sentence — a test actively holding a bug in place.
+        # Numeric turn-taking defaults are now owned by
+        # test_config_contract.FallbackDefaultsTests, which derives them from the
+        # column defaults so the fallback cannot drift from the schema again.
         self.assertIn("parakeet-tdt-0.6b-v2", src)
-        self.assertIn("stt_endpointing_ms=100", src)
         self.assertIn("gpt-5.4-nano", src)
         self.assertIn("elevenlabs", src)
 

@@ -841,6 +841,11 @@ async def bot(runner_args: LiveKitRunnerArguments):
 
     @context_aggregator.assistant().event_handler("on_assistant_turn_stopped")
     async def on_assistant_turn_stopped(aggregator, message):
+        # Closes the interruption enforcement window. Gating on
+        # BotStoppedSpeakingFrame instead meant an onset landing in a >350ms
+        # inter-sentence gap was ignored (BOT_VAD_STOP_SECS), so interruption
+        # worked only intermittently. See interruption.py.
+        interruptions.assistant_turn_stopped(time.monotonic())
         # Remember recent bot speech so on_user_turn_stopped can flag self-echo.
         if message.content:
             _recent_bot_texts.append(message.content)

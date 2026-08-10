@@ -258,62 +258,114 @@ class RC2EndpointingTests(unittest.TestCase):
 # ── RC3 — interruption measured, never enforced ───────────────────────────────
 
 
-class RC3InterruptionNotEnforcedTests(unittest.TestCase):
-    """The bot talks over users and has no mechanism to stop.
+class RC3InterruptionEnforcementTests(unittest.TestCase):
+    """The bot must yield when someone talks over it.
 
-    Production signature: 52 talk-over events, p50 1375ms, observed max 4743ms.
+    Production signature before the fix: 52 talk-over events, p50 1375ms,
+    observed max 4743ms. Detection was fully built; enforcement was not.
+
+    Why the built-in path could not be used
+    ---------------------------------------
+    Pipecat's usual route is transport VAD -> UserStartedSpeakingFrame ->
+    interruption. Two reasons that is not the mechanism here:
+
+    * The 0.0.x-era ``allow_interruptions`` / ``interruption_strategies`` knobs on
+      PipelineParams do not exist in 1.4.0 — see
+      ``test_pipeline_params_has_no_allow_interruptions_in_this_version``.
+    * We already compute a better signal. MultiSpeakerSTT gives per-participant
+      VAD onset (``on_speech_onset``), attributed to a specific speaker, from
+      audio it is already analysing. Adding a transport-level analyzer would
+      re-run VAD over the mixed stream for a worse, unattributed signal.
+
+    So enforcement rides the signal we have: onset during a bot-speaking window
+    pushes an InterruptionFrame, which every FrameProcessor handles by cancelling
+    in-flight work (frame_processor.py: InterruptionFrame -> _start_interruption).
     """
 
-    def test_transport_is_built_without_a_vad_analyzer(self):
-        """No transport VAD means Pipecat's built-in interruption path is inert.
+    def test_pipeline_params_has_no_allow_interruptions_in_this_version(self):
+        """Guards the reasoning above against a dependency bump.
 
-        FIX: invert to ``assertIn("vad_analyzer", kwargs)``.
+        Much of the public Pipecat documentation still describes
+        ``PipelineParams(allow_interruptions=..., interruption_strategies=[...])``.
+        Those fields are gone in 1.4.0. If they come back, revisit whether the
+        built-in path is now the better mechanism.
         """
-        sites = call_sites(BOT_PY, "LiveKitParams")
-        self.assertEqual(len(sites), 1, "expected exactly one LiveKitParams call site")
+        from pipecat.pipeline.task import PipelineParams
 
-        self.assertNotIn("vad_analyzer", sites[0])
+        fields = set(PipelineParams.model_fields)
+        self.assertNotIn("allow_interruptions", fields)
+        self.assertNotIn("interruption_strategies", fields)
 
-    def test_allow_interruptions_is_never_configured_anywhere(self):
-        """FIX: invert once the flag is set — assert the offenders list is non-empty.
-
-        Scans agent-runner sources rather than one call site: the point is that
-        the setting is absent from the entire service, not just from bot.py.
-        """
-        hits = [
-            path.name
-            for path in AGENT_RUNNER_DIR.glob("*.py")
-            if "allow_interruptions" in path.read_text()
-        ]
-        self.assertEqual(hits, [])
-
-    def test_tracker_records_a_talkover_but_has_no_way_to_stop_the_bot(self):
-        """The tracker is observe-only: counters in, nothing out.
-
-        It holds no pipeline handle, so a detected talk-over cannot become a
-        cancellation. This is the whole of RC3 in one assertion.
-
-        FIX: when interruption is enforced, assert the detection path actually
-        emits/pushes something (e.g. an InterruptionFrame) instead of only
-        incrementing a counter.
-        """
+    def test_the_tracker_tells_the_caller_to_yield(self):
+        """A detected talk-over now produces an actionable signal, not just a count."""
         from interruption import InterruptionTracker
 
         tracker = InterruptionTracker(record=False)
         tracker.bot_started(0.0)
-        tracker.user_onset(0.5, "sid-A")   # user starts talking over the bot
-        tracker.bot_stopped(4.7)           # ...bot carries on for another 4.2s
 
-        # The talk-over is measured precisely.
+        self.assertTrue(
+            tracker.user_onset(0.5, "sid-A"),
+            "a user speaking over the bot must signal an interruption",
+        )
+
+        tracker.bot_stopped(4.7)
+        # ...and the measurement is unchanged, so the metric stays comparable
+        # with the pilot numbers in docs/pilot-postmortem-2026-08.md.
         self.assertEqual(tracker.interruptions, 1)
         self.assertAlmostEqual(tracker.talkovers_ms[0], 4200.0, places=3)
 
-        # ...and the tracker has no means to have prevented it.
-        for mechanism in ("push_frame", "queue_frame", "cancel", "interrupt", "task"):
-            self.assertFalse(
-                hasattr(tracker, mechanism),
-                f"tracker unexpectedly exposes {mechanism!r} — interruption may now be enforced",
-            )
+    def test_the_speech_onset_handler_pushes_an_interruption_frame(self):
+        """End of the chain: the signal reaches the pipeline.
+
+        Exercises the real handler bot.py installs, with a fake enqueue, so the
+        wiring is covered without standing up a pipeline.
+        """
+        import asyncio
+
+        import bot
+        from interruption import InterruptionTracker
+        from pipecat.frames.frames import InterruptionFrame
+
+        tracker = InterruptionTracker(record=False)
+        pushed = []
+
+        async def fake_enqueue(frame):
+            pushed.append(frame)
+
+        handler = bot.make_speech_onset_handler(tracker, fake_enqueue)
+
+        async def scenario():
+            # Nobody is speaking over anyone — no interruption.
+            await handler("sid-A")
+            self.assertEqual(pushed, [])
+
+            tracker.bot_started(1.0)
+            await handler("sid-A")
+            await handler("sid-A")  # flicker: must not re-interrupt
+
+        asyncio.run(scenario())
+
+        self.assertEqual(len(pushed), 1, "expected exactly one interruption per window")
+        self.assertIsInstance(pushed[0], InterruptionFrame)
+
+    def test_a_missing_pipeline_handle_does_not_crash_the_audio_path(self):
+        """on_speech_onset runs inside frame processing; it must never raise.
+
+        The handler is created before the PipelineTask exists, so it can be
+        invoked with nothing to push to. Losing an interruption is bad; killing
+        the audio path is worse.
+        """
+        import asyncio
+
+        import bot
+        from interruption import InterruptionTracker
+
+        tracker = InterruptionTracker(record=False)
+        handler = bot.make_speech_onset_handler(tracker, None)
+        tracker.bot_started(0.0)
+
+        asyncio.run(handler("sid-A"))  # must not raise
+        self.assertEqual(tracker.interruptions, 1, "the talk-over is still measured")
 
 
 # ── RC4 — recordings lost to the egress quota, with no trace ──────────────────

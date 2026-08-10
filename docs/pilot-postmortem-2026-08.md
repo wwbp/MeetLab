@@ -338,9 +338,30 @@ problem no code was ever going to fix.
    p90 from ~7s to under ~1.5s and remove most chaining. *One line, highest leverage in the whole list.*
 2. **Raise `stt_endpointing_ms` to 400–600 ms** (RC2) and re-measure fragmentation. Trades a little
    snappiness on clipped answers for not shredding real sentences.
-3. **Actually implement interruption** (RC3): put a VAD on `LiveKitParams`, enable
-   `allow_interruptions`, and make `InterruptionTracker` assert rather than observe. Target: bot
-   yields in <300 ms. This is the only item that is real work rather than configuration.
+3. ~~**Actually implement interruption** (RC3): put a VAD on `LiveKitParams`, enable
+   `allow_interruptions`~~ — **done 2026-08-10, but not that way. The recommendation
+   above was wrong** and is left visible because the reason is worth keeping:
+
+   - `allow_interruptions` and `interruption_strategies` are **0.0.x-era fields that
+     do not exist on `PipelineParams` in Pipecat 1.4.0**. Much of the published
+     documentation still describes them. A test now pins their absence so a
+     dependency bump forces us to revisit.
+   - A transport-level `vad_analyzer` would have been the worse option even if it
+     existed: `MultiSpeakerSTT` already runs per-participant VAD, so we have onset
+     attributed to a *specific speaker*. A transport analyzer re-runs VAD over the
+     mixed stream for an unattributed signal.
+
+   What shipped: `user_onset()` already knew when someone started talking over the
+   bot — it just returned nothing. It now returns that as a signal, and
+   `make_speech_onset_handler` pushes an `InterruptionFrame`, which every
+   `FrameProcessor` handles by cancelling in-flight work
+   (`frame_processor.py`: `InterruptionFrame` → `_start_interruption`). Fires once
+   per bot-speaking window, so VAD flicker or a second speaker joining in does not
+   re-interrupt.
+
+   Note the pre-existing asymmetry this closes: a **typed** message already
+   interrupted the bot (`on_data_received` queued an `InterruptionFrame`). Only
+   *speech* didn't.
 4. **Make recording robust** (RC4):
    - retry egress start with backoff on 429, and surface a visible "recording unavailable" state
      instead of failing silently;

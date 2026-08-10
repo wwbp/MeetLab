@@ -64,6 +64,59 @@ class TestInterruptionTracker(unittest.TestCase):
         self.assertEqual(t.interruptions, 0)
         self.assertEqual(t.talkovers_ms, [])
 
+    # ── RC3: the tracker must also tell the caller to *act* ───────────────────
+    #
+    # Detection was always here; enforcement was not. user_onset() now returns
+    # True exactly when the bot should yield, so bot.py can push an
+    # InterruptionFrame. Returning the signal (rather than bot.py re-deriving it)
+    # keeps the "once per bot-speaking window" rule in one place.
+
+    def test_user_onset_signals_interrupt_when_the_bot_is_speaking(self):
+        t = self._tracker()
+        t.bot_started(0.0)
+        self.assertTrue(t.user_onset(0.5, "sidA"))
+
+    def test_user_onset_does_not_signal_when_the_bot_is_silent(self):
+        """Normal turn-taking. Interrupting here would cancel nothing and could
+        discard the user's own in-flight turn."""
+        t = self._tracker()
+        self.assertFalse(t.user_onset(1.0, "sidA"))
+
+        t.bot_started(2.0)
+        t.bot_stopped(3.0)
+        self.assertFalse(t.user_onset(3.5, "sidA"))
+
+    def test_only_the_first_onset_in_a_window_signals(self):
+        """VAD flicker, or a second speaker joining in, must not re-interrupt.
+
+        The bot is already being cancelled; repeated InterruptionFrames would
+        churn the pipeline for no gain.
+        """
+        t = self._tracker()
+        t.bot_started(0.0)
+        self.assertTrue(t.user_onset(0.2, "sidA"))
+        self.assertFalse(t.user_onset(0.4, "sidA"))
+        self.assertFalse(t.user_onset(0.6, "sidB"))
+
+    def test_each_new_bot_window_can_signal_again(self):
+        t = self._tracker()
+        t.bot_started(0.0)
+        self.assertTrue(t.user_onset(0.5, "s"))
+        t.bot_stopped(1.0)
+
+        t.bot_started(5.0)
+        self.assertTrue(t.user_onset(5.2, "s"))
+
+    def test_signalling_does_not_change_what_gets_measured(self):
+        """Enforcement must not distort the metric that proved the problem."""
+        t = self._tracker()
+        t.bot_started(10.0)
+        t.user_onset(10.5, "s")
+        t.bot_stopped(11.0)
+
+        self.assertEqual(t.interruptions, 1)
+        self.assertAlmostEqual(t.talkovers_ms[0], 500.0, places=3)
+
     def test_summary_reports_count_and_max(self):
         t = self._tracker()
         t.bot_started(0.0); t.user_onset(0.5, "s"); t.bot_stopped(1.0)   # 500ms

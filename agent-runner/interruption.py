@@ -1,6 +1,12 @@
-"""Bot-over-user interruption tracking.
+"""Bot-over-user interruption: detection, measurement, and the yield signal.
 
 The bot should yield when a user starts speaking — it should not talk over them.
+Until 2026-08 this module only *measured* how badly it failed to (52 talk-over
+events in the Jul/Aug pilot, up to 4743ms of the bot carrying on regardless).
+``user_onset`` now also returns whether the caller should interrupt, so the
+"once per bot-speaking window" rule lives here rather than being re-derived by
+bot.py. See docs/pilot-postmortem-2026-08.md (RC3).
+
 This tracker turns three pipeline signals into numbers:
 
     bot_started(t)        BotStartedSpeakingFrame  — bot's TTS output began
@@ -33,7 +39,20 @@ class InterruptionTracker:
         self._bot_speaking = True
         self._overlap_start = None
 
-    def user_onset(self, t: float, sid: str | None = None) -> None:
+    def user_onset(self, t: float, sid: str | None = None) -> bool:
+        """Record a user speech onset. Returns True if the bot should yield now.
+
+        The return value is the enforcement signal. It is True exactly once per
+        bot-speaking window — on the onset that opens the talk-over — so the
+        caller can push a single InterruptionFrame. Later onsets in the same
+        window (VAD flicker, or a second person joining in) return False: the bot
+        is already being cancelled and re-interrupting would only churn the
+        pipeline.
+
+        False when the bot is silent, which is ordinary turn-taking. Interrupting
+        there would cancel nothing and risks discarding the user's own in-flight
+        turn.
+        """
         # Count once per bot-speaking window: the first onset opens the talk-over.
         if self._bot_speaking and self._overlap_start is None:
             self._overlap_start = t
@@ -41,6 +60,8 @@ class InterruptionTracker:
             logger.info(f"Interruption: user {sid} started speaking while bot was talking")
             if self._record:
                 self._emit_count(sid)
+            return True
+        return False
 
     def bot_stopped(self, t: float) -> None:
         if self._bot_speaking and self._overlap_start is not None:

@@ -191,6 +191,49 @@ def _build_vad_processor(bot_config):
     )
 
 
+def make_speech_onset_handler(tracker, enqueue_frame):
+    """Handler for real per-participant speech onset — makes the bot actually yield.
+
+    RC3 from the Jul/Aug 2026 pilot: talk-over was measured in detail (52 events,
+    up to 4743ms of the bot carrying on after someone else started) and nothing
+    ever acted on it. We shipped the gauge and skipped the brake.
+
+    Why this signal rather than Pipecat's built-in path
+    --------------------------------------------------
+    The usual route is transport VAD -> UserStartedSpeakingFrame -> interruption.
+    Not available here: the 0.0.x-era ``allow_interruptions`` and
+    ``interruption_strategies`` fields on PipelineParams do not exist in 1.4.0,
+    and most published examples still assume they do.
+
+    A transport-level ``vad_analyzer`` would also be the worse option even if it
+    worked: MultiSpeakerSTT already runs per-participant VAD, so we have onset
+    attributed to a *specific speaker*, while a transport analyzer would re-run
+    VAD over the mixed stream to produce an unattributed signal.
+
+    So we push an InterruptionFrame ourselves. Every FrameProcessor treats it as
+    a SystemFrame and responds by cancelling in-flight work
+    (frame_processor.py: InterruptionFrame -> _start_interruption), which is what
+    stops LLM generation and TTS playback mid-sentence.
+
+    ``enqueue_frame`` is an async callable taking one frame, or None before the
+    PipelineTask exists. The handler never raises: it runs inside frame
+    processing, so losing an interruption is bad but killing the audio path for
+    the rest of the session is worse.
+    """
+
+    async def _on_speech_onset(sid: str) -> None:
+        should_yield = tracker.user_onset(time.monotonic(), sid)
+        if not should_yield or enqueue_frame is None:
+            return
+        try:
+            await enqueue_frame(InterruptionFrame())
+            logger.info(f"Interruption: yielding to {sid} — cancelling bot output")
+        except Exception as e:
+            logger.warning(f"failed to interrupt bot output for {sid}: {e}")
+
+    return _on_speech_onset
+
+
 def build_user_aggregator_params():
     """User-turn aggregation params — how the bot decides you have finished talking.
 
@@ -443,8 +486,19 @@ async def bot(runner_args: LiveKitRunnerArguments):
     # onset from the per-participant VAD (via MultiSpeakerSTT's on_speech_onset).
     interruptions = InterruptionTracker(labels={"stt_model": bot_config.stt_model})
 
-    def _on_speech_onset(sid: str) -> None:
-        interruptions.user_onset(time.monotonic(), sid)
+    # The PipelineTask does not exist yet, so the handler reaches it through this
+    # holder, filled in once the task is built. Audio cannot flow before the
+    # pipeline runs, so in practice it is always set by the time onset fires — the
+    # handler tolerates None anyway rather than risk raising inside frame
+    # processing.
+    _task_ref: list = [None]
+
+    async def _enqueue_frame(frame) -> None:
+        task_ = _task_ref[0]
+        if task_ is not None:
+            await task_.queue_frame(frame)
+
+    _on_speech_onset = make_speech_onset_handler(interruptions, _enqueue_frame)
 
     multi_stt = MultiSpeakerSTT(_stt_factory, on_speech_onset=_on_speech_onset)
     logger.info(
@@ -663,6 +717,10 @@ async def bot(runner_args: LiveKitRunnerArguments):
             "tts.voice": bot_config.tts_voice,
         },
     )
+
+    # The speech-onset handler was built before the task existed; give it the
+    # handle it needs to push an InterruptionFrame when someone talks over the bot.
+    _task_ref[0] = task
 
     # --- transcript hooks ---
 

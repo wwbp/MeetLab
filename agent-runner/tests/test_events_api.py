@@ -24,6 +24,13 @@ class EventsApiTests(unittest.TestCase):
         os.environ.setdefault("LIVEKIT_API_SECRET", "secret")
         os.environ.setdefault("LIVEKIT_URL", "ws://transport-server:7880")
 
+        # Stub out bot so /start does not spawn a real pipeline. sys.modules is
+        # process-wide, so the real module is stashed and restored in
+        # tearDownClass — without that, every alphabetically-later test module
+        # that imports bot silently gets this stub. (test_runner_start.py had the
+        # same leak; this file was written before that was found.)
+        cls._real_bot_module = sys.modules.get("bot")
+
         fake_bot_module = types.ModuleType("bot")
 
         async def fake_bot(_runner_args):
@@ -45,6 +52,10 @@ class EventsApiTests(unittest.TestCase):
     @classmethod
     def tearDownClass(cls):
         cls._client_ctx.__exit__(None, None, None)
+        if cls._real_bot_module is not None:
+            sys.modules["bot"] = cls._real_bot_module
+        else:
+            sys.modules.pop("bot", None)
 
     def setUp(self):
         # Unique room per test so filtered reads can't see other tests' rows.

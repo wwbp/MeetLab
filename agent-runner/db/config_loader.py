@@ -10,7 +10,6 @@ from db.models import BotConfig
 class EffectiveBotConfig:
     system_prompt: str
     greeting: str
-    vad_stop_secs: float
     llm_model: str
     tts_voice: str
     stt_model: str
@@ -18,11 +17,17 @@ class EffectiveBotConfig:
     stt_delay: str | None  # "minimal" | "low" | "medium" | "high" | "xhigh" | None
     tts_provider: str  # "elevenlabs" | "openai"
     tts_aggregation_mode: str  # "sentence" | "token"
-    stt_endpointing_ms: int  # 200 | 100 | 50
+    # The turn-end window is the SUM of these two: a turn commits after roughly
+    # stt_endpointing_ms + user_speech_timeout_ms of silence. 450+300=750ms is
+    # calibrated against real pilot audio — see tests/test_turn_calibration.py.
+    stt_endpointing_ms: int
     auto_record: bool  # auto-start recording when the first participant joins
     # Advisory session cap in minutes, measured from the first human join; 0 = unlimited.
     # Defaulted so callers predating the field keep the old (uncapped) behaviour.
     session_limit_minutes: int = 0
+    # Second half of the turn-end window (see stt_endpointing_ms above). Defaulted
+    # so callers predating the field keep the calibrated behaviour.
+    user_speech_timeout_ms: int = 300
 
 
 async def load_bot_config(room_name: str | None = None) -> EffectiveBotConfig:
@@ -51,7 +56,6 @@ async def load_bot_config(room_name: str | None = None) -> EffectiveBotConfig:
                     "Respond to what the user said in a creative and helpful way."
                 ),
                 greeting="Hello! How are you doing today?",
-                vad_stop_secs=0.6,
                 llm_model="gpt-5.4-nano",
                 tts_voice="WhMcMcvXQ8T2QfmQmlYh",
                 stt_model="parakeet-tdt-0.6b-v2",
@@ -59,7 +63,11 @@ async def load_bot_config(room_name: str | None = None) -> EffectiveBotConfig:
                 stt_delay=None,
                 tts_provider="elevenlabs",
                 tts_aggregation_mode="sentence",
-                stt_endpointing_ms=100,
+                # Must track the bot_config column defaults. This said 100 —
+                # the pilot value RC2 fixed — so an empty table silently
+                # reinstated the behaviour that cut participants off.
+                stt_endpointing_ms=450,
+                user_speech_timeout_ms=300,
                 auto_record=False,
                 session_limit_minutes=0,
             )
@@ -67,7 +75,6 @@ async def load_bot_config(room_name: str | None = None) -> EffectiveBotConfig:
         return EffectiveBotConfig(
             system_prompt=row.system_prompt,
             greeting=row.greeting,
-            vad_stop_secs=row.vad_stop_secs,
             llm_model=row.llm_model,
             tts_voice=row.tts_voice,
             stt_model=row.stt_model,
@@ -75,7 +82,8 @@ async def load_bot_config(room_name: str | None = None) -> EffectiveBotConfig:
             stt_delay=getattr(row, "stt_delay", None),
             tts_provider=getattr(row, "tts_provider", "elevenlabs"),
             tts_aggregation_mode=getattr(row, "tts_aggregation_mode", "sentence"),
-            stt_endpointing_ms=getattr(row, "stt_endpointing_ms", 200),
+            stt_endpointing_ms=getattr(row, "stt_endpointing_ms", 450),
+            user_speech_timeout_ms=int(getattr(row, "user_speech_timeout_ms", 300) or 300),
             auto_record=bool(getattr(row, "auto_record", False)),
             session_limit_minutes=int(getattr(row, "session_limit_minutes", 0) or 0),
         )

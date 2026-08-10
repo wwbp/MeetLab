@@ -1,7 +1,13 @@
 """add events.severity (+ indexes for console filtering)
 
 Revision ID: b7d24e91c8a3
-Revises: f3a91c05be27
+Revises: d4a72b619fc8
+
+Re-parented when this branch was merged forward. It originally pointed at
+f3a91c05be27, which main has since given three more children (endpointing default,
+user_speech_timeout_ms, dropping vad_stop_secs). Leaving it would have created a
+second alembic head, which is what stops the runner booting with
+"Can't locate revision identified by ...".
 Create Date: 2026-07-29 21:40:00.000000
 
 """
@@ -12,7 +18,7 @@ import sqlalchemy as sa
 
 
 revision: str = 'b7d24e91c8a3'
-down_revision: Union[str, None] = 'f3a91c05be27'
+down_revision: Union[str, None] = 'd4a72b619fc8'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

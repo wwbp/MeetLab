@@ -72,16 +72,42 @@ jobs:
 
       - name: Assert EB deployment state
         env:
-          DEPLOYED_VERSION: ${{ steps.eb_deploy.outputs['version-label'] }}
-          DEPLOYED_STATUS: ${{ steps.eb_deploy.outputs['environment-status'] }}
-          DEPLOYED_HEALTH: ${{ steps.eb_deploy.outputs['environment-health'] }}
+          ENV_NAME: ${{ secrets.AWS_PROD_MEET_ENVIRONMENT_NAME }}
           TARGET_VERSION: meet-${{ github.event.workflow_run.head_sha }}
         run: |
           set -euo pipefail
-          echo "Deployed version=${DEPLOYED_VERSION}, status=${DEPLOYED_STATUS}, health=${DEPLOYED_HEALTH}"
-          test "${DEPLOYED_VERSION}" = "${TARGET_VERSION}"
-          test "${DEPLOYED_STATUS}" = "Ready"
-          test "${DEPLOYED_HEALTH}" = "Green"
+          # Ask EB what is actually running. The previous version of this step
+          # compared steps.eb_deploy.outputs['version-label'] against the target —
+          # but that output is the action echoing back its own input, so the test
+          # could never fail. On 2026-08-05 an agent-runner deploy was rejected by
+          # EB ("Failed to deploy application", invalid option values) and this step
+          # still passed, leaving the environment on the previous version while CD
+          # reported success.
+          #
+          # The action also returns as soon as it has *initiated* the update and
+          # sees Ready/Green — which is the state the environment was already in
+          # before the update started. So poll until the environment settles on the
+          # version we asked for.
+          status=""; health=""; version=""
+          for i in $(seq 1 60); do
+            read -r status health version < <(aws elasticbeanstalk describe-environments \
+              --environment-names "${ENV_NAME}" \
+              --query 'Environments[0].[Status,Health,VersionLabel]' --output text)
+            echo "poll ${i}: status=${status} health=${health} version=${version}"
+            if [ "${status}" = "Ready" ] && [ "${version}" = "${TARGET_VERSION}" ]; then
+              break
+            fi
+            sleep 15
+          done
+          if [ "${version}" != "${TARGET_VERSION}" ]; then
+            echo "::error::environment is running ${version}, expected ${TARGET_VERSION}"
+            aws elasticbeanstalk describe-events --environment-name "${ENV_NAME}" \
+              --max-items 15 --severity ERROR \
+              --query 'Events[].[EventDate,Message]' --output text || true
+            exit 1
+          fi
+          test "${status}" = "Ready"
+          test "${health}" = "Green"
 
       - name: Smoke test deployed app
         env:
@@ -176,16 +202,32 @@ jobs:
 
       - name: Assert EB deployment state
         env:
-          DEPLOYED_VERSION: ${{ steps.eb_deploy.outputs['version-label'] }}
-          DEPLOYED_STATUS: ${{ steps.eb_deploy.outputs['environment-status'] }}
-          DEPLOYED_HEALTH: ${{ steps.eb_deploy.outputs['environment-health'] }}
+          ENV_NAME: ${{ secrets.AWS_PROD_AGENT_RUNNER_ENVIRONMENT_NAME }}
           TARGET_VERSION: agent-runner-${{ github.event.workflow_run.head_sha }}
         run: |
           set -euo pipefail
-          echo "Deployed version=${DEPLOYED_VERSION}, status=${DEPLOYED_STATUS}, health=${DEPLOYED_HEALTH}"
-          test "${DEPLOYED_VERSION}" = "${TARGET_VERSION}"
-          test "${DEPLOYED_STATUS}" = "Ready"
-          test "${DEPLOYED_HEALTH}" = "Green"
+          # See the equivalent step in deploy_meet for why this queries EB directly
+          # rather than trusting the deploy action's outputs.
+          status=""; health=""; version=""
+          for i in $(seq 1 60); do
+            read -r status health version < <(aws elasticbeanstalk describe-environments \
+              --environment-names "${ENV_NAME}" \
+              --query 'Environments[0].[Status,Health,VersionLabel]' --output text)
+            echo "poll ${i}: status=${status} health=${health} version=${version}"
+            if [ "${status}" = "Ready" ] && [ "${version}" = "${TARGET_VERSION}" ]; then
+              break
+            fi
+            sleep 15
+          done
+          if [ "${version}" != "${TARGET_VERSION}" ]; then
+            echo "::error::environment is running ${version}, expected ${TARGET_VERSION}"
+            aws elasticbeanstalk describe-events --environment-name "${ENV_NAME}" \
+              --max-items 15 --severity ERROR \
+              --query 'Events[].[EventDate,Message]' --output text || true
+            exit 1
+          fi
+          test "${status}" = "Ready"
+          test "${health}" = "Green"
 
       - name: Smoke test deployed app
         env:

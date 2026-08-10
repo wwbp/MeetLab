@@ -177,7 +177,6 @@ class BotConfig(Base):
     greeting: Mapped[str] = mapped_column(
         Text, default="Hello! How are you doing today?"
     )
-    vad_stop_secs: Mapped[float] = mapped_column(Float, default=0.6)
     llm_model: Mapped[str] = mapped_column(String(128), default="gpt-5.4-nano")
     tts_voice: Mapped[str] = mapped_column(String(64), default="WhMcMcvXQ8T2QfmQmlYh")
     stt_model: Mapped[str] = mapped_column(String(128), default="parakeet-tdt-0.6b-v2")
@@ -185,7 +184,15 @@ class BotConfig(Base):
     stt_delay: Mapped[str | None] = mapped_column(String(32), nullable=True)
     tts_provider: Mapped[str] = mapped_column(String(32), default="elevenlabs")
     tts_aggregation_mode: Mapped[str] = mapped_column(String(16), default="sentence")
-    stt_endpointing_ms: Mapped[int] = mapped_column(BigInteger, default=100, server_default="100")
+    stt_endpointing_ms: Mapped[int] = mapped_column(BigInteger, default=450, server_default="450")
+    # Extra silence the turn aggregator waits after the VAD reports the speaker
+    # stopped. ADDS to stt_endpointing_ms: a turn ends after roughly the sum of the
+    # two. Calibrated against real pilot audio to 450+300=750ms — see
+    # tests/test_turn_calibration.py. Config-driven so the window can be tuned
+    # against live conversations without a deploy.
+    user_speech_timeout_ms: Mapped[int] = mapped_column(
+        BigInteger, default=300, server_default="300", nullable=False
+    )
     # When true, the bot auto-starts recording (composite mp4 + per-speaker WAV)
     # once the first participant joins. Off by default — opt in per room/global.
     auto_record: Mapped[bool] = mapped_column(

@@ -3,18 +3,32 @@ import { jwtVerify } from 'jose';
 
 const COOKIE_NAME = 'console-session';
 
+// This matcher is an ALLOW-LIST OF PROTECTED PATHS: anything not listed here is
+// public. A new console page or admin API is therefore world-readable until
+// someone remembers to add it. `middleware.test.ts` enumerates app/(shell) and
+// app/api and fails when something is missing — keep both in sync.
+//
+// 2026-08-05: `/meetings` and `/api/meetings/*` were missing and were serving
+// meeting metadata, transcripts and participant audio/video downloads
+// unauthenticated in production. See docs/distillation-audit.md (Iteration 3).
 export const config = {
   matcher: [
     '/',
     '/config',
+    // The durable event log's console view. A new console page is public until
+    // it appears here — middleware.test.ts enumerates app/(shell) and fails if
+    // one is missing.
     '/events',
     '/meetings',
     '/start-links',
     '/db/:path*',
-    // Session records: metadata, transcripts and recording downloads. Console-only
-    // (the only caller is components/desk/meetings-tab.tsx).
-    '/api/meetings/:path*',
     '/api/concierge/:path*',
+    // Console-only meeting data: listing, transcripts, and the audio/recording
+    // download proxies. Only the console calls these, and it carries a session
+    // cookie, so protecting them breaks no legitimate caller. Both forms are
+    // listed rather than relying on `:path*` also matching the bare path.
+    '/api/meetings',
+    '/api/meetings/:path*',
     '/api/console/logout',
     '/api/console/config',
     '/api/console/configs',

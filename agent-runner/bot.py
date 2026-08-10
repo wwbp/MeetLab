@@ -57,6 +57,49 @@ from runner_types import LiveKitRunnerArguments
 
 _STT_DELAY_VALUES = frozenset({"minimal", "low", "medium", "high", "xhigh"})
 
+# Silence, in ms, after which a participant's VAD closes a speech segment. This is
+# the first half of the turn-end window; user_speech_timeout_ms is the second.
+# (A `vad_stop_secs` column used to sit here doing nothing at all; removed
+# 2026-08-10, see docs/distillation-audit.md.)
+#
+# The pilot ran at 100ms, which is far shorter than an ordinary thinking pause, so
+# a single sentence was chopped into as many as 31 fragments and the bot cut people
+# off mid-thought. 450ms survives a normal pause while still feeling responsive.
+# Used when a config row has no explicit value; the DB column default matches.
+_DEFAULT_ENDPOINTING_MS = 450
+
+# Extra silence the turn aggregator waits after VAD reports the speaker stopped,
+# before committing the turn. This ADDS to the endpointing window — a turn ends
+# after roughly _DEFAULT_ENDPOINTING_MS + USER_SPEECH_TIMEOUT of quiet.
+#
+# Calibrated against real pilot audio rather than guessed. Running production's
+# own Silero analyzer over three participants from 2026-07-30 (407 intra-speaker
+# silences) and comparing predicted segments against the 80 turns they actually
+# took:
+#
+#     effective silence   segments   vs 80 real turns
+#              450 ms         107        1.34x   over-splits
+#              600 ms          91        1.14x
+#              750 ms          78        0.97x   <- matches reality
+#             1050 ms          61        0.76x   merges separate turns
+#
+# 450 + 300 = 750ms. Over-splitting is cheap here (the aggregator rejoins
+# fragments); under-splitting is not, because merging two turns makes the bot
+# answer both at once — the "chained answers" complaint. See
+# tests/test_turn_calibration.py and scripts/analyze-pause-distribution.py.
+_DEFAULT_USER_SPEECH_TIMEOUT_MS = 300
+
+
+def _user_speech_timeout_secs(bot_config) -> float:
+    """Aggregator wait, in seconds, from config — falling back to the default.
+
+    Config-driven so the turn-end window can be tuned against live conversations
+    without a deploy. Remember it ADDS to stt_endpointing_ms; judge changes by the
+    sum, not this value alone (tests/test_turn_calibration.py).
+    """
+    ms = getattr(bot_config, "user_speech_timeout_ms", None) or _DEFAULT_USER_SPEECH_TIMEOUT_MS
+    return ms / 1000.0
+
 # ── Phase 1 diagnostics tunables ─────────────────────────────────────────────
 # stt_ms above this is logged + counted as a spike so we can capture the
 # conditions (queue depth, model, content) when extreme latency occurs.
@@ -154,9 +197,105 @@ def _build_vad_processor(bot_config):
     from pipecat.audio.vad.vad_analyzer import VADParams
     from pipecat.processors.audio.vad_processor import VADProcessor
 
-    endpointing_ms = getattr(bot_config, "stt_endpointing_ms", 200) or 200
+    endpointing_ms = getattr(bot_config, "stt_endpointing_ms", _DEFAULT_ENDPOINTING_MS) or _DEFAULT_ENDPOINTING_MS
     return VADProcessor(
         vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=endpointing_ms / 1000))
+    )
+
+
+def make_speech_onset_handler(tracker, enqueue_frame):
+    """Handler for real per-participant speech onset — makes the bot actually yield.
+
+    RC3 from the Jul/Aug 2026 pilot: talk-over was measured in detail (52 events,
+    up to 4743ms of the bot carrying on after someone else started) and nothing
+    ever acted on it. We shipped the gauge and skipped the brake.
+
+    Why this signal rather than Pipecat's built-in path
+    --------------------------------------------------
+    The usual route is transport VAD -> UserStartedSpeakingFrame -> interruption.
+    Not available here: the 0.0.x-era ``allow_interruptions`` and
+    ``interruption_strategies`` fields on PipelineParams do not exist in 1.4.0,
+    and most published examples still assume they do.
+
+    A transport-level ``vad_analyzer`` would also be the worse option even if it
+    worked: MultiSpeakerSTT already runs per-participant VAD, so we have onset
+    attributed to a *specific speaker*, while a transport analyzer would re-run
+    VAD over the mixed stream to produce an unattributed signal.
+
+    So we push an InterruptionFrame ourselves. Every FrameProcessor treats it as
+    a SystemFrame and responds by cancelling in-flight work
+    (frame_processor.py: InterruptionFrame -> _start_interruption), which is what
+    stops LLM generation and TTS playback mid-sentence.
+
+    ``enqueue_frame`` is an async callable taking one frame, or None before the
+    PipelineTask exists. The handler never raises: it runs inside frame
+    processing, so losing an interruption is bad but killing the audio path for
+    the rest of the session is worse.
+    """
+
+    async def _on_speech_onset(sid: str) -> None:
+        should_yield = tracker.user_onset(time.monotonic(), sid)
+        if not should_yield or enqueue_frame is None:
+            return
+        try:
+            await enqueue_frame(InterruptionFrame())
+            logger.info(f"Interruption: yielding to {sid} — cancelling bot output")
+        except Exception as e:
+            logger.warning(f"failed to interrupt bot output for {sid}: {e}")
+
+    return _on_speech_onset
+
+
+def build_user_aggregator_params(bot_config=None):
+    """User-turn aggregation params — how the bot decides you have finished talking.
+
+    This is the single most consequential setting in the pipeline. Getting it
+    wrong cost us the Jul/Aug 2026 pilot: 49% of turns took over three seconds
+    and the median substantive answer waited 5.2s. See
+    docs/pilot-postmortem-2026-08.md (RC1).
+
+    Why the defaults cannot work here
+    ---------------------------------
+    Pipecat's default stop strategy is TurnAnalyzerUserTurnStopStrategy, an ONNX
+    smart-turn model that decides the user has finished by analysing *audio*. Our
+    pipeline never gives the aggregator any: MultiSpeakerSTT consumes every
+    UserAudioRawFrame to route it to a per-participant STT and deliberately does
+    not forward it downstream. So the analyzer is starved, never fires, and every
+    single turn falls through to `user_turn_stop_timeout` — 5.0s by default.
+
+    That is why the fix is a different *strategy*, not merely a smaller timeout,
+    and why passing a `vad_analyzer` here would not help either: the VADController
+    it builds would be starved of the same audio.
+
+    What we use instead
+    -------------------
+    SpeechTimeoutUserTurnStopStrategy ends the turn a short pause after the user
+    stops speaking, driven by signals this pipeline does deliver — the
+    VADUserStoppedSpeakingFrame emitted by each per-participant VAD chain, with a
+    fallback that measures inactivity since the last transcript and rearms on each
+    new one. A mid-sentence pause therefore extends the turn instead of ending it.
+
+    `user_turn_stop_timeout` stays as a backstop for the case where no strategy
+    fires at all, but at 1.5s rather than 5.0s: it should be an emergency exit,
+    not the normal path it silently became.
+    """
+    from pipecat.turns.user_stop import SpeechTimeoutUserTurnStopStrategy
+    from pipecat.turns.user_turn_strategies import (
+        UserTurnStrategies,
+        default_user_turn_start_strategies,
+    )
+
+    return LLMUserAggregatorParams(
+        # Deliberately None: the aggregator receives no audio, so a VAD analyzer
+        # here would build a controller that never sees a sample.
+        vad_analyzer=None,
+        user_turn_strategies=UserTurnStrategies(
+            start=default_user_turn_start_strategies(),
+            stop=[SpeechTimeoutUserTurnStopStrategy(
+                user_speech_timeout=_user_speech_timeout_secs(bot_config)
+            )],
+        ),
+        user_turn_stop_timeout=1.5,
     )
 
 
@@ -343,7 +482,8 @@ async def bot(runner_args: LiveKitRunnerArguments):
     bot_config = _apply_stt_model_override(await load_bot_config(runner_args.room_name))
     logger.info(
         f"Loaded bot config for room '{runner_args.room_name}': "
-        f"model={bot_config.llm_model} voice={bot_config.tts_voice} vad={bot_config.vad_stop_secs}s"
+        f"model={bot_config.llm_model} voice={bot_config.tts_voice} "
+        f"turn_window={bot_config.stt_endpointing_ms}+{bot_config.user_speech_timeout_ms}ms"
     )
 
     # Per-participant STT: each participant gets a dedicated STT instance so
@@ -359,8 +499,19 @@ async def bot(runner_args: LiveKitRunnerArguments):
     # onset from the per-participant VAD (via MultiSpeakerSTT's on_speech_onset).
     interruptions = InterruptionTracker(labels={"stt_model": bot_config.stt_model})
 
-    def _on_speech_onset(sid: str) -> None:
-        interruptions.user_onset(time.monotonic(), sid)
+    # The PipelineTask does not exist yet, so the handler reaches it through this
+    # holder, filled in once the task is built. Audio cannot flow before the
+    # pipeline runs, so in practice it is always set by the time onset fires — the
+    # handler tolerates None anyway rather than risk raising inside frame
+    # processing.
+    _task_ref: list = [None]
+
+    async def _enqueue_frame(frame) -> None:
+        task_ = _task_ref[0]
+        if task_ is not None:
+            await task_.queue_frame(frame)
+
+    _on_speech_onset = make_speech_onset_handler(interruptions, _enqueue_frame)
 
     multi_stt = MultiSpeakerSTT(_stt_factory, on_speech_onset=_on_speech_onset)
     logger.info(
@@ -413,11 +564,9 @@ async def bot(runner_args: LiveKitRunnerArguments):
     )
 
     context = LLMContext([{"role": "system", "content": bot_config.system_prompt}])
-    # VAD is handled per-participant inside each dedicated STT instance, so the
-    # context aggregator does not need its own VAD analyzer.
     context_aggregator = LLMContextAggregatorPair(
         context,
-        user_params=LLMUserAggregatorParams(vad_analyzer=None),
+        user_params=build_user_aggregator_params(bot_config),
     )
 
     # Per-turn timing — stt_done/tts_first anchors for E2E (stt_done → tts_first).
@@ -582,6 +731,10 @@ async def bot(runner_args: LiveKitRunnerArguments):
         },
     )
 
+    # The speech-onset handler was built before the task existed; give it the
+    # handle it needs to push an InterruptionFrame when someone talks over the bot.
+    _task_ref[0] = task
+
     # --- transcript hooks ---
 
     @context_aggregator.user().event_handler("on_user_turn_stopped")
@@ -688,6 +841,11 @@ async def bot(runner_args: LiveKitRunnerArguments):
 
     @context_aggregator.assistant().event_handler("on_assistant_turn_stopped")
     async def on_assistant_turn_stopped(aggregator, message):
+        # Closes the interruption enforcement window. Gating on
+        # BotStoppedSpeakingFrame instead meant an onset landing in a >350ms
+        # inter-sentence gap was ignored (BOT_VAD_STOP_SECS), so interruption
+        # worked only intermittently. See interruption.py.
+        interruptions.assistant_turn_stopped(time.monotonic())
         # Remember recent bot speech so on_user_turn_stopped can flag self-echo.
         if message.content:
             _recent_bot_texts.append(message.content)

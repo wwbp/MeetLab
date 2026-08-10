@@ -33,6 +33,7 @@ Usage in bot.py:
 """
 
 import asyncio
+import inspect
 from collections.abc import Callable
 
 from loguru import logger
@@ -103,7 +104,13 @@ class _FrameCollector(FrameProcessor):
             # dropping it from the main pipeline.
             if isinstance(frame, VADUserStartedSpeakingFrame) and self._on_speech_onset:
                 try:
-                    self._on_speech_onset(self._sid)
+                    # Awaited rather than fire-and-forget: the handler pushes the
+                    # InterruptionFrame that cancels bot output, and that should
+                    # happen before this onset's transcript work continues.
+                    # Sync callbacks stay supported.
+                    result = self._on_speech_onset(self._sid)
+                    if inspect.isawaitable(result):
+                        await result
                 except Exception as e:
                     logger.warning(f"_FrameCollector: on_speech_onset error: {e}")
             return

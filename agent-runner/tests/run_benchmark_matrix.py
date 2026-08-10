@@ -48,16 +48,13 @@ RESULTS_PATH = Path(__file__).parent / "fixtures" / "benchmark_results.json"
 
 ELEVENLABS_VOICE = "WhMcMcvXQ8T2QfmQmlYh"
 
+# Only what production actually runs. Benchmarking a stack we don't ship produced a
+# documented "best result" on Deepgram that prod has never used (see the dev/prod
+# parity section of docs/distillation-audit.md) — months of latency work tuned
+# against the wrong system. Requires NEMOTRON_STT_URL to point at a reachable
+# Parakeet NIM; there is no local-only fallback on purpose.
 _STT_MODELS = [
-    # nova-3-general only — meeting/phonecall/voicemail variants 100% timeout
-    # (not available on current Deepgram plan)
-    "nova-3-general",
-    "gpt-realtime-whisper",
-    "gpt-4o-transcribe",
-    "gpt-4o-mini-transcribe",
-    # "whisper-turbo",  # local faster-whisper — GPU only. On CPU: stt_ms ≈ 9.7s and the
-    # 3.2GB-per-bot model OOMs the dev Docker VM (Experiment 5). Uncomment on a GPU host.
-    # Parakeet NIM (Parakeet-TDT 0.6B) — self-hosted GPU via NEMOTRON_STT_URL (Experiments 6-7)
+    # Parakeet NIM (Parakeet-TDT 0.6B) — self-hosted GPU via NEMOTRON_STT_URL.
     "parakeet-tdt-0.6b-v2",
 ]
 
@@ -75,9 +72,10 @@ _TTS_OPTIONS = [
     {"tts_provider": "openai", "tts_voice": "alloy", "tts_aggregation_mode": "sentence"},
 ]
 
-# Endpointing variants. Deepgram: server-side endpointing (measured no-op,
-# Experiment 2 addendum). whisper-/parakeet- chains: local Silero VAD stop_secs —
-# genuinely tunable (Experiment 6). OpenAI STT ignores this field.
+# Endpointing variants. The parakeet chain drives commits from local Silero VAD
+# stop_secs, so this is genuinely tunable (Experiment 6). 100 is what the pilot
+# ran and 200 is the global default; both are kept so the RC2 fix can be measured
+# against the shape production actually had.
 _DEEPGRAM_ENDPOINTING_OPTIONS = [200, 100]
 
 # Models whose configs honor stt_endpointing_ms (get ep variants in the matrix)

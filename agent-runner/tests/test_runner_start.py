@@ -3,6 +3,7 @@ import os
 import sys
 import types
 import unittest
+import uuid
 
 from fastapi.testclient import TestClient
 
@@ -13,6 +14,13 @@ class RunnerStartApiTests(unittest.TestCase):
         os.environ.setdefault("LIVEKIT_API_KEY", "devkey")
         os.environ.setdefault("LIVEKIT_API_SECRET", "secret")
         os.environ.setdefault("LIVEKIT_URL", "ws://transport-server:7880")
+
+        # Stub out bot so /start does not spawn a real pipeline. This replaces a
+        # GLOBAL — sys.modules is process-wide — so the real module is stashed and
+        # restored in tearDownClass. Without that, every alphabetically-later test
+        # module that imports bot silently gets this stub and sees a module with
+        # nothing on it but `bot`.
+        cls._real_bot_module = sys.modules.get("bot")
 
         fake_bot_module = types.ModuleType("bot")
 
@@ -39,6 +47,11 @@ class RunnerStartApiTests(unittest.TestCase):
     @classmethod
     def tearDownClass(cls):
         cls._client_ctx.__exit__(None, None, None)
+        # Undo the sys.modules["bot"] stub so later test modules import the real one.
+        if cls._real_bot_module is not None:
+            sys.modules["bot"] = cls._real_bot_module
+        else:
+            sys.modules.pop("bot", None)
 
     # ------------------------------------------------------------------
     # Input validation — room_name
@@ -237,7 +250,8 @@ class RunnerStartApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         body = response.json()
         for key in (
-            "scope", "system_prompt", "greeting", "vad_stop_secs",
+            "scope", "system_prompt", "greeting",
+            "stt_endpointing_ms", "user_speech_timeout_ms",
             "llm_model", "tts_voice", "tts_provider",
             "stt_model", "stt_vad_mode", "stt_delay", "auto_record",
             "session_limit_minutes",
@@ -262,6 +276,45 @@ class RunnerStartApiTests(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 200, response.text)
         self.assertEqual(response.json().get("llm_model"), "gpt-4o-mini")
+
+    def test_every_column_default_survives_a_config_round_trip(self):
+        """GET a config, PUT it back under a new scope — start-link's exact flow.
+
+        Regression: the stt_endpointing_ms validator was an allow-list of
+        (50, 100, 200). When the column default moved to 450 to fix RC2, every
+        round-trip started returning 400 — so /api/start-link answered 502 and
+        no participant could join through a link. Unit tests all passed; only the
+        integration suite caught it.
+
+        This asserts the invariant that was violated: a config the API hands out
+        must be one the API accepts back. It holds for every field at once, so a
+        future default that drifts outside its validator fails here.
+        """
+        from db.models import BotConfig
+
+        source = f"rt-src-{uuid.uuid4().hex[:8]}"
+        # Materialise a row carrying the column defaults.
+        created = self.client.put("/config", json={"scope": source})
+        self.assertEqual(created.status_code, 200, created.text)
+
+        fetched = self.client.get(f"/config?scope={source}")
+        self.assertEqual(fetched.status_code, 200, fetched.text)
+        fields = fetched.json()
+
+        # start-link copies everything it got, minus the scope, under a new one.
+        fields.pop("scope", None)
+        fields.pop("updated_at", None)
+        echoed = self.client.put("/config", json={**fields, "scope": f"rt-dst-{uuid.uuid4().hex[:8]}"})
+
+        self.assertEqual(
+            echoed.status_code, 200,
+            f"a config the API returned was rejected on write back: {echoed.text}",
+        )
+        # And specifically the field that broke: the default must be writable.
+        self.assertEqual(
+            echoed.json().get("stt_endpointing_ms"),
+            BotConfig.__table__.c.stt_endpointing_ms.default.arg,
+        )
 
     def test_config_put_valid_stt_delay_accepted(self):
         response = self.client.put(
@@ -433,17 +486,6 @@ class RunnerStartApiTests(unittest.TestCase):
     def test_config_put_non_object_body_returns_400(self):
         response = self.client.put("/config", json=[])
         self.assertEqual(response.status_code, 400)
-
-    def test_config_put_invalid_vad_stop_secs_type_returns_400(self):
-        response = self.client.put(
-            "/config",
-            json={"scope": "test-runner-scope", "vad_stop_secs": "fast"},
-        )
-        self.assertEqual(response.status_code, 400)
-
-    # ------------------------------------------------------------------
-    # custom_data → Conversation.meta (which bot config ran this session)
-    # ------------------------------------------------------------------
 
     def test_start_persists_custom_data_on_conversation(self):
         import uuid as _uuid

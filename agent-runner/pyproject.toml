@@ -24,11 +24,11 @@ dependencies = [
 
 [tool.uv]
 override-dependencies = [
-    "aiohttp>=3.13.4",
+    "aiohttp>=3.14.3",
     "filelock>=3.20.3",
     "msgpack>=1.2.1",
-    "nltk>=3.9.4",
-    "pillow>=12.2.0",
+    "nltk>=3.10.0",
+    "pillow>=12.3.0",
     "protobuf>=5.29.6",
     "pyjwt>=2.13.0",
     "python-multipart>=0.0.31",

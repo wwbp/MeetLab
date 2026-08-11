@@ -139,7 +139,12 @@ class Event(Base):
         String(64), ForeignKey("conversations.id")
     )
     type: Mapped[str] = mapped_column(String(128), nullable=False)
-    room_name: Mapped[str | None] = mapped_column(String(256))
+    # "info" | "warning" | "error" — a real column, not a payload key, so the
+    # console can filter incidents out of a busy lifecycle log.
+    severity: Mapped[str] = mapped_column(
+        String(16), default="info", server_default="info", nullable=False, index=True
+    )
+    room_name: Mapped[str | None] = mapped_column(String(256), index=True)
     payload: Mapped[dict] = mapped_column(JSONB, default=dict, server_default="{}")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_now

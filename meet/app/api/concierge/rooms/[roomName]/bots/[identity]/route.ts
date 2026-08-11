@@ -4,6 +4,7 @@ import { clearBotTrackSubscriptionSignalsForRoom } from '@/lib/concierge/bot-tra
 import { pushConciergeEvent } from '@/lib/concierge/events-store';
 import { noStoreHeaders } from '@/lib/concierge/http-utils';
 import { getRoomServiceClient } from '@/lib/concierge/livekit-admin';
+import { noteRouteError } from '@/lib/concierge/event-log';
 
 export const dynamic = 'force-dynamic';
 
@@ -47,6 +48,7 @@ export async function DELETE(
 
     return new NextResponse(null, { status: 204, headers: noStoreHeaders() });
   } catch (error) {
+    noteRouteError('DELETE /api/concierge/rooms/[roomName]/bots/[identity]', error);
     const message = error instanceof Error ? error.message : 'Failed to remove bot';
     return NextResponse.json({ error: message }, { status: 500, headers: noStoreHeaders() });
   }

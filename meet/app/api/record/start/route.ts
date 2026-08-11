@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerConfig } from '@/lib/config/server';
 import { noStoreHeaders } from '@/lib/concierge/http-utils';
+import { noteRouteError } from '@/lib/concierge/event-log';
 
 export async function GET(req: NextRequest) {
   const roomName = req.nextUrl.searchParams.get('roomName');
@@ -32,6 +33,7 @@ export async function GET(req: NextRequest) {
     }
     return new NextResponse(null, { status: 200, headers: noStoreHeaders() });
   } catch (error) {
+    noteRouteError('GET /api/record/start', error);
     const message = error instanceof Error ? error.message : 'Failed to start recording';
     return new NextResponse(message, { status: 500, headers: noStoreHeaders() });
   }

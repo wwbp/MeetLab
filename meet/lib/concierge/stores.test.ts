@@ -1,5 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+// The durable event log talks to agent-runner over HTTP; these are store tests.
+vi.mock('@/lib/concierge/event-log', () => ({
+  recordEvent: vi.fn().mockResolvedValue(undefined),
+  deferWrite: (write: () => Promise<unknown>) => {
+    void write().catch(() => undefined);
+  },
+}));
+
 // Reset all in-memory store state before each test.
 const STORE_KEYS = [
   '__concierge_bot_request_store__',
@@ -213,43 +221,45 @@ describe('bot-track-subscription-store', async () => {
 });
 
 // ---------------------------------------------------------------------------
-// events-store
+// events-store (now a façade over the durable event log)
 // ---------------------------------------------------------------------------
 describe('events-store', async () => {
-  const { listConciergeEvents, pushConciergeEvent } = await import(
-    '@/lib/concierge/events-store'
-  );
+  const { pushConciergeEvent } = await import('@/lib/concierge/events-store');
+  const { recordEvent } = await import('@/lib/concierge/event-log');
 
-  it('pushConciergeEvent assigns id and receivedAt', () => {
+  it('returns the event synchronously, with an id and a timestamp', () => {
+    // Callers (notably the LiveKit webhook route) act on the returned event in
+    // the same tick, so this stays synchronous even though the write is not.
     const ev = pushConciergeEvent({ source: 'concierge', event: 'test.event' });
     expect(ev.id).toBeTruthy();
     expect(ev.receivedAt).toBeTruthy();
     expect(ev.event).toBe('test.event');
-  });
-
-  it('listConciergeEvents returns most recent events first', () => {
-    pushConciergeEvent({ source: 'concierge', event: 'first' });
-    pushConciergeEvent({ source: 'concierge', event: 'second' });
-    const events = listConciergeEvents(2);
-    expect(events[0].event).toBe('second');
-    expect(events[1].event).toBe('first');
-  });
-
-  it('listConciergeEvents respects limit', () => {
-    for (let i = 0; i < 10; i++) pushConciergeEvent({ source: 'concierge', event: `e${i}` });
-    expect(listConciergeEvents(3)).toHaveLength(3);
-  });
-
-  it('listConciergeEvents clamps limit to [1, 200]', () => {
-    for (let i = 0; i < 5; i++) pushConciergeEvent({ source: 'concierge', event: `e${i}` });
-    expect(listConciergeEvents(0)).toHaveLength(1);
-    expect(listConciergeEvents(9999)).toHaveLength(5);
+    expect(ev.severity).toBe('info');
   });
 
   it('accepts custom receivedAt', () => {
     const ts = '2024-01-01T00:00:00.000Z';
     const ev = pushConciergeEvent({ source: 'webhook', event: 'e', receivedAt: ts });
     expect(ev.receivedAt).toBe(ts);
+  });
+
+  it('persists the event to the durable log', () => {
+    pushConciergeEvent({ source: 'concierge', event: 'concierge.room.created', roomName: 'r' });
+    expect(recordEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ event: 'concierge.room.created', roomName: 'r' }),
+      'info',
+    );
+  });
+
+  it('passes an explicit severity through', () => {
+    pushConciergeEvent({ source: 'concierge', event: 'meet.route.error' }, 'error');
+    expect(recordEvent).toHaveBeenCalledWith(expect.anything(), 'error');
+  });
+
+  it('still returns an event when the durable write fails', () => {
+    // The room really was created; losing the telemetry must not look like failure.
+    vi.mocked(recordEvent).mockRejectedValueOnce(new Error('runner down'));
+    expect(() => pushConciergeEvent({ source: 'concierge', event: 'x' })).not.toThrow();
   });
 });
 

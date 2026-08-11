@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { pushConciergeEvent } from '@/lib/concierge/events-store';
 import { noStoreHeaders } from '@/lib/concierge/http-utils';
 import { getRoomServiceClient } from '@/lib/concierge/livekit-admin';
+import { noteRouteError } from '@/lib/concierge/event-log';
 
 export const dynamic = 'force-dynamic';
 
@@ -45,6 +46,7 @@ export async function POST(
       { headers: noStoreHeaders() }
     );
   } catch (error) {
+    noteRouteError('POST /api/concierge/rooms/[roomName]/participants/[identity]/tracks/[trackSid]/mute', error);
     const message = error instanceof Error ? error.message : 'Failed to update track mute state';
     return NextResponse.json({ error: message }, { status: 500, headers: noStoreHeaders() });
   }

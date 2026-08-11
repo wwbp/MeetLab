@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getServerConfig, requireEnv } from '@/lib/config/server';
+import { noteRouteError } from '@/lib/concierge/event-log';
 
 export const dynamic = 'force-dynamic';
 
@@ -26,6 +27,7 @@ export async function GET() {
     }
     return NextResponse.json(data, { status: res.status });
   } catch (err) {
+    noteRouteError('GET /api/console/configs', err);
     const message = err instanceof Error ? err.message : 'Failed to list configs';
     return NextResponse.json({ error: message }, { status: 502 });
   }

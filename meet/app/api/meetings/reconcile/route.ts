@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getServerConfig } from '@/lib/config/server';
 import { noStoreHeaders } from '@/lib/concierge/http-utils';
+import { noteRouteError } from '@/lib/concierge/event-log';
 
 export const dynamic = 'force-dynamic';
 
@@ -20,6 +21,7 @@ export async function POST() {
     try { data = JSON.parse(text); } catch { data = { raw: text }; }
     return NextResponse.json(data, { status: res.status, headers: noStoreHeaders() });
   } catch (error) {
+    noteRouteError('POST /api/meetings/reconcile', error);
     const message = error instanceof Error ? error.message : 'Reconcile failed';
     return NextResponse.json({ error: message }, { status: 500, headers: noStoreHeaders() });
   }

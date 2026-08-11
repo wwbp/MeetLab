@@ -15,6 +15,10 @@ export const config = {
   matcher: [
     '/',
     '/config',
+    // The durable event log's console view. A new console page is public until
+    // it appears here — middleware.test.ts enumerates app/(shell) and fails if
+    // one is missing.
+    '/events',
     '/meetings',
     '/start-links',
     '/db/:path*',

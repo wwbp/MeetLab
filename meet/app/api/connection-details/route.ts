@@ -7,6 +7,7 @@ import { validateLiveKitPublicUrlForRequestHost } from '@/lib/validateLiveKitPub
 import { AccessToken, AccessTokenOptions, VideoGrant } from 'livekit-server-sdk';
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerConfig, requireEnv } from '@/lib/config/server';
+import { noteRouteError } from '@/lib/concierge/event-log';
 
 const COOKIE_KEY = 'random-participant-postfix';
 
@@ -125,6 +126,7 @@ export async function GET(request: NextRequest) {
       },
     });
   } catch (error) {
+    noteRouteError('GET /api/connection-details', error);
     // Unconditional: falling off the end of a route handler returns undefined,
     // which Next cannot serve.
     const message = error instanceof Error ? error.message : 'Internal Server Error';

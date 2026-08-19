@@ -853,11 +853,17 @@ async def bot(runner_args: LiveKitRunnerArguments):
         #   2. Raw SID stored directly from on_data_received (_last_data_sender)
         #   3. First known participant (audio-mixed-STT path, no per-frame user_id)
         speaker_sid = _current_speaker_sid[0] or _last_data_sender[0]
-        if speaker_sid and speaker_sid in _sid_to_identity:
-            identity = _sid_to_identity[speaker_sid]
-        else:
-            sid = next(iter(_sid_to_identity), None)
-            identity = _sid_to_identity.get(sid, sid) if sid else None
+        try:
+            _roster = transport._client.room.remote_participants
+        except Exception:
+            _roster = {}
+        identity, _learned = resolve_speaker_identity(speaker_sid, _sid_to_identity, _roster)
+        for _sid, (_ident, _name) in _learned.items():
+            # on_participant_connected lost its race with the SDK roster. Recover
+            # here rather than discard the turn — see resolve_speaker_identity.
+            _sid_to_identity[_sid] = _ident
+            _sid_to_name[_sid] = _name
+            logger.info(f"Recovered identity {_ident} for {_sid} (connect callback missed it)")
         if not identity:
             logger.warning("on_user_turn_stopped: no known participant identity, skipping utterance")
             return
@@ -877,6 +883,16 @@ async def bot(runner_args: LiveKitRunnerArguments):
         utt_id = _new_id()
         async with AsyncSessionLocal() as db:
             async with db.begin():
+                for _sid, (_ident, _name) in _learned.items():
+                    # utterances.speaker_id is a NOT NULL FK onto speakers.id, and a
+                    # recovered participant never went through the connect handler
+                    # that would have created the row.
+                    await db.execute(
+                        pg_insert(Speaker)
+                        .values(id=_ident, meta={"role": "participant",
+                                                 "display_name": _name})
+                        .on_conflict_do_nothing(index_elements=["id"])
+                    )
                 db.add(
                     Utterance(
                         id=utt_id,
@@ -1205,6 +1221,43 @@ def _find_participant_by_sid(remote_participants: dict, sid: str):
     returns None — we must search by value.
     """
     return next((p for p in remote_participants.values() if p.sid == sid), None)
+
+
+def resolve_speaker_identity(sid, sid_to_identity: dict, remote_participants: dict):
+    """Work out whose turn this was. Returns (identity | None, newly_learned).
+
+    Resolution order:
+      1. the SID cache, populated by on_participant_connected
+      2. the live LiveKit roster, for when that callback lost its race
+      3. any known participant, so a single-speaker room is never dropped
+
+    Step 2 is the fix for the 2026-08-19 defect. Identity used to be learned only
+    in on_participant_connected, which bails out when the SDK roster has not caught
+    up with the SID pipecat handed it — and nothing ever retried, so every later
+    turn from that participant was discarded. Under load that was almost every
+    participant: 8 and 13 bots started against 1 and 2 identities recorded, and
+    335 dropped utterances in a six-minute eight-room run.
+
+    Consulting the roster at use-time makes a missed connect event cost one dict
+    scan rather than the whole session's transcript. `newly_learned` maps
+    sid -> (identity, display_name) for the caller to fold into its caches, so the
+    scan happens once per participant rather than once per turn.
+    """
+    if sid and sid in sid_to_identity:
+        return sid_to_identity[sid], {}
+
+    if sid:
+        p = _find_participant_by_sid(remote_participants, sid)
+        if p:
+            # Same display-name rule as on_participant_connected: prefer the token
+            # name, else strip the __randomPostfix connection-details appends.
+            name = p.name or p.identity.split("__")[0]
+            return p.identity, {sid: (p.identity, name)}
+
+    known = next(iter(sid_to_identity), None)
+    if known:
+        return sid_to_identity.get(known, known), {}
+    return None, {}
 
 
 def _turn_detection_for_vad_mode(vad_mode: str):

@@ -1,24 +1,35 @@
-"""The two windows that decide whether the bot can be interrupted at all.
+"""When the bot may be interrupted — and the floor that keeps it from being mute.
 
-Prod symptom (2026-08-19): interruption "feels slow or non-existent — bots keep
-speaking". The enforcement path added in RC3 works when it fires: 24h of prod
-logs show one onset, one matching "yielding to", and zero failures. It just
-rarely gets the chance to fire, for two reasons this module pins.
+History, because this file has now been driven by two opposite production reports.
 
-**Gap 1 — the response window opened too late.** It was armed by
-BotStartedSpeakingFrame, i.e. the first TTS *audio*. A user who starts talking
-during LLM generation or TTS synthesis therefore hit `_response_open == False`,
-got no interruption, and was then talked over for the whole response.
+**2026-08-19 morning.** "Interruption feels non-existent, bots keep speaking."
+The window opened on the bot's first TTS audio, so a user talking during LLM
+generation could not interrupt at all, and edge-triggered onset never fired again
+while they kept talking. Fix: open the window at generation (`llm_started`) and
+level-trigger at `bot_started`.
 
-**Gap 2 — onset is edge-triggered.** VADUserStartedSpeakingFrame fires once, at
-the moment speech starts. In the situation above the user is already mid-utterance
-by the time the bot begins, so no second onset ever arrives and nothing can
-rescue the turn. The bot needs to check, at the moment it starts speaking,
-whether anyone is *currently* talking.
+**2026-08-19 09:00 EDT, a real multi-person sync.** The opposite failure. 17 TTS
+generations, 12 reached audio, **22 yields** — the bot was interrupted more often
+than it spoke. Its greeting was cancelled 244ms in. Because a cancelled response
+never completes, it never enters the LLM context, so the model regenerated
+near-identical questions turn after turn ("What do the participants think about
+A, B and C…" seven times). Silent stretches, apparent lag, and answers that
+looked wrong were all the same root cause.
 
-The staleness guard exists because gap 2's fix introduces a failure mode worse
-than the bug: if a VAD stop is ever lost, a speaker would be considered "still
-talking" forever and the bot would yield on every response — silence, permanently.
+Why: `llm_started` made the bot interruptible during its entire think-time, and in
+a group meeting people are talking to *each other* almost continuously. The bot
+was permanently suppressed.
+
+The rule now, one concept covering both failures:
+
+    no audio yet          -> nothing to interrupt, nothing yields
+    audio < floor         -> the bot keeps the floor; it always gets a phrase out
+    audio >= floor        -> any onset yields, and each new sentence re-checks
+                             whether someone is still talking
+
+`llm_started` is gone: the level trigger at `bot_started` already covers the case
+it was added for, without letting ordinary conversation kill a response before it
+makes a sound.
 """
 import os
 import sys
@@ -28,105 +39,144 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 from interruption import InterruptionTracker
 
-
-def tracker():
-    return InterruptionTracker(record=False)
+FLOOR_MS = 600
 
 
-class TestResponseWindowOpensAtGeneration(unittest.TestCase):
-    """The window must open when the bot commits to answering, not when audio lands."""
+def tracker(floor_ms: int = FLOOR_MS):
+    return InterruptionTracker(record=False, min_bot_speech_ms=floor_ms)
 
-    def test_onset_during_llm_generation_yields(self):
+
+class TestNothingInterruptsBeforeTheBotHasSpoken(unittest.TestCase):
+    """The regression that suppressed the 2026-08-19 sync."""
+
+    def test_speech_during_generation_does_not_yield(self):
         t = tracker()
-        t.llm_started(0.0)
-        self.assertTrue(
-            t.user_onset(0.3, "sidA"),
-            "user spoke while the LLM was generating — the bot should yield "
-            "before it ever opens its mouth",
-        )
-
-    def test_onset_with_no_response_in_flight_is_ordinary_turn_taking(self):
-        t = tracker()
+        # The bot is thinking. There is no audio to cancel, and cancelling here
+        # throws away a whole response for free.
         self.assertFalse(t.user_onset(0.3, "sidA"))
         self.assertEqual(t.interruptions, 0)
 
-    def test_audio_starting_after_generation_does_not_reopen_the_window(self):
-        """bot_started must not clear _interrupted_this_response mid-response."""
+    def test_speech_with_no_response_at_all_does_not_yield(self):
         t = tracker()
-        t.llm_started(0.0)
-        self.assertTrue(t.user_onset(0.3, "sidA"))
-        t.bot_started(0.4)
-        self.assertFalse(
-            t.user_onset(0.5, "sidA"),
-            "already cancelling this response; re-interrupting only churns the pipeline",
-        )
+        self.assertFalse(t.user_onset(0.3, "sidA"))
+
+    def test_the_level_trigger_still_covers_the_talking_through_case(self):
+        """This is why llm_started was redundant.
+
+        Someone talks all the way through generation. They are still going when
+        audio starts, so the bot yields then — one response's worth of work lost
+        at most, instead of every response dying mid-thought.
+        """
+        t = tracker(floor_ms=0)
+        t.user_onset(0.0, "sidA")
+        self.assertTrue(t.bot_started(1.0))
         self.assertEqual(t.interruptions, 1)
 
-    def test_window_closes_on_assistant_turn_stopped(self):
+
+class TestTheBotKeepsAFloor(unittest.TestCase):
+    """A guaranteed speaking window, so the bot cannot be livelocked into silence."""
+
+    def test_onset_inside_the_floor_is_ignored(self):
         t = tracker()
-        t.llm_started(0.0)
-        t.bot_started(0.2)
+        t.bot_started(0.0)
+        self.assertFalse(
+            t.user_onset(0.244, "sidA"),
+            "244ms is where the real greeting died; the bot must survive it",
+        )
+        self.assertEqual(t.interruptions, 0)
+
+    def test_onset_after_the_floor_yields(self):
+        t = tracker()
+        t.bot_started(0.0)
+        self.assertTrue(t.user_onset(0.7, "sidA"))
+        self.assertEqual(t.interruptions, 1)
+
+    def test_the_floor_runs_from_first_audio_not_each_sentence(self):
+        """BotStartedSpeaking fires per sentence. The floor is per response."""
+        t = tracker()
+        t.bot_started(0.0)
+        t.bot_stopped(0.5)
+        t.bot_started(0.55)  # sentence two
+        self.assertTrue(
+            t.user_onset(0.65, "sidA"),
+            "0.65s of audio has played across the response; the floor is spent",
+        )
+
+    def test_a_new_response_gets_a_fresh_floor(self):
+        t = tracker()
+        t.bot_started(0.0)
+        self.assertTrue(t.user_onset(0.7, "sidA"))
+        t.bot_stopped(0.8)
+        t.assistant_turn_stopped(0.9)
+
+        t.bot_started(5.0)
+        self.assertFalse(t.user_onset(5.2, "sidA"), "inside the new response's floor")
+        self.assertTrue(t.user_onset(5.7, "sidA"))
+
+    def test_someone_still_talking_yields_at_the_next_sentence(self):
+        """The re-check that makes the floor safe rather than merely rude.
+
+        The bot starts over someone and keeps its floor, but each sentence
+        boundary asks again — so it stops after a phrase, not after the whole
+        response.
+        """
+        t = tracker()
+        t.user_onset(0.0, "sidA")  # talking before the bot began
+        self.assertFalse(t.bot_started(1.0), "floor: the bot gets its phrase")
+        t.bot_stopped(1.5)
+        self.assertTrue(
+            t.bot_started(1.7), "sidA never stopped; yield at the sentence boundary"
+        )
+
+    def test_a_speaker_who_stopped_does_not_trigger_the_recheck(self):
+        t = tracker()
+        t.user_onset(0.0, "sidA")
+        t.user_offset(0.5, "sidA")
+        t.bot_started(1.0)
+        t.bot_stopped(1.5)
+        self.assertFalse(t.bot_started(1.7))
+        self.assertEqual(t.interruptions, 0)
+
+
+class TestOncePerResponse(unittest.TestCase):
+    def test_a_second_onset_in_the_same_response_is_a_no_op(self):
+        t = tracker()
+        t.bot_started(0.0)
+        self.assertTrue(t.user_onset(0.7, "sidA"))
+        self.assertFalse(t.user_onset(0.9, "sidA"), "already cancelling")
+        self.assertEqual(t.interruptions, 1)
+
+    def test_the_window_closes_when_the_response_ends(self):
+        t = tracker()
+        t.bot_started(0.0)
         t.bot_stopped(1.0)
         t.assistant_turn_stopped(1.05)
         self.assertFalse(t.user_onset(1.5, "sidA"))
 
-
-class TestLevelTriggeredYield(unittest.TestCase):
-    """If someone is already talking when the bot starts, yield immediately."""
-
-    def test_bot_starting_while_user_already_speaking_yields(self):
+    def test_talkover_is_measured_from_the_onset_that_armed_it(self):
         t = tracker()
-        t.user_onset(0.0, "sidA")           # no response in flight yet — returns False
-        t.llm_started(0.5)
-        self.assertTrue(
-            t.bot_started(1.0),
-            "sidA never stopped talking; the bot must not start over them",
+        t.bot_started(0.0)
+        t.user_onset(0.7, "sidA")
+        t.bot_stopped(1.1)
+        self.assertEqual(len(t.talkovers_ms), 1)
+        self.assertAlmostEqual(t.talkovers_ms[0], 400.0, places=3)
+
+
+class TestStaleSpeakers(unittest.TestCase):
+    def test_a_lost_stop_frame_does_not_wedge_the_bot_into_silence(self):
+        t = tracker(floor_ms=0)
+        t.user_onset(0.0, "sidA")  # offset never arrives
+        self.assertFalse(
+            t.bot_started(100.0),
+            "an onset this old is a dropped stop, not a 100-second turn",
         )
-        self.assertEqual(t.interruptions, 1)
-
-    def test_bot_starting_after_user_finished_speaks_normally(self):
-        t = tracker()
-        t.user_onset(0.0, "sidA")
-        t.user_offset(0.5, "sidA")
-        t.llm_started(0.6)
-        self.assertFalse(t.bot_started(1.0))
-        self.assertEqual(t.interruptions, 0)
 
     def test_one_speaker_leaving_does_not_clear_another(self):
-        t = tracker()
+        t = tracker(floor_ms=0)
         t.user_onset(0.0, "sidA")
         t.user_onset(0.1, "sidB")
         t.user_offset(0.5, "sidA")
-        t.llm_started(0.6)
         self.assertTrue(t.bot_started(1.0), "sidB is still talking")
-
-    def test_level_trigger_fires_at_most_once_per_response(self):
-        t = tracker()
-        t.user_onset(0.0, "sidA")
-        t.llm_started(0.5)
-        self.assertTrue(t.bot_started(1.0))
-        self.assertFalse(t.user_onset(1.2, "sidA"))
-        self.assertEqual(t.interruptions, 1)
-
-    def test_stale_speaker_does_not_wedge_the_bot_into_silence(self):
-        """A lost VAD stop must not mute the bot for the rest of the session."""
-        t = tracker()
-        t.user_onset(0.0, "sidA")           # offset never arrives
-        t.llm_started(100.0)
-        self.assertFalse(
-            t.bot_started(100.5),
-            "an onset this old means the stop frame was lost, not that "
-            "someone has been talking for 100 seconds",
-        )
-
-    def test_talkover_is_measured_from_the_level_trigger(self):
-        t = tracker()
-        t.user_onset(0.0, "sidA")
-        t.llm_started(0.5)
-        t.bot_started(1.0)
-        t.bot_stopped(1.4)
-        self.assertEqual(len(t.talkovers_ms), 1)
-        self.assertAlmostEqual(t.talkovers_ms[0], 400.0, places=3)
 
 
 if __name__ == "__main__":

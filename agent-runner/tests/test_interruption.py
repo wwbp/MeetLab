@@ -20,7 +20,11 @@ from interruption import InterruptionTracker
 
 class TestInterruptionTracker(unittest.TestCase):
     def _tracker(self):
-        return InterruptionTracker(record=False)
+        # min_bot_speech_ms=0 disables the barge-in floor. These tests are about
+        # window semantics, once-per-response counting and talkover measurement —
+        # all orthogonal to how long the bot is guaranteed before it may be cut
+        # off. The floor itself is covered in test_interruption_windows.py.
+        return InterruptionTracker(record=False, min_bot_speech_ms=0)
 
     def test_user_speaking_while_bot_silent_is_not_an_interruption(self):
         t = self._tracker()

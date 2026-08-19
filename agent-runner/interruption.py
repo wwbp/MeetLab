@@ -45,6 +45,19 @@ meetlab.bot_talkover_ms.
 """
 from loguru import logger
 
+# Freshness bound on a speech onset that has no matching stop yet.
+#
+# user_offset is the primary mechanism — a speaker is normally cleared the moment
+# their VAD stop arrives. This bound only decides how long a *lost* stop keeps
+# someone marked as talking, and the asymmetry is stark: too short and we miss an
+# interruption the next onset would catch anyway; too long and one dropped frame
+# makes the bot yield on every response, silencing it for the session.
+#
+# 3s covers the case this exists for — the LLM-generation and TTS-synthesis window
+# between a user's onset and the bot's first audio. An onset older than that is
+# not something the bot is about to talk over; it is a stop frame we never saw.
+_SPEAKING_STALE_SECS = 3.0
+
 
 class InterruptionTracker:
     def __init__(self, *, record: bool = True, labels: dict | None = None):
@@ -59,18 +72,87 @@ class InterruptionTracker:
         # One interruption per response. Cleared only when the response ends, so a
         # sentence boundary mid-talk-over cannot re-arm it.
         self._interrupted_this_response = False
+        # sid -> onset time for everyone currently mid-utterance. Needed because
+        # onset is edge-triggered: without it the bot cannot tell, at the moment
+        # it starts speaking, that someone is already talking.
+        self._speaking: dict[str, float] = {}
         self.interruptions = 0
         self.talkovers_ms: list[float] = []
 
-    def bot_started(self, t: float) -> None:
-        self._bot_audio_on = True
-        # First audio of a response opens the response window. Later sentences in
-        # the same response must not reset _overlap_start, or a talk-over already
-        # in progress would be forgotten and could be counted twice.
+    def _open_response(self) -> None:
+        """Open the response window, if it isn't already.
+
+        Later sentences in the same response must not reset _overlap_start, or a
+        talk-over already in progress would be forgotten and could be counted twice.
+        """
         if not self._response_open:
             self._response_open = True
             self._overlap_start = None
             self._interrupted_this_response = False
+
+    def _arm(self, t: float, sid: str | None) -> bool:
+        """Mark this response as interrupted. True the first time only.
+
+        Both enforcement paths funnel through here so "once per response" is one
+        rule in one place, whether the trigger was a user starting to speak or the
+        bot starting to speak over someone.
+        """
+        if not self._response_open or self._interrupted_this_response:
+            return False
+        self._interrupted_this_response = True
+        self._overlap_start = t
+        self.interruptions += 1
+        if self._record:
+            self._emit_count(sid)
+        return True
+
+    def _current_speaker(self, t: float) -> str | None:
+        """Someone who is talking right now, or None.
+
+        Onsets older than _SPEAKING_STALE_SECS are treated as a lost stop frame
+        rather than a very long turn. Without that guard a single dropped
+        VADUserStoppedSpeakingFrame would make the bot yield on every subsequent
+        response — silence for the rest of the session, which is a worse failure
+        than the talk-over this is here to prevent.
+        """
+        for sid, started in self._speaking.items():
+            # Lower bound as well as upper: an onset stamped *after* t is not
+            # someone talking early, it is a clock the caller did not share with
+            # us, and treating it as live would burn this response's single
+            # interruption on a speaker who may not be talking at all.
+            if 0.0 <= t - started <= _SPEAKING_STALE_SECS:
+                return sid
+        return None
+
+    def llm_started(self, t: float) -> None:
+        """The bot has committed to answering — open the window here, not at audio.
+
+        This is the fix for the "interruption is non-existent" report of 2026-08-19.
+        The window used to open on the first TTS audio frame, so a user who started
+        talking during LLM generation or TTS synthesis found _response_open False,
+        got no interruption, and was then spoken over for the whole response. That
+        latency window is exactly where a listener decides the bot has stalled and
+        starts talking again, so it was the *most* likely moment to be interrupted
+        and the only one that could not be.
+        """
+        self._open_response()
+
+    def bot_started(self, t: float) -> bool:
+        """Audio started. True if the bot must yield immediately.
+
+        Returns True when someone is already mid-utterance, which edge-triggered
+        onset alone cannot catch: their VADUserStartedSpeakingFrame fired before
+        this response existed and no second one is coming while they keep talking.
+        """
+        self._bot_audio_on = True
+        self._open_response()
+        speaker = self._current_speaker(t)
+        if speaker is not None and self._arm(t, speaker):
+            logger.info(
+                f"Interruption: bot started while user {speaker} was already speaking"
+            )
+            return True
+        return False
 
     def bot_stopped(self, t: float) -> None:
         """Audio stopped. May be a gap between sentences, not the end of the turn."""
@@ -104,15 +186,21 @@ class InterruptionTracker:
         Interrupting there would cancel nothing and risks discarding the user's
         own in-progress turn.
         """
-        if self._response_open and not self._interrupted_this_response:
-            self._interrupted_this_response = True
-            self._overlap_start = t
-            self.interruptions += 1
+        if sid is not None:
+            self._speaking[sid] = t
+        if self._arm(t, sid):
             logger.info(f"Interruption: user {sid} started speaking while bot was talking")
-            if self._record:
-                self._emit_count(sid)
             return True
         return False
+
+    def user_offset(self, t: float, sid: str | None = None) -> None:
+        """A user stopped speaking. Clears them from the currently-talking set.
+
+        Only bookkeeping for bot_started's level-triggered check — it never
+        interrupts anything itself.
+        """
+        if sid is not None:
+            self._speaking.pop(sid, None)
 
     def summary(self) -> dict:
         tk = self.talkovers_ms

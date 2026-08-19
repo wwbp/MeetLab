@@ -17,6 +17,8 @@ from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
     InterruptionFrame,
+    InterruptionTaskFrame,
+    LLMFullResponseStartFrame,
     MetricsFrame,
     TranscriptionFrame,
     TTSAudioRawFrame,
@@ -53,6 +55,7 @@ from db.engine import AsyncSessionLocal
 from db.models import Conversation, MediaFile, Speaker, Utterance
 from interruption import InterruptionTracker
 from multi_speaker_stt import MultiSpeakerSTT, SpeakerLabelInjector
+from speech_onset_vad import build_speech_onset_silero
 from runner_types import LiveKitRunnerArguments
 
 _STT_DELAY_VALUES = frozenset({"minimal", "low", "medium", "high", "xhigh"})
@@ -88,6 +91,7 @@ _DEFAULT_ENDPOINTING_MS = 450
 # answer both at once — the "chained answers" complaint. See
 # tests/test_turn_calibration.py and scripts/analyze-pause-distribution.py.
 _DEFAULT_USER_SPEECH_TIMEOUT_MS = 300
+
 
 
 def _user_speech_timeout_secs(bot_config) -> float:
@@ -187,20 +191,26 @@ class _OpenAIRealtimeSTT(OpenAIRealtimeSTTService):
         })
 
 
-def _build_vad_processor(bot_config):
+def _build_vad_processor(bot_config, vad_handlers=None):
     """Per-participant Silero VADProcessor for segmented STT chains.
 
     stop_secs mirrors Deepgram's endpointing_ms so stt_ms numbers stay
     comparable across providers.
+
+    The analyzer also reports its QUIET -> STARTING edge when vad_handlers is
+    given. That edge is the interruption signal: the earliest moment this analyzer
+    will admit someone is talking, several frames before the SPEAKING transition
+    the STT segments on. See speech_onset_vad.py.
     """
-    from pipecat.audio.vad.silero import SileroVADAnalyzer
     from pipecat.audio.vad.vad_analyzer import VADParams
     from pipecat.processors.audio.vad_processor import VADProcessor
 
     endpointing_ms = getattr(bot_config, "stt_endpointing_ms", _DEFAULT_ENDPOINTING_MS) or _DEFAULT_ENDPOINTING_MS
-    return VADProcessor(
-        vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=endpointing_ms / 1000))
-    )
+    analyzer = build_speech_onset_silero(VADParams(stop_secs=endpointing_ms / 1000))
+    if vad_handlers is not None:
+        on_detected, on_cleared = vad_handlers
+        analyzer.set_onset_handlers(on_detected=on_detected, on_cleared=on_cleared)
+    return VADProcessor(vad_analyzer=analyzer)
 
 
 def make_speech_onset_handler(tracker, enqueue_frame):
@@ -222,10 +232,19 @@ def make_speech_onset_handler(tracker, enqueue_frame):
     attributed to a *specific speaker*, while a transport analyzer would re-run
     VAD over the mixed stream to produce an unattributed signal.
 
-    So we push an InterruptionFrame ourselves. Every FrameProcessor treats it as
-    a SystemFrame and responds by cancelling in-flight work
-    (frame_processor.py: InterruptionFrame -> _start_interruption), which is what
-    stops LLM generation and TTS playback mid-sentence.
+    So we request the interruption ourselves. We push an InterruptionTaskFrame
+    *upstream* rather than an InterruptionFrame downstream, because the task
+    handles the two differently: queue_frame() puts a downstream frame on
+    _push_queue, a plain FIFO that the interruption then waits in. An upstream
+    InterruptionTaskFrame reaches PipelineTask._source_push_frame, which injects
+    the InterruptionFrame straight into the pipeline — pipeline/task.py calls this
+    out explicitly as "bypassing the push queue".
+
+    From there every FrameProcessor treats InterruptionFrame as a SystemFrame and
+    cancels in-flight work (frame_processor.py: InterruptionFrame ->
+    _start_interruption), which stops LLM generation and TTS mid-sentence, and
+    LiveKitOutputTransport clears the AudioSource queue so audio already handed to
+    LiveKit is dropped instead of played out.
 
     ``enqueue_frame`` is an async callable taking one frame, or None before the
     PipelineTask exists. The handler never raises: it runs inside frame
@@ -238,7 +257,7 @@ def make_speech_onset_handler(tracker, enqueue_frame):
         if not should_yield or enqueue_frame is None:
             return
         try:
-            await enqueue_frame(InterruptionFrame())
+            await enqueue_frame(InterruptionTaskFrame(), FrameDirection.UPSTREAM)
             logger.info(f"Interruption: yielding to {sid} — cancelling bot output")
         except Exception as e:
             logger.warning(f"failed to interrupt bot output for {sid}: {e}")
@@ -299,7 +318,7 @@ def build_user_aggregator_params(bot_config=None):
     )
 
 
-def _build_whisper_chain(bot_config):
+def _build_whisper_chain(bot_config, vad_handlers=None):
     """Local Whisper STT chain: (VADProcessor, WhisperSTTService) head/tail pair.
 
     WhisperSTTService is a SegmentedSTTService — it transcribes only the audio
@@ -314,13 +333,13 @@ def _build_whisper_chain(bot_config):
     from pipecat.services.whisper.stt import WhisperSTTService
 
     model_name = bot_config.stt_model[len("whisper-"):]
-    vad = _build_vad_processor(bot_config)
+    vad = _build_vad_processor(bot_config, vad_handlers)
     stt = WhisperSTTService(settings=WhisperSTTService.Settings(model=model_name))
     vad.link(stt)
     return (vad, stt)
 
 
-def _build_parakeet_chain(bot_config):
+def _build_parakeet_chain(bot_config, vad_handlers=None):
     """Parakeet NIM chain: (VADProcessor, NemotronHTTPSTTService).
 
     Same segmented shape as the whisper chain; the tail POSTs each segment to the
@@ -328,7 +347,7 @@ def _build_parakeet_chain(bot_config):
     """
     from nemotron_stt import NemotronHTTPSTTService, nemotron_stt_url
 
-    vad = _build_vad_processor(bot_config)
+    vad = _build_vad_processor(bot_config, vad_handlers)
     stt = NemotronHTTPSTTService(base_url=nemotron_stt_url(), model=bot_config.stt_model)
     vad.link(stt)
     return (vad, stt)
@@ -491,8 +510,20 @@ async def bot(runner_args: LiveKitRunnerArguments):
     # The factory is called once per participant join — OpenAI Realtime STT uses
     # server-side VAD (turn_detection=None) so each instance handles its own
     # turn boundaries and emits UserStarted/StoppedSpeakingFrames independently.
-    def _stt_factory():
-        return _build_stt_for_multi_speaker(bot_config, openai_api_key, env_config.deepgram_api_key)
+    def _stt_factory(sid=None):
+        # Bind this participant's interruption handlers to their own VAD. The
+        # analyzer reports its QUIET -> STARTING edge, which is the earliest
+        # evidence they started talking — several frames before the SPEAKING
+        # transition the STT segments on.
+        handlers = None
+        if sid:
+            handlers = (
+                lambda: _on_speech_onset(sid),
+                lambda: _on_speech_offset(sid),
+            )
+        return _build_stt_for_multi_speaker(
+            bot_config, openai_api_key, env_config.deepgram_api_key, vad_handlers=handlers
+        )
 
     # Interruption tracking: the bot should yield, not talk over users. The tracker
     # is fed bot-speaking frames (via _InterruptionObserver) and REAL user speech
@@ -506,14 +537,23 @@ async def bot(runner_args: LiveKitRunnerArguments):
     # processing.
     _task_ref: list = [None]
 
-    async def _enqueue_frame(frame) -> None:
+    async def _enqueue_frame(frame, direction=FrameDirection.DOWNSTREAM) -> None:
         task_ = _task_ref[0]
         if task_ is not None:
-            await task_.queue_frame(frame)
+            await task_.queue_frame(frame, direction)
 
     _on_speech_onset = make_speech_onset_handler(interruptions, _enqueue_frame)
 
-    multi_stt = MultiSpeakerSTT(_stt_factory, on_speech_onset=_on_speech_onset)
+    async def _on_speech_offset(sid: str) -> None:
+        # Clears the speaker so bot_started's already-speaking check stays honest.
+        # Never interrupts anything itself.
+        interruptions.user_offset(time.monotonic(), sid)
+
+    multi_stt = MultiSpeakerSTT(
+        _stt_factory,
+        on_speech_onset=_on_speech_onset,
+        on_speech_offset=_on_speech_offset,
+    )
     logger.info(
         f"STT: model={bot_config.stt_model} mode=per-participant delay={bot_config.stt_delay}"
     )
@@ -636,9 +676,26 @@ async def bot(runner_args: LiveKitRunnerArguments):
             frame = data.frame
             if frame.id in self._seen:
                 return
-            if isinstance(frame, BotStartedSpeakingFrame):
+            if isinstance(frame, LLMFullResponseStartFrame):
+                # Opens the response window at generation, not first audio. A user
+                # talking during LLM+TTS latency used to be unable to interrupt at
+                # all — see interruption.llm_started.
                 self._seen.add(frame.id)
-                interruptions.bot_started(time.monotonic())
+                interruptions.llm_started(time.monotonic())
+            elif isinstance(frame, BotStartedSpeakingFrame):
+                self._seen.add(frame.id)
+                if interruptions.bot_started(time.monotonic()):
+                    # Someone was already mid-utterance when we started talking.
+                    # Edge-triggered onset cannot catch this: their speech began
+                    # before this response existed and no second onset is coming.
+                    try:
+                        await _enqueue_frame(InterruptionTaskFrame(), FrameDirection.UPSTREAM)
+                        logger.info(
+                            "Interruption: yielding — user was already speaking "
+                            "when the bot started"
+                        )
+                    except Exception as e:
+                        logger.warning(f"failed to yield to an already-speaking user: {e}")
             elif isinstance(frame, BotStoppedSpeakingFrame):
                 self._seen.add(frame.id)
                 interruptions.bot_stopped(time.monotonic())
@@ -1074,7 +1131,7 @@ async def bot(runner_args: LiveKitRunnerArguments):
         )
 
 
-def _build_stt_for_multi_speaker(bot_config, openai_api_key: str, deepgram_api_key: str | None):
+def _build_stt_for_multi_speaker(bot_config, openai_api_key: str, deepgram_api_key: str | None, vad_handlers=None):
     """Build an STT instance for a single participant in per-participant mode.
 
     OpenAI Realtime STT: turn_detection=None (server VAD) so each instance drives
@@ -1100,9 +1157,9 @@ def _build_stt_for_multi_speaker(bot_config, openai_api_key: str, deepgram_api_k
             ),
         )
     if bot_config.stt_model.startswith("whisper-"):
-        return _build_whisper_chain(bot_config)
+        return _build_whisper_chain(bot_config, vad_handlers)
     if bot_config.stt_model.startswith("parakeet-"):
-        return _build_parakeet_chain(bot_config)
+        return _build_parakeet_chain(bot_config, vad_handlers)
     if not deepgram_api_key:
         raise ValueError("DEEPGRAM_API_KEY is required for Deepgram STT models")
     endpointing_ms = getattr(bot_config, "stt_endpointing_ms", 200)

@@ -276,18 +276,27 @@ class RC3InterruptionEnforcementTests(unittest.TestCase):
 
         Exercises the real handler bot.py installs, with a fake enqueue, so the
         wiring is covered without standing up a pipeline.
+
+        Updated 2026-08-19: the handler now pushes an InterruptionTaskFrame
+        UPSTREAM instead of an InterruptionFrame downstream. This is a deliberate
+        behaviour change, not a refactor. A downstream frame goes onto the task's
+        _push_queue — a plain FIFO the interruption then waits in. Upstream, it
+        reaches PipelineTask._source_push_frame, which injects the InterruptionFrame
+        directly into the pipeline; pipecat calls this out as "bypassing the push
+        queue". The direction is the whole point, so it is asserted.
         """
         import asyncio
 
         import bot
         from interruption import InterruptionTracker
-        from pipecat.frames.frames import InterruptionFrame
+        from pipecat.frames.frames import InterruptionTaskFrame
+        from pipecat.processors.frame_processor import FrameDirection
 
         tracker = InterruptionTracker(record=False)
         pushed = []
 
-        async def fake_enqueue(frame):
-            pushed.append(frame)
+        async def fake_enqueue(frame, direction=FrameDirection.DOWNSTREAM):
+            pushed.append((frame, direction))
 
         handler = bot.make_speech_onset_handler(tracker, fake_enqueue)
 
@@ -303,7 +312,13 @@ class RC3InterruptionEnforcementTests(unittest.TestCase):
         asyncio.run(scenario())
 
         self.assertEqual(len(pushed), 1, "expected exactly one interruption per window")
-        self.assertIsInstance(pushed[0], InterruptionFrame)
+        frame, direction = pushed[0]
+        self.assertIsInstance(frame, InterruptionTaskFrame)
+        self.assertEqual(
+            direction,
+            FrameDirection.UPSTREAM,
+            "downstream would put the interruption back in the FIFO it needs to skip",
+        )
 
     def test_a_missing_pipeline_handle_does_not_crash_the_audio_path(self):
         """on_speech_onset runs inside frame processing; it must never raise.

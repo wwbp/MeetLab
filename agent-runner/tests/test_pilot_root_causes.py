@@ -257,7 +257,10 @@ class RC3InterruptionEnforcementTests(unittest.TestCase):
         """A detected talk-over now produces an actionable signal, not just a count."""
         from interruption import InterruptionTracker
 
-        tracker = InterruptionTracker(record=False)
+        # min_bot_speech_ms=0: this test is about the yield *signal* existing at
+        # all (RC3), not about the barge-in floor added 2026-08-19, which is
+        # covered in test_interruption_windows.py.
+        tracker = InterruptionTracker(record=False, min_bot_speech_ms=0)
         tracker.bot_started(0.0)
 
         self.assertTrue(

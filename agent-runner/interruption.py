@@ -43,6 +43,8 @@ Times are monotonic seconds (the caller passes time.monotonic()). Emits two OTel
 instruments unless record=False: meetlab.bot_interruptions_total and
 meetlab.bot_talkover_ms.
 """
+import os
+
 from loguru import logger
 
 # Freshness bound on a speech onset that has no matching stop yet.
@@ -58,11 +60,37 @@ from loguru import logger
 # not something the bot is about to talk over; it is a stop frame we never saw.
 _SPEAKING_STALE_SECS = 3.0
 
+# Audio the bot is guaranteed to get out before anything may cancel it.
+#
+# Added after the 2026-08-19 09:00 multi-person sync, where the bot managed 12
+# audible responses against 22 yields and its greeting was cancelled 244ms in. In a
+# group meeting people talk to each other continuously, so an unconditional yield
+# means the bot is never audible at all — and because a cancelled response never
+# lands in the LLM context, the model kept regenerating the same question.
+#
+# The floor is deliberately short: long enough for a phrase, short enough that
+# talking over someone is brief. Each sentence boundary re-checks whether they are
+# still going (see bot_started), so this buys the bot a phrase, not a monologue.
+# Tunable without a deploy — set INTERRUPT_MIN_BOT_SPEECH_MS as an EB env property.
+_MIN_BOT_SPEECH_MS = int(os.getenv("INTERRUPT_MIN_BOT_SPEECH_MS", "600"))
+
 
 class InterruptionTracker:
-    def __init__(self, *, record: bool = True, labels: dict | None = None):
+    def __init__(
+        self,
+        *,
+        record: bool = True,
+        labels: dict | None = None,
+        min_bot_speech_ms: int | None = None,
+    ):
         self._record = record
         self._labels = labels or {}
+        self._min_bot_speech_ms = (
+            _MIN_BOT_SPEECH_MS if min_bot_speech_ms is None else min_bot_speech_ms
+        )
+        # When this response's audio first started, or None if it has not. Doubles
+        # as "is there anything to interrupt yet".
+        self._response_audio_start: float | None = None
         # Audio is playing right now (may flicker between sentences).
         self._bot_audio_on = False
         # A bot response is in flight — spans inter-sentence gaps. Enforcement
@@ -124,32 +152,36 @@ class InterruptionTracker:
                 return sid
         return None
 
-    def llm_started(self, t: float) -> None:
-        """The bot has committed to answering — open the window here, not at audio.
+    def _floor_spent(self, t: float) -> bool:
+        """Has the bot earned the right to be interrupted yet?
 
-        This is the fix for the "interruption is non-existent" report of 2026-08-19.
-        The window used to open on the first TTS audio frame, so a user who started
-        talking during LLM generation or TTS synthesis found _response_open False,
-        got no interruption, and was then spoken over for the whole response. That
-        latency window is exactly where a listener decides the bot has stalled and
-        starts talking again, so it was the *most* likely moment to be interrupted
-        and the only one that could not be.
+        False while no audio has played (nothing to cancel, and cancelling would
+        throw away a whole response for free) and during the first
+        _min_bot_speech_ms of it.
         """
-        self._open_response()
+        if self._response_audio_start is None:
+            return False
+        return (t - self._response_audio_start) * 1000.0 >= self._min_bot_speech_ms
 
     def bot_started(self, t: float) -> bool:
-        """Audio started. True if the bot must yield immediately.
+        """Audio started — for this response or just the next sentence.
 
-        Returns True when someone is already mid-utterance, which edge-triggered
-        onset alone cannot catch: their VADUserStartedSpeakingFrame fired before
-        this response existed and no second one is coming while they keep talking.
+        Returns True if the bot must yield immediately: someone is still talking
+        and the floor is spent. Fires per sentence, which is what makes the floor
+        safe — the bot gets a phrase out, then checks again rather than ploughing
+        through the whole response.
         """
         self._bot_audio_on = True
         self._open_response()
+        if self._response_audio_start is None:
+            self._response_audio_start = t
+        if not self._floor_spent(t):
+            return False
         speaker = self._current_speaker(t)
         if speaker is not None and self._arm(t, speaker):
             logger.info(
-                f"Interruption: bot started while user {speaker} was already speaking"
+                f"Interruption: user {speaker} still speaking at a sentence "
+                f"boundary — yielding"
             )
             return True
         return False
@@ -172,6 +204,7 @@ class InterruptionTracker:
         self._response_open = False
         self._overlap_start = None
         self._interrupted_this_response = False
+        self._response_audio_start = None
 
     def user_onset(self, t: float, sid: str | None = None) -> bool:
         """Record a user speech onset. Returns True if the bot should yield now.
@@ -188,6 +221,10 @@ class InterruptionTracker:
         """
         if sid is not None:
             self._speaking[sid] = t
+        if not self._floor_spent(t):
+            # Either the bot has not made a sound yet, or it is inside the floor.
+            # Recorded as speaking above, so bot_started can still act on it.
+            return False
         if self._arm(t, sid):
             logger.info(f"Interruption: user {sid} started speaking while bot was talking")
             return True

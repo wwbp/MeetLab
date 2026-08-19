@@ -18,7 +18,6 @@ from pipecat.frames.frames import (
     BotStoppedSpeakingFrame,
     InterruptionFrame,
     InterruptionTaskFrame,
-    LLMFullResponseStartFrame,
     MetricsFrame,
     TranscriptionFrame,
     TTSAudioRawFrame,
@@ -676,18 +675,13 @@ async def bot(runner_args: LiveKitRunnerArguments):
             frame = data.frame
             if frame.id in self._seen:
                 return
-            if isinstance(frame, LLMFullResponseStartFrame):
-                # Opens the response window at generation, not first audio. A user
-                # talking during LLM+TTS latency used to be unable to interrupt at
-                # all — see interruption.llm_started.
-                self._seen.add(frame.id)
-                interruptions.llm_started(time.monotonic())
-            elif isinstance(frame, BotStartedSpeakingFrame):
+            if isinstance(frame, BotStartedSpeakingFrame):
                 self._seen.add(frame.id)
                 if interruptions.bot_started(time.monotonic()):
-                    # Someone was already mid-utterance when we started talking.
-                    # Edge-triggered onset cannot catch this: their speech began
-                    # before this response existed and no second onset is coming.
+                    # Someone is still mid-utterance at a sentence boundary, and
+                    # the bot has had its floor. Edge-triggered onset cannot catch
+                    # this: their speech began before this response existed and no
+                    # second onset is coming while they keep going.
                     try:
                         await _enqueue_frame(InterruptionTaskFrame(), FrameDirection.UPSTREAM)
                         logger.info(

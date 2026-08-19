@@ -299,7 +299,7 @@ class TestMultiSpeakerSTTChainFactory(unittest.IsolatedAsyncioTestCase):
         self.heads: list[_PassthroughHead] = []
         self.tails: list[_ImmediateSTT] = []
 
-        def chain_factory():
+        def chain_factory(sid=None):
             head = _PassthroughHead()
             tail = _ImmediateSTT()
             head.link(tail)
@@ -365,7 +365,7 @@ class TestMultiSpeakerSTTRouting(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.setup_params = _make_setup()
 
-        def factory():
+        def factory(sid=None):
             return _ImmediateSTT()
 
         self.multi_stt = MultiSpeakerSTT(factory)

@@ -74,12 +74,14 @@ class _FrameCollector(FrameProcessor):
     """
 
     def __init__(self, queue: asyncio.Queue, *, needs_vad_wrap: bool = False,
-                 sid: str | None = None, on_speech_onset: Callable[[str], None] | None = None):
+                 sid: str | None = None, on_speech_onset: Callable[[str], None] | None = None,
+                 on_speech_offset: Callable[[str], None] | None = None):
         super().__init__()
         self._queue = queue
         self._needs_vad_wrap = needs_vad_wrap
         self._sid = sid
         self._on_speech_onset = on_speech_onset
+        self._on_speech_offset = on_speech_offset
 
     async def queue_frame(
         self,
@@ -102,6 +104,15 @@ class _FrameCollector(FrameProcessor):
             # But VADUserStartedSpeakingFrame is the REAL user speech onset, so
             # surface it to the interruption tracker (talk-over detection) before
             # dropping it from the main pipeline.
+            if isinstance(frame, VADUserStoppedSpeakingFrame) and self._on_speech_offset:
+                # Clears this speaker from the interruption tracker's
+                # currently-talking set. Bookkeeping only — it never interrupts.
+                try:
+                    result = self._on_speech_offset(self._sid)
+                    if inspect.isawaitable(result):
+                        await result
+                except Exception as e:
+                    logger.warning(f"_FrameCollector: on_speech_offset error: {e}")
             if isinstance(frame, VADUserStartedSpeakingFrame) and self._on_speech_onset:
                 try:
                     # Awaited rather than fire-and-forget: the handler pushes the
@@ -145,10 +156,12 @@ class MultiSpeakerSTT(FrameProcessor):
     """
 
     def __init__(self, stt_factory: Callable[[], FrameProcessor],
-                 on_speech_onset: Callable[[str], None] | None = None):
+                 on_speech_onset: Callable[[str], None] | None = None,
+                 on_speech_offset: Callable[[str], None] | None = None):
         super().__init__()
         self._stt_factory = stt_factory
         self._on_speech_onset = on_speech_onset
+        self._on_speech_offset = on_speech_offset
         self._stts: dict[str, FrameProcessor] = {}
         self._output_queue: asyncio.Queue = asyncio.Queue()
         self._pump_task: asyncio.Task | None = None
@@ -214,18 +227,21 @@ class MultiSpeakerSTT(FrameProcessor):
     async def _ensure_stt(self, sid: str) -> FrameProcessor:
         """Return the per-participant STT entry point for sid, creating it if needed.
 
-        The factory may return a single processor or a (head, tail) chain
+        The factory is called with the participant's sid so it can bind
+        per-participant hooks (the VAD's speech-onset handlers, which drive
+        interruption). It may return a single processor or a (head, tail) chain
         (e.g. VADProcessor → WhisperSTTService). Frames enter at the head;
         the collector is linked after the tail; lifecycle frames sent to the
         head propagate through the chain via the normal push machinery.
         """
         if sid not in self._stts:
-            chain = self._stt_factory()
+            chain = self._stt_factory(sid)
             head, tail = chain if isinstance(chain, tuple) else (chain, chain)
             needs_vad_wrap = not _stt_emits_vad_frames(tail)
             collector = _FrameCollector(
                 self._output_queue, needs_vad_wrap=needs_vad_wrap,
                 sid=sid, on_speech_onset=self._on_speech_onset,
+                on_speech_offset=self._on_speech_offset,
             )
             tail.link(collector)
             if self._setup_params is not None:

@@ -42,6 +42,22 @@ class TestWorkerCount(unittest.TestCase):
         not reproduce it."""
         self.assertGreater(worker_count(env={}), 1)
 
+    def test_it_follows_the_machine_when_not_told_otherwise(self):
+        """A fixed 4 wastes a bigger instance and oversubscribes a smaller one.
+        Sizing to cores keeps one process per core, which is what the GIL
+        argument implies: parallelism comes from processes, and there is no
+        point having more of them than cores to run them on."""
+        self.assertEqual(worker_count(env={}, cpus=8), 8)
+        self.assertEqual(worker_count(env={}, cpus=2), 2)
+
+    def test_it_never_goes_below_two_however_small_the_box(self):
+        """One process is the bottleneck this exists to remove, so even a
+        single-core machine gets two."""
+        self.assertGreaterEqual(worker_count(env={}, cpus=1), 2)
+
+    def test_an_explicit_setting_still_wins(self):
+        self.assertEqual(worker_count(env={"AGENT_RUNNER_WORKERS": "3"}, cpus=16), 3)
+
     def test_it_is_configurable(self):
         self.assertEqual(worker_count(env={"AGENT_RUNNER_WORKERS": "6"}), 6)
 

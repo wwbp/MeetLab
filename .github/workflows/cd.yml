@@ -185,11 +185,12 @@ jobs:
       # is rejected as contradictory and the whole deploy fails. That is exactly
       # what happened on 2026-08-20. Applying them here, before the deploy,
       # keeps the values in version control while satisfying EB's precedence.
-      - name: Apply autoscaling bounds
+      - name: Apply autoscaling bounds and instance type
         env:
           ENV_NAME: ${{ secrets.AWS_PROD_AGENT_RUNNER_ENVIRONMENT_NAME }}
           MIN_SIZE: ${{ vars.AGENT_RUNNER_MIN_SIZE || '2' }}
           MAX_SIZE: ${{ vars.AGENT_RUNNER_MAX_SIZE || '6' }}
+          INSTANCE_TYPE: ${{ vars.AGENT_RUNNER_INSTANCE_TYPE || 'c6i.xlarge' }}
         run: |
           set -euo pipefail
           current_min=$(aws elasticbeanstalk describe-configuration-settings \
@@ -202,8 +203,16 @@ jobs:
             --environment-name "${ENV_NAME}" \
             --query "ConfigurationSettings[0].OptionSettings[?OptionName=='MaxSize'].Value | [0]" \
             --output text)
-          echo "current: min=${current_min} max=${current_max}; desired: min=${MIN_SIZE} max=${MAX_SIZE}"
-          if [ "${current_min}" = "${MIN_SIZE}" ] && [ "${current_max}" = "${MAX_SIZE}" ]; then
+          current_type=$(aws elasticbeanstalk describe-configuration-settings \
+            --application-name "${{ secrets.AWS_APPLICATION_NAME }}" \
+            --environment-name "${ENV_NAME}" \
+            --query "ConfigurationSettings[0].OptionSettings[?OptionName=='InstanceType'].Value | [0]" \
+            --output text)
+          echo "current: min=${current_min} max=${current_max} type=${current_type}"
+          echo "desired: min=${MIN_SIZE} max=${MAX_SIZE} type=${INSTANCE_TYPE}"
+          if [ "${current_min}" = "${MIN_SIZE}" ] \
+            && [ "${current_max}" = "${MAX_SIZE}" ] \
+            && [ "${current_type}" = "${INSTANCE_TYPE}" ]; then
             echo "already correct, nothing to do"
             exit 0
           fi
@@ -215,6 +224,7 @@ jobs:
             --option-settings \
               "Namespace=aws:autoscaling:asg,OptionName=MaxSize,Value=${MAX_SIZE}" \
               "Namespace=aws:autoscaling:asg,OptionName=MinSize,Value=${MIN_SIZE}" \
+              "Namespace=aws:autoscaling:launchconfiguration,OptionName=InstanceType,Value=${INSTANCE_TYPE}" \
             --query 'EnvironmentName' --output text
           echo "waiting for the environment to settle before deploying"
           for i in $(seq 1 60); do

@@ -25,23 +25,33 @@ import os
 RECONCILER_LOCK_KEY = 8_142_026
 
 
-def worker_count(env: dict | None = None) -> int:
+def worker_count(env: dict | None = None, cpus: int | None = None) -> int:
     """How many worker processes should serve the app.
 
-    Defaults to 4 rather than 1. One process is the configuration the ramp found
-    the ceiling in, so it is not a safe default to fall back to — a typo in an
-    environment property should not silently restore the bottleneck.
+    Defaults to one per core. Parallelism here comes from processes, not
+    threads — that is the whole point of the GIL argument — so there is little
+    value in more processes than cores to run them on, and a fixed number either
+    wastes a large instance or oversubscribes a small one.
 
-    Pin to 1 locally: a single process is far easier to debug, and concurrency
-    is not what a laptop is testing.
+    Never fewer than two, whatever the machine reports. A single process is the
+    configuration the 2026-08-20 ramp found the ceiling in (ten sessions, 480
+    utterances, zero replies), so it is not a value to fall back into by
+    accident — including when a typo makes an explicit setting unreadable.
+
+    Pin AGENT_RUNNER_WORKERS=1 locally when debugging; a single process is far
+    easier to follow, and concurrency is not what a laptop is testing.
     """
     env = os.environ if env is None else env
+    cores = cpus if cpus is not None else (os.cpu_count() or 2)
+
     raw = env.get("AGENT_RUNNER_WORKERS", "")
-    try:
-        n = int(str(raw).strip())
-    except (TypeError, ValueError):
-        return 4
-    return max(1, n)
+    if str(raw).strip():
+        try:
+            return max(1, int(str(raw).strip()))
+        except (TypeError, ValueError):
+            logger_msg = f"AGENT_RUNNER_WORKERS={raw!r} is not a number; sizing to cores"
+            print(logger_msg)
+    return max(2, cores)
 
 
 def should_run_singleton(*, acquired: bool | None) -> bool:

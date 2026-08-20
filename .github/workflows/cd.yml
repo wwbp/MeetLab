@@ -179,6 +179,54 @@ jobs:
           role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/${{ secrets.AWS_ROLE_NAME }}
           aws-region: ${{ env.AWS_REGION }}
 
+      # Autoscaling bounds cannot be set from .ebextensions once they exist as
+      # direct environment settings — direct settings outrank the source bundle,
+      # so a bundle raising MinSize while the environment still holds MaxSize=1
+      # is rejected as contradictory and the whole deploy fails. That is exactly
+      # what happened on 2026-08-20. Applying them here, before the deploy,
+      # keeps the values in version control while satisfying EB's precedence.
+      - name: Apply autoscaling bounds
+        env:
+          ENV_NAME: ${{ secrets.AWS_PROD_AGENT_RUNNER_ENVIRONMENT_NAME }}
+          MIN_SIZE: ${{ vars.AGENT_RUNNER_MIN_SIZE || '2' }}
+          MAX_SIZE: ${{ vars.AGENT_RUNNER_MAX_SIZE || '6' }}
+        run: |
+          set -euo pipefail
+          current_min=$(aws elasticbeanstalk describe-configuration-settings \
+            --application-name "${{ secrets.AWS_APPLICATION_NAME }}" \
+            --environment-name "${ENV_NAME}" \
+            --query "ConfigurationSettings[0].OptionSettings[?OptionName=='MinSize'].Value | [0]" \
+            --output text)
+          current_max=$(aws elasticbeanstalk describe-configuration-settings \
+            --application-name "${{ secrets.AWS_APPLICATION_NAME }}" \
+            --environment-name "${ENV_NAME}" \
+            --query "ConfigurationSettings[0].OptionSettings[?OptionName=='MaxSize'].Value | [0]" \
+            --output text)
+          echo "current: min=${current_min} max=${current_max}; desired: min=${MIN_SIZE} max=${MAX_SIZE}"
+          if [ "${current_min}" = "${MIN_SIZE}" ] && [ "${current_max}" = "${MAX_SIZE}" ]; then
+            echo "already correct, nothing to do"
+            exit 0
+          fi
+          # MaxSize first: raising MinSize while MaxSize is still lower is the
+          # contradiction EB rejects.
+          aws elasticbeanstalk update-environment \
+            --application-name "${{ secrets.AWS_APPLICATION_NAME }}" \
+            --environment-name "${ENV_NAME}" \
+            --option-settings \
+              "Namespace=aws:autoscaling:asg,OptionName=MaxSize,Value=${MAX_SIZE}" \
+              "Namespace=aws:autoscaling:asg,OptionName=MinSize,Value=${MIN_SIZE}" \
+            --query 'EnvironmentName' --output text
+          echo "waiting for the environment to settle before deploying"
+          for i in $(seq 1 60); do
+            read -r status health < <(aws elasticbeanstalk describe-environments \
+              --environment-names "${ENV_NAME}" \
+              --query 'Environments[0].[Status,Health]' --output text)
+            echo "poll ${i}: ${status}/${health}"
+            [ "${status}" = "Ready" ] && break
+            sleep 15
+          done
+          test "${status}" = "Ready"
+
       - name: Build deployment package
         run: |
           set -euo pipefail

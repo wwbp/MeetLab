@@ -21,7 +21,7 @@ from starlette.requests import Request as StarletteRequest
 from starlette.responses import Response as StarletteResponse
 
 from fastapi.responses import FileResponse, RedirectResponse, Response
-from sqlalchemy import func, select, update
+from sqlalchemy import func, select, text, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import selectinload
 
@@ -33,6 +33,7 @@ from config import load_config, require
 from db.config_loader import load_bot_config
 from event_log import EVENT_SEVERITIES, install_error_event_sink, record_event
 from db.engine import AsyncSessionLocal, engine
+from process_concurrency import RECONCILER_LOCK_KEY, should_run_singleton
 from db.models import BotConfig, Conversation, Event, MediaFile, Speaker, Utterance
 from runner_types import LiveKitRunnerArguments
 
@@ -1089,10 +1090,48 @@ async def _install_event_log_sink() -> None:
     logger.info("event-log sink installed (WARNING+ mirrored to events table)")
 
 
+_RECONCILER_SESSION: list = []
+
+
+async def _claim_reconciler_role() -> bool | None:
+    """Try to become the fleet's single reconciler, via a Postgres advisory lock.
+
+    True if this process holds it, False if another does, None if the question
+    could not be answered. The lock lives as long as its database session and
+    Postgres frees it automatically when that ends, so the role moves on its own
+    if a process dies — no heartbeat, no lease to expire.
+    """
+    try:
+        db = AsyncSessionLocal()
+        got = await db.execute(
+            text("SELECT pg_try_advisory_lock(:k)"), {"k": RECONCILER_LOCK_KEY}
+        )
+        acquired = bool(got.scalar())
+        if acquired:
+            # Deliberately left open: closing it would release the lock and the
+            # role along with it.
+            _RECONCILER_SESSION.append(db)
+        else:
+            await db.close()
+        return acquired
+    except Exception as e:
+        logger.warning(f"could not determine reconciler role: {e}")
+        return None
+
+
 @app.on_event("startup")
 async def _start_conversation_reconcile_loop() -> None:
     if os.environ.get("DISABLE_CONVERSATION_RECONCILE", "").lower() in ("1", "true", "yes"):
         return
+
+    # Several worker processes per instance, several instances: without election
+    # this runs N*M times over. It is idempotent, so the cost is a redundant
+    # LiveKit round-trip per process per cycle rather than corruption — but that
+    # multiplies with exactly the scaling this change enables.
+    if not should_run_singleton(acquired=await _claim_reconciler_role()):
+        logger.info("conversation reconcile loop: another process holds the role")
+        return
+
     interval = int(os.environ.get("CONVERSATION_RECONCILE_INTERVAL_SECONDS", "120"))
 
     async def _loop() -> None:
@@ -1401,5 +1440,23 @@ async def health_check():
 
 if __name__ == "__main__":
     import uvicorn
-    logger.info(f"Starting LiveKit Bot Runner — LiveKit URL: {LIVEKIT_URL}")
-    uvicorn.run(app, host="0.0.0.0", port=7860)
+
+    from process_concurrency import worker_count
+
+    workers = worker_count()
+    logger.info(
+        f"Starting LiveKit Bot Runner — LiveKit URL: {LIVEKIT_URL}, "
+        f"worker processes: {workers}"
+    )
+    if workers == 1:
+        # Pass the app object so local runs stay debuggable without an import
+        # string.
+        uvicorn.run(app, host="0.0.0.0", port=7860)
+    else:
+        # Several processes, each with its own interpreter, GIL and event loop.
+        # Bots run as asyncio tasks inside whichever process served their /start,
+        # so concurrency scales with process count. The 2026-08-20 ramp stalled
+        # at ten sessions on a single process while CPU sat at 80% — one GIL
+        # cannot service ten pipelines, and more cores do not change that.
+        # uvicorn needs an import string in order to fork.
+        uvicorn.run("runner:app", host="0.0.0.0", port=7860, workers=workers)

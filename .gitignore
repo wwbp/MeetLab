@@ -15,3 +15,8 @@ docs/team-update-2026-06-11.md
 # soak run artifacts
 agent-runner/soak-results-*.json
 soak-results-*.json
+
+# Generated TTS fixtures for the conversation load harness. Regenerate with
+# `uv run python tests/generate_conversation_audio.py` — they are build
+# artefacts, not source, and cost an OpenAI call each.
+agent-runner/tests/fixtures/conversations/

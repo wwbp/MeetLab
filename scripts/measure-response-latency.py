@@ -164,11 +164,14 @@ def main():
     w = sorted(waits)
     over3 = sum(1 for x in w if x > 3000) / len(w) * 100
     print(f"  turns    {len(w)}")
+    print(f"  mean     {st.mean(w):7.0f} ms")
+    print(f"  p10      {pct(w, 0.10):7.0f} ms")
     print(f"  p50      {st.median(w):7.0f} ms")
     print(f"  p90      {pct(w, 0.90):7.0f} ms")
     print(f"  p99      {pct(w, 0.99):7.0f} ms")
     print(f"  max      {max(w):7.0f} ms")
     print(f"  over 3s  {over3:6.1f} %      <- pilot: 48.6% (30 Jul), 27.4% (5 Aug)")
+    print(f"  under 800ms {sum(1 for x in w if x <= 800) / len(w) * 100:5.1f} %   <- target band")
 
     if bursts:
         b = sorted(bursts)

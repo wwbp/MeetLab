@@ -115,6 +115,19 @@ number, not the pilot's.
 3. **Fix the memory leak** (C4). If the root cause is not quickly findable,
    mitigate: cap sessions per process and recycle. Do not scale without one or
    the other.
+
+   **Done, in part — participants are now capped.** `MultiSpeakerSTT` refuses a
+   new participant once a room holds `MAX_PARTICIPANT_WORKERS` recognition
+   streams (default 6, sized from the 19 Aug ramp; override with the env var of
+   the same name, which is the fastest lever during an incident and needs no
+   deploy). The refusal is a WARNING, so it lands in the event log and the
+   `meetlab.participants_refused_total` counter — the thing 19 Aug lacked, when
+   the ramp accepted everyone, exhausted recognition throughput and quietly went
+   from 261 replies to 23 with nothing saying no. The cap applies to *admission
+   only*: someone already in the meeting keeps their stream at the ceiling, and a
+   participant leaving frees the slot even if their teardown raises. Policy lives
+   in `participant_workers.route_audio` (pure, unit-tested); this is a session
+   *recycle* mitigation still outstanding, not a substitute for it.
 4. **Move concierge state out of process** (C6) — Redis or Postgres for the three
    stores. This is a **hard prerequisite** for running more than one `meet`
    instance, and therefore for any HA at all.

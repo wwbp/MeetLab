@@ -69,3 +69,8 @@ bot_talkover_ms = _meter.create_histogram(
     unit="ms",
     description="How long the bot kept speaking after a user interrupted (lower = yields faster)",
 )
+
+participants_refused_total = _meter.create_counter(
+    "meetlab.participants_refused_total",
+    description="Participants refused a recognition stream because the room hit its cap",
+)

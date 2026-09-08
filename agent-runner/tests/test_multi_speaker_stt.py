@@ -31,6 +31,8 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor, FrameProcessorSetup
 
+from loguru import logger
+
 from multi_speaker_stt import MultiSpeakerSTT, SpeakerLabelInjector, _FrameCollector
 
 
@@ -667,6 +669,73 @@ class TestSpeakerLabelInjector(unittest.IsolatedAsyncioTestCase):
             f"Expected stripped-identity fallback, got: {[f.text for f in transcripts]}",
         )
 
+
+class AdmissionControlTests(unittest.IsolatedAsyncioTestCase):
+    """The cap that 2026-08-19 lacked: refuse visibly instead of degrading.
+
+    That ramp accepted every participant, exhausted recognition throughput and
+    quietly stopped replying (261 replies → 23, processor at 77%). These pin the
+    two properties that make a cap safe rather than merely present.
+    """
+
+    def _stt(self, cap):
+        made = []
+
+        def factory(sid=None):
+            p = _ImmediateSTT()
+            made.append(p)
+            return p
+
+        return MultiSpeakerSTT(factory, cap=cap), made
+
+    async def _speak(self, ms, sid):
+        return await ms._ensure_stt(sid)
+
+    async def test_new_participants_are_refused_at_the_cap(self):
+        ms, made = self._stt(cap=2)
+        self.assertIsNotNone(await self._speak(ms, "a"))
+        self.assertIsNotNone(await self._speak(ms, "b"))
+        self.assertIsNone(await self._speak(ms, "c"))
+        self.assertEqual(len(made), 2, "a refused participant must not build an STT")
+        self.assertIn("c", ms.refused)
+
+    async def test_people_already_in_the_room_keep_working_at_the_cap(self):
+        """The regression that matters most.
+
+        route_audio speaks in worker names, not sids. Passing sids straight in
+        makes every membership test miss, so at the cap the *existing* speakers
+        get refused too — throttling a healthy conversation to protect capacity,
+        which breaks the thing being protected.
+        """
+        ms, _ = self._stt(cap=2)
+        first = await self._speak(ms, "a")
+        await self._speak(ms, "b")
+        await self._speak(ms, "c")           # refused, room is full
+        again = await self._speak(ms, "a")   # 'a' was here first
+        self.assertIsNotNone(again, "an admitted participant was refused at the cap")
+        self.assertIs(again, first, "an admitted participant got a second STT")
+
+    async def test_leaving_frees_the_slot_for_someone_new(self):
+        ms, _ = self._stt(cap=2)
+        await self._speak(ms, "a")
+        await self._speak(ms, "b")
+        self.assertIsNone(await self._speak(ms, "c"))
+        await ms.remove_participant("a")
+        self.assertIsNotNone(await self._speak(ms, "c"), "slot not released on leave")
+
+    async def test_a_refusal_is_recorded_once_not_once_per_audio_frame(self):
+        """Audio arrives every 20ms; an unlatched refusal would flood the log."""
+        ms, _ = self._stt(cap=1)
+        await self._speak(ms, "a")
+        seen = []
+        sink = logger.add(lambda m: seen.append(str(m)), level="WARNING")
+        try:
+            for _ in range(50):
+                self.assertIsNone(await self._speak(ms, "b"))
+        finally:
+            logger.remove(sink)
+        refusals = [m for m in seen if "refused" in m]
+        self.assertEqual(len(refusals), 1, f"expected one refusal log, got {len(refusals)}")
 
 if __name__ == "__main__":
     unittest.main()

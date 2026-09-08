@@ -55,6 +55,8 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor, FrameProcessorSetup
 
+from participant_workers import route_audio, worker_name
+
 
 class _FrameCollector(FrameProcessor):
     """Captures all downstream frames from a per-participant STT into a shared queue.
@@ -157,12 +159,17 @@ class MultiSpeakerSTT(FrameProcessor):
 
     def __init__(self, stt_factory: Callable[[], FrameProcessor],
                  on_speech_onset: Callable[[str], None] | None = None,
-                 on_speech_offset: Callable[[str], None] | None = None):
+                 on_speech_offset: Callable[[str], None] | None = None,
+                 cap: int | None = None):
         super().__init__()
         self._stt_factory = stt_factory
         self._on_speech_onset = on_speech_onset
         self._on_speech_offset = on_speech_offset
+        self._cap = cap
         self._stts: dict[str, FrameProcessor] = {}
+        # Participants turned away at the cap. Held so the refusal is logged and
+        # counted once per person rather than once per 20ms audio frame.
+        self.refused: set[str] = set()
         self._output_queue: asyncio.Queue = asyncio.Queue()
         self._pump_task: asyncio.Task | None = None
         self._setup_params: FrameProcessorSetup | None = None
@@ -197,8 +204,12 @@ class MultiSpeakerSTT(FrameProcessor):
         elif direction == FrameDirection.DOWNSTREAM and isinstance(frame, UserAudioRawFrame):
             if frame.user_id:
                 stt = await self._ensure_stt(frame.user_id)
-                await stt.process_frame(frame, direction)
+                if stt is not None:
+                    await stt.process_frame(frame, direction)
             # Audio consumed by per-participant STT; do not push downstream directly.
+            # That includes refused audio: forwarding it would feed unattributed
+            # speech into the shared context, which is the failure the cap exists
+            # to avoid — worse than not hearing that person at all.
 
         else:
             await self.push_frame(frame, direction)
@@ -214,6 +225,10 @@ class MultiSpeakerSTT(FrameProcessor):
     async def remove_participant(self, sid: str) -> None:
         """Tear down the STT instance for a participant who left the room."""
         stt = self._stts.pop(sid, None)
+        # Popped before anything can fail below, and the refusal latch cleared
+        # regardless: a teardown that raises must not hold a slot forever, or one
+        # bad participant shrinks the room for the rest of its life.
+        self.refused.discard(sid)
         if stt is None:
             return
         try:
@@ -224,7 +239,7 @@ class MultiSpeakerSTT(FrameProcessor):
 
     # ── internal ────────────────────────────────────────────────────────────
 
-    async def _ensure_stt(self, sid: str) -> FrameProcessor:
+    async def _ensure_stt(self, sid: str) -> FrameProcessor | None:
         """Return the per-participant STT entry point for sid, creating it if needed.
 
         The factory is called with the participant's sid so it can bind
@@ -233,27 +248,62 @@ class MultiSpeakerSTT(FrameProcessor):
         (e.g. VADProcessor → WhisperSTTService). Frames enter at the head;
         the collector is linked after the tail; lifecycle frames sent to the
         head propagate through the chain via the normal push machinery.
+
+        Returns None when the room is at capacity and this participant is new.
+        On 2026-08-19 an eight-room ramp accepted every participant, exhausted
+        recognition throughput and quietly stopped replying — replies fell from
+        261 to 23 while the processor sat at 77%. Nothing said no. Refusing is
+        visible; degradation is not.
         """
-        if sid not in self._stts:
-            chain = self._stt_factory(sid)
-            head, tail = chain if isinstance(chain, tuple) else (chain, chain)
-            needs_vad_wrap = not _stt_emits_vad_frames(tail)
-            collector = _FrameCollector(
-                self._output_queue, needs_vad_wrap=needs_vad_wrap,
-                sid=sid, on_speech_onset=self._on_speech_onset,
-                on_speech_offset=self._on_speech_offset,
-            )
-            tail.link(collector)
-            if self._setup_params is not None:
-                await head.setup(self._setup_params)
-                if tail is not head:
-                    await tail.setup(self._setup_params)
-                await collector.setup(self._setup_params)
-            if self._start_frame is not None:
-                await head.process_frame(self._start_frame, FrameDirection.DOWNSTREAM)
-            self._stts[sid] = head
-            logger.info(f"MultiSpeakerSTT: created STT for participant {sid} (vad_wrap={needs_vad_wrap})")
-        return self._stts[sid]
+        # Fast path: already admitted. A participant's audio arrives every 20ms, so
+        # the admission policy is reserved for genuine new arrivals rather than
+        # rebuilt and re-consulted on every frame of every speaker.
+        if sid in self._stts:
+            return self._stts[sid]
+
+        # Admission is decided by pure policy in participant_workers so it can be
+        # tested without a transport, a factory or a second of audio. That policy
+        # speaks in worker names, not raw sids — passing sids here would make every
+        # membership test miss, and the cap would then refuse people already in the
+        # meeting instead of only new arrivals.
+        decision = route_audio(
+            sid, {worker_name(s) for s in self._stts}, cap=self._cap
+        )
+        if decision is None:
+            if sid not in self.refused:
+                self.refused.add(sid)
+                logger.warning(
+                    f"MultiSpeakerSTT: participant {sid} refused — at capacity "
+                    f"({len(self._stts)} active). Their audio is not being transcribed."
+                )
+                try:
+                    import metrics as _prom
+                    _prom.participants_refused_total.add(1)
+                except Exception:
+                    pass
+            return None
+
+        # Admitted and new: build the chain. The membership guard that used to wrap
+        # this is now the fast path above.
+        chain = self._stt_factory(sid)
+        head, tail = chain if isinstance(chain, tuple) else (chain, chain)
+        needs_vad_wrap = not _stt_emits_vad_frames(tail)
+        collector = _FrameCollector(
+            self._output_queue, needs_vad_wrap=needs_vad_wrap,
+            sid=sid, on_speech_onset=self._on_speech_onset,
+            on_speech_offset=self._on_speech_offset,
+        )
+        tail.link(collector)
+        if self._setup_params is not None:
+            await head.setup(self._setup_params)
+            if tail is not head:
+                await tail.setup(self._setup_params)
+            await collector.setup(self._setup_params)
+        if self._start_frame is not None:
+            await head.process_frame(self._start_frame, FrameDirection.DOWNSTREAM)
+        self._stts[sid] = head
+        logger.info(f"MultiSpeakerSTT: created STT for participant {sid} (vad_wrap={needs_vad_wrap})")
+        return head
 
     async def _pump_output(self) -> None:
         """Forward frames from per-participant STT outputs to the main pipeline."""

@@ -42,7 +42,14 @@ API_SECRET = os.getenv("LIVEKIT_API_SECRET", "secret")
 BOT_JOIN_WAIT = 5.0   # seconds to wait for the bot to join before users connect
 USER_JOIN_WAIT = 2.0  # brief settle after all users connect
 POLL_INTERVAL = 1.0   # DB poll cadence in seconds
-TURN_TIMEOUT = 90.0   # max seconds to wait for a bot response per turn
+# Max seconds to wait for a bot response per turn. Sized for local dev, where the
+# bot transcribes with in-process whisper-base and the first audio frame blocks on
+# the model load; prod's HTTP Parakeet path is far faster. 90s was enough only
+# while the polls were accidentally counting the greeting and returning a turn
+# early — now that they wait for the actual reply, a slow local turn needs more.
+TURN_TIMEOUT = 120.0
+# The bot greets on join, so every session has one bot utterance before any turn.
+_GREETING_UTTERANCES = 1
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────
@@ -97,16 +104,31 @@ async def _send_message(room: rtc.Room, text: str) -> None:
     await room.local_participant.publish_data(payload.encode())
 
 
-async def _poll_utterances(session_id: str, min_count: int, timeout: float) -> list[dict]:
-    """Poll DB until at least min_count utterances exist for the session.
+async def _poll_utterances(
+    session_id: str, min_count: int, timeout: float, *, plus_greeting: bool = True
+) -> list[dict]:
+    """Poll DB until at least min_count turn utterances exist for the session.
 
     Returns all utterances ordered by ts asc, each as a plain dict with
     keys: id, speaker_id, role (participant|bot), text, reply_to, ts.
     Returns whatever has accumulated if timeout is reached.
+
+    ``min_count`` counts conversation turns. The bot also greets on join, which
+    is a stored utterance no caller's turn arithmetic includes, so the greeting
+    is added here rather than at the eighteen call sites. Without it every poll
+    returns one utterance early — usually still passing, because these tests
+    assert on content rather than length, but racing the final bot reply on
+    every single turn.
+
+    ``plus_greeting=False`` is for the one caller that is waiting for the
+    greeting itself and has therefore already counted it.
     """
     from db.engine import AsyncSessionLocal
     from db.models import Utterance, Speaker
     from sqlalchemy import select
+
+    if plus_greeting:
+        min_count += _GREETING_UTTERANCES
 
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
@@ -257,15 +279,24 @@ class TestMultiSpeakerE2E(unittest.IsolatedAsyncioTestCase):
                 u["speaker_id"], bot_identity,
                 f"Bot utterance attributed to wrong speaker: {u['speaker_id']}",
             )
-        # reply_to: first user utterance has none; first bot replies to first user
+        # The bot greets on join (bot.py on_first_participant_joined), so the
+        # conversation's root is that greeting, and the first *user* utterance
+        # replies to it. This assertion used to expect None — correct before the
+        # greeting existed, stale since.
+        greeting = bot_utts[0]
         self.assertIsNone(
-            user_utts[0]["reply_to"],
-            "First user utterance should have reply_to=None",
+            greeting["reply_to"],
+            "The greeting is spoken before anyone talks, so it has no parent",
         )
-        if bot_utts:
+        self.assertEqual(
+            user_utts[0]["reply_to"], greeting["id"],
+            "First user utterance should reply_to the bot's greeting",
+        )
+        replies = bot_utts[1:]
+        if replies:
             self.assertEqual(
-                bot_utts[0]["reply_to"], user_utts[0]["id"],
-                "First bot utterance should reply_to first user utterance",
+                replies[0]["reply_to"], user_utts[0]["id"],
+                "First bot reply should reply_to the first user utterance",
             )
 
     # -- test 10: greeting timing ---------------------------------------------
@@ -292,8 +323,11 @@ class TestMultiSpeakerE2E(unittest.IsolatedAsyncioTestCase):
         t_join = time.monotonic()
         rooms = await self._connect_users(room_name, [uid])
         try:
-            # First bot utterance == the greeting (no user message sent).
-            utts = await _poll_utterances(session_id, min_count=1, timeout=TURN_TIMEOUT)
+            # First bot utterance == the greeting (no user message sent), so this
+            # count already includes it — no turn is coming to make up the rest.
+            utts = await _poll_utterances(
+                session_id, min_count=1, timeout=TURN_TIMEOUT, plus_greeting=False
+            )
             bot_utts = [u for u in utts if u["role"] == "bot"]
             self.assertTrue(bot_utts, "Bot never greeted after the user joined")
             greet_secs = time.monotonic() - t_join
@@ -492,11 +526,17 @@ class TestMultiSpeakerE2E(unittest.IsolatedAsyncioTestCase):
         utt_index = {u["id"]: u for u in utts}
         bot_utts  = [u for u in utts if u["role"] == "bot"]
 
-        for bot_utt in bot_utts:
-            self.assertIsNotNone(
-                bot_utt["reply_to"],
-                f"Bot utterance {bot_utt['id'][:8]}… is missing reply_to",
-            )
+        # The greeting alone has no parent — it is spoken on join, before anyone
+        # has said anything. Exactly one: a second parentless bot utterance would
+        # be a genuine break in the chain, so this stays an equality, not a skip.
+        parentless = [u for u in bot_utts if u["reply_to"] is None]
+        self.assertEqual(
+            len(parentless), 1,
+            f"expected exactly one parentless bot utterance (the greeting), "
+            f"got {len(parentless)}",
+        )
+
+        for bot_utt in [u for u in bot_utts if u["reply_to"] is not None]:
             parent = utt_index.get(bot_utt["reply_to"])
             self.assertIsNotNone(
                 parent,
@@ -599,14 +639,29 @@ class TestMultiSpeakerE2E(unittest.IsolatedAsyncioTestCase):
             room_bob = rooms_bob[0]
             await asyncio.sleep(USER_JOIN_WAIT)
 
+            # KNOWN GAP — late-join data-channel delivery is unreliable.
+            # A participant who joins mid-session sometimes has their publish_data
+            # packet never reach the bot at all: on_data_received does not fire, so
+            # no utterance is written and no reply comes. Reproduced in isolation,
+            # roughly one run in two, on both this branch and main.
+            #
+            # These two polls are therefore left at the pre-greeting counts, which
+            # is exactly what main does — this test is no stricter here than it was.
+            # Making it greeting-aware like the rest of the file turns an existing
+            # intermittent failure into a more frequent one, which is not this
+            # change's job to absorb. Investigate the delivery gap on its own.
             await _send_message(room_bob, "Bob late: what is the boiling point of water?")
-            utts = await _poll_utterances(session_id, min_count=4, timeout=TURN_TIMEOUT)
+            utts = await _poll_utterances(
+                session_id, min_count=4, timeout=TURN_TIMEOUT, plus_greeting=False
+            )
             self.assertGreaterEqual(len(utts), 4, "No bot response to Bob")
             print(f"  Phase 2 done: {len(utts)} utterances", flush=True)
 
             # Phase 3: Alice speaks again after Bob joined
             await _send_message(room_alice, "Alice again: what is the tallest mountain?")
-            utts = await _poll_utterances(session_id, min_count=6, timeout=TURN_TIMEOUT)
+            utts = await _poll_utterances(
+                session_id, min_count=6, timeout=TURN_TIMEOUT, plus_greeting=False
+            )
             self.assertGreaterEqual(len(utts), 6, "No bot response to Alice (phase 3)")
             print(f"  Phase 3 done: {len(utts)} utterances", flush=True)
 
@@ -772,8 +827,15 @@ class TestMultiSpeakerE2E(unittest.IsolatedAsyncioTestCase):
             # timing.llm_ttft_ms is set by _LLMFirstTimer and reliably fires on
             # every turn. latency_ms from UserBotLatencyObserver is best-effort
             # (race with on_assistant_turn_stopped) so is not asserted here.
-            bot_db_utts = [u for u in db_utts if u.speaker_id == bot_identity]
-            self.assertGreaterEqual(len(bot_db_utts), 1, "Expected at least 1 bot utterance")
+            # The greeting is canned text pushed as a TTSSpeakFrame — it never goes
+            # through the LLM, so its llm_ttft_ms is a meaningless 0.0. Assert on
+            # actual generated replies, which are exactly the bot utterances that
+            # have a parent to reply to.
+            bot_db_utts = [
+                u for u in db_utts
+                if u.speaker_id == bot_identity and u.reply_to is not None
+            ]
+            self.assertGreaterEqual(len(bot_db_utts), 1, "Expected at least 1 bot reply")
             for u in bot_db_utts:
                 timing = u.meta.get("timing", {})
                 self.assertIn(
@@ -802,7 +864,8 @@ class TestMultiSpeakerE2E(unittest.IsolatedAsyncioTestCase):
         """reply_to forms a correct bidirectional chain across 2 full turns.
 
         Expected shape:
-          user_utt_1  (reply_to=None)         ← first utterance ever
+          greeting    (reply_to=None)         ← bot greets on join
+          user_utt_1  (reply_to=greeting.id)
           bot_utt_1   (reply_to=user_utt_1.id)
           user_utt_2  (reply_to=bot_utt_1.id) ← user "continues" the conversation
           bot_utt_2   (reply_to=user_utt_2.id)
@@ -836,15 +899,25 @@ class TestMultiSpeakerE2E(unittest.IsolatedAsyncioTestCase):
         bot_utts  = [u for u in utts if u["role"] == "bot"]
 
         self.assertGreaterEqual(len(user_utts), 2, "Need at least 2 user utterances")
-        self.assertGreaterEqual(len(bot_utts), 2, "Need at least 2 bot utterances")
+        # 3, not 2: the greeting is a bot utterance too, and it precedes both replies.
+        self.assertGreaterEqual(
+            len(bot_utts), 3, "Need the greeting plus 2 bot replies"
+        )
 
         u1, u2 = user_utts[0], user_utts[1]
-        b1, b2 = bot_utts[0], bot_utts[1]
+        greeting = bot_utts[0]
+        b1, b2 = bot_utts[1], bot_utts[2]
 
-        # First utterance has no prior bot to reply to
+        # The chain now starts at the greeting, which the bot speaks on join:
+        #   greeting (reply_to=None) → u1 → b1 → u2 → b2
         self.assertIsNone(
-            u1["reply_to"],
-            f"First user utterance reply_to should be None, got {u1['reply_to']!r}",
+            greeting["reply_to"],
+            f"Greeting reply_to should be None, got {greeting['reply_to']!r}",
+        )
+        self.assertEqual(
+            u1["reply_to"], greeting["id"],
+            f"user_utt_1.reply_to should be the greeting ({greeting['id'][:8]}…), "
+            f"got {u1['reply_to']!r}",
         )
         # Bot responds to the user turn that preceded it
         self.assertEqual(

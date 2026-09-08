@@ -117,6 +117,127 @@ Share links of the form `https://<ngrok-domain>/rooms/<roomName>`. Revert with:
 make revert-livekit-local && make start
 ```
 
+## Participant cap
+
+One room admits `MAX_PARTICIPANT_WORKERS` speech-recognition streams (default
+`6`). Past that, a **new** participant is refused: their audio is not
+transcribed, and the bot cannot hear them.
+
+Refusal is deliberate. On 2026-08-19 an eight-room ramp accepted everyone,
+exhausted recognition throughput and quietly went from 261 replies to 23 while
+the processor sat at 77% — nothing said no. A refusal is visible; silent
+degradation is not.
+
+- The cap applies to **admission only**. Someone already in the meeting keeps
+  their stream at the ceiling — throttling a healthy conversation to protect
+  capacity breaks the thing being protected.
+- A participant leaving **frees the slot**, even if their teardown raises.
+- Each refusal logs once per participant (WARNING → the event log at `/events`)
+  and increments `meetlab.participants_refused_total`.
+
+Override with the `MAX_PARTICIPANT_WORKERS` env var on `agent-runner`. It needs
+no deploy, so turning a room's ceiling down is the fastest lever during an
+incident. The default of 6 was sized from the 19 Aug ramp on a **t3.medium**;
+agent-runner has since moved to c6i.xlarge, so it is probably conservative —
+raise it behind a measurement, not a guess.
+
+## Known gaps and failure modes
+
+Things that are broken, misleading, or will bite you. Kept here rather than in a
+commit message because each one has already cost someone an afternoon.
+
+### Late joiners can be silently dropped
+
+A participant who joins **mid-session** sometimes has their data-channel message
+never reach the bot at all — `on_data_received` never fires, no utterance is
+written, and no reply comes. Reproduced in isolation roughly **one run in two**,
+on `main` as well as on feature branches. The token grants `can_publish_data`, so
+it is not a permissions problem.
+
+`test_06_late_join` covers this path and is intermittently red as a result. Its
+polls are deliberately left at pre-greeting counts so it is no stricter than it
+has always been — see the comment in the test. **Unfixed.** It matters for any
+session where people arrive at different times.
+
+### The local bind mounts serve stale code — this will waste your afternoon
+
+`agent-runner` and `meet` are both bind-mounted, but modifications to existing
+files do **not** reliably propagate into the containers. New files do; edits do
+not. A container will happily run a weeks-old copy of a file you just saved, and
+your tests will pass — or fail — against code that is not on your disk.
+
+Both have burned us in a single session:
+
+- `agent-runner` ran an **Aug 19** copy of a file edited that morning, so two
+  test runs reported results for code that no longer existed.
+- `meet` failed one concierge integration test (`bot remove rejects identity
+  mismatch`, returning a 404 page). Nothing was wrong with the code. After a
+  restart the suite was 15/15.
+
+**Restart the container after editing its source, before believing any result:**
+
+```bash
+docker compose -f .devcontainer/docker-compose.yml restart agent-runner
+docker compose -f .devcontainer/docker-compose.yml restart meet     # slower to be ready
+```
+
+If a result surprises you, verify the container is running your code:
+
+```bash
+# these must match
+md5 -q agent-runner/multi_speaker_stt.py
+docker compose -f .devcontainer/docker-compose.yml exec -T agent-runner \
+  md5sum /app/multi_speaker_stt.py
+```
+
+Note the trap: `docker compose exec -T agent-runner wc -l < file` redirects on the
+**host**, so it silently reads the host file and always appears to match. Pass
+the path as an argument instead of redirecting.
+
+The rule of thumb: **a surprising local test result is a stale container until
+proven otherwise.** Restart and re-run before debugging the code.
+
+### `make benchmark` reports OK while measuring nothing
+
+Locally every stage comes back `None`/`0ms` and the run still exits `OK`:
+
+```
+LLM TTFT    10    0ms    0ms    0ms    0ms
+```
+
+Verified against a clean `main`, so it is not a regression from any current
+branch — but the `BENCHMARK_SAMPLES=10` minimum in `docs/performance-tests.md` is
+currently measuring nothing on local dev. Do not read local benchmark output as
+evidence. **Unfixed.**
+
+### The bot greets first, and utterance counts must allow for it
+
+`on_first_participant_joined` speaks `bot_config.greeting`, which is stored as a
+bot utterance. Consequences that have already produced false test results:
+
+- The conversation's root is the **greeting**, so the first *user* utterance has
+  `reply_to` set, not `None`.
+- The greeting is the one bot utterance with `reply_to=None`.
+- It is canned `TTSSpeakFrame` text that never goes through the LLM, so its
+  `llm_ttft_ms` is a meaningless `0.0`. Assert timing on generated replies only.
+- Any "N turns → 2N utterances" arithmetic is off by one. In the e2e suite
+  `_poll_utterances` adds the greeting centrally; `plus_greeting=False` opts out
+  for callers waiting on the greeting itself.
+
+Four assertions in `test_multi_speaker_e2e.py` predated the greeting and were
+failing on `main` for this reason alone, while the off-by-one poll counts let
+other tests pass without ever waiting for the bot's reply.
+
+### The worker-architecture rewrite is landed but dormant
+
+`participant_pool.py`, `participant_router.py`, `responder_context.py` and
+`listener_factory.py` are tested and **unwired** — nothing calls them. Only
+`participant_workers.py` is live, via the participant cap above. Wiring the rest
+means transplanting `bot.py` (~1349 lines) onto Pipecat's worker/bus model and
+re-homing the interruption path from PR #72/#73, which ~1563 lines of tests
+currently pin to `MultiSpeakerSTT`. That is a separate PR with its own 1/3/5/8
+ramp — do not treat these files as load-bearing.
+
 ## Known constraints
 
 - All room/bot state in `meet` is in-memory — a restart clears everything. Sessions in flight are stranded.

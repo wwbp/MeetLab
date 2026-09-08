@@ -20,6 +20,7 @@ Everything here is pure. The shell that owns real workers reads these decisions
 and acts on them, so the policy can be tested exhaustively without a bus, a
 transport, or a second of audio.
 """
+import os
 from dataclasses import dataclass
 
 # How many participants one runner will carry before refusing new ones.
@@ -32,7 +33,10 @@ from dataclasses import dataclass
 #
 # Deliberately conservative. Raising it is a decision that should follow a
 # measurement, and lowering it is the fastest lever if a room starts to struggle.
-MAX_PARTICIPANT_WORKERS = 6
+# Env-overridable precisely because it is the fastest lever: turning a room's
+# ceiling down during an incident should not require a deploy, and the right
+# number is a property of the instance size, which changes without this file.
+MAX_PARTICIPANT_WORKERS = int(os.getenv("MAX_PARTICIPANT_WORKERS", "6"))
 
 
 @dataclass(frozen=True)

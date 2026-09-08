@@ -16,6 +16,7 @@ type BotConfig = {
   stt_delay: string | null;
   auto_record: boolean;
   session_limit_minutes: number;
+  closing_message: string;
 };
 
 const EMPTY_CONFIG: Omit<BotConfig, 'scope'> = {
@@ -31,6 +32,7 @@ const EMPTY_CONFIG: Omit<BotConfig, 'scope'> = {
   stt_delay: null,
   auto_record: false,
   session_limit_minutes: 0,
+  closing_message: '',
 };
 
 const STT_MODELS = [
@@ -88,6 +90,7 @@ export default function ConfigPage() {
         stt_delay: data.stt_delay ?? null,
         auto_record: data.auto_record ?? false,
         session_limit_minutes: data.session_limit_minutes ?? 0,
+        closing_message: data.closing_message ?? '',
       });
     } catch {
       setError('Network error loading config');
@@ -329,6 +332,21 @@ export default function ConfigPage() {
               the bot starts) and is shared by everyone in the room. Participants see a timer, a
               warning three quarters of the way through, and a final reminder near the end. The
               limit is advisory — nobody is disconnected.
+            </p>
+            <Field label="Closing message">
+              <textarea
+                value={form.closing_message}
+                onChange={(e) => setForm((f) => ({ ...f, closing_message: e.target.value }))}
+                rows={3}
+                className={inp}
+                required
+              />
+            </Field>
+            <p className="text-muted-foreground text-xs">
+              Spoken once when the limit runs out, waiting for a gap in the conversation so it is
+              not interrupted away. Only ever said when a limit is set above. Mention the
+              completion code — the participant sees it on screen after they leave, and pastes it
+              into the study survey.
             </p>
           </Section>
 

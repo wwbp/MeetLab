@@ -8,6 +8,8 @@ import { AccessToken, AccessTokenOptions, VideoGrant } from 'livekit-server-sdk'
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerConfig, requireEnv } from '@/lib/config/server';
 import { noteRouteError } from '@/lib/concierge/event-log';
+import { completionCode } from '@/lib/completion-code';
+import { normalizeProlificId } from '@/lib/study';
 
 const COOKIE_KEY = 'random-participant-postfix';
 
@@ -118,6 +120,14 @@ export async function GET(request: NextRequest) {
       participantToken,
       participantName,
       sessionLimitSeconds,
+      // Keyed on the Prolific ID where there is one, so a researcher can recompute
+      // a participant's code from their Prolific export. Falls back to the display
+      // name so a room outside a study still gets a working code.
+      completionCode: completionCode(
+        roomName,
+        normalizeProlificId(metadata) ?? metadata ?? participantName,
+        apiSecret,
+      ),
     };
     return new NextResponse(JSON.stringify(data), {
       headers: {

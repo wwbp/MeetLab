@@ -13,6 +13,8 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
+from study_support import CLOSING_MESSAGE
+
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
@@ -203,6 +205,14 @@ class BotConfig(Base):
     # the browser counts down and warns; nobody is disconnected.
     session_limit_minutes: Mapped[int] = mapped_column(
         BigInteger, default=0, server_default="0", nullable=False
+    )
+    # Spoken once, when session_limit_minutes elapses, to tell the participant the
+    # study is over and what to do next. Only reached when a limit is set.
+    closing_message: Mapped[str] = mapped_column(
+        Text,
+        default=CLOSING_MESSAGE,
+        server_default=CLOSING_MESSAGE,
+        nullable=False,
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_now, onupdate=_now

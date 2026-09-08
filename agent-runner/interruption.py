@@ -199,6 +199,14 @@ class InterruptionTracker:
             self._overlap_start = None
         self._bot_audio_on = False
 
+    def idle(self, t: float) -> bool:
+        """Nobody is talking — not the bot, not a participant.
+
+        The one moment it is safe to say something unprompted, since anything the
+        bot starts while a participant is mid-sentence gets interrupted away.
+        """
+        return not self._bot_audio_on and self._current_speaker(t) is None
+
     def assistant_turn_stopped(self, t: float) -> None:
         """The bot's whole response is finished — anything after this is normal."""
         self._response_open = False

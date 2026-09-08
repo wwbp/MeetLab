@@ -30,6 +30,7 @@ import {
 import { useRouter } from 'next/navigation';
 import { useSetupE2EE } from '@/lib/useSetupE2EE';
 import { useLowCPUOptimizer } from '@/lib/usePerfomanceOptimiser';
+import { normalizeProlificId, prolificIdFromParams } from '@/lib/study';
 
 const CONN_DETAILS_ENDPOINT =
   process.env.NEXT_PUBLIC_CONN_DETAILS_ENDPOINT ?? '/api/connection-details';
@@ -117,29 +118,78 @@ export function PageClientImpl(props: {
     setConferenceKey((k) => k + 1);
   }, []);
 
-  const handlePreJoinSubmit = React.useCallback(async (values: LocalUserChoices) => {
-    setPreJoinChoices(values);
-    const url = new URL(CONN_DETAILS_ENDPOINT, window.location.origin);
-    url.searchParams.append('roomName', props.roomName);
-    url.searchParams.append('participantName', values.username);
-    if (props.region) {
-      url.searchParams.append('region', props.region);
-    }
-    const connectionDetailsResp = await fetch(url.toString());
-    const connectionDetailsData = await connectionDetailsResp.json();
-    setConnectionDetails(connectionDetailsData);
-  }, []);
+  // Prolific hands the participant over with ?PROLIFIC_PID=... in the URL. That
+  // parameter goes missing often enough — bookmarks, refreshes, extensions that
+  // strip query strings — that the field is prefilled but still editable, and
+  // required either way: a session with no ID cannot be paid.
+  const [prolificId, setProlificId] = React.useState(() =>
+    typeof window === 'undefined'
+      ? ''
+      : prolificIdFromParams(new URLSearchParams(window.location.search)),
+  );
+  const validProlificId = normalizeProlificId(prolificId);
+
+  const handlePreJoinSubmit = React.useCallback(
+    async (values: LocalUserChoices) => {
+      setPreJoinChoices(values);
+      const url = new URL(CONN_DETAILS_ENDPOINT, window.location.origin);
+      url.searchParams.append('roomName', props.roomName);
+      url.searchParams.append('participantName', values.username);
+      // Rides along as LiveKit participant metadata, which the bot reads off the
+      // token and stores on the speaker row.
+      if (validProlificId) {
+        url.searchParams.append('metadata', validProlificId);
+      }
+      if (props.region) {
+        url.searchParams.append('region', props.region);
+      }
+      const connectionDetailsResp = await fetch(url.toString());
+      const connectionDetailsData = await connectionDetailsResp.json();
+      setConnectionDetails(connectionDetailsData);
+    },
+    [props.roomName, props.region, validProlificId],
+  );
   const handlePreJoinError = React.useCallback((e: any) => console.error(e), []);
 
   return (
     <main data-lk-theme="default" style={{ height: '100%' }}>
       {connectionDetails === undefined || preJoinChoices === undefined ? (
         <div style={{ display: 'grid', placeItems: 'center', height: '100%' }}>
-          <PreJoin
-            defaults={preJoinDefaults}
-            onSubmit={handlePreJoinSubmit}
-            onError={handlePreJoinError}
-          />
+          <div style={{ display: 'grid', gap: '0.75rem', justifyItems: 'stretch' }}>
+            <div style={{ display: 'grid', gap: '0.25rem' }}>
+              <label htmlFor="prolific-id" style={{ fontSize: '0.875rem' }}>
+                Prolific ID
+              </label>
+              <input
+                id="prolific-id"
+                className="lk-form-control"
+                value={prolificId}
+                onChange={(e) => setProlificId(e.target.value)}
+                placeholder="24-character Prolific ID"
+                autoComplete="off"
+                spellCheck={false}
+                aria-describedby="prolific-id-help"
+                aria-invalid={prolificId.length > 0 && !validProlificId}
+              />
+              <span
+                id="prolific-id-help"
+                style={{
+                  fontSize: '0.75rem',
+                  color: prolificId.length > 0 && !validProlificId ? '#fbbf24' : 'var(--lk-fg2)',
+                }}
+              >
+                {prolificId.length > 0 && !validProlificId
+                  ? "That doesn't look like a Prolific ID — it should be 24 letters and numbers."
+                  : 'Copied from Prolific. Needed to pay you for this session.'}
+              </span>
+            </div>
+            <PreJoin
+              defaults={preJoinDefaults}
+              onSubmit={handlePreJoinSubmit}
+              onValidate={(values) => values.username.trim().length > 0 && !!validProlificId}
+              onError={handlePreJoinError}
+            />
+          </div>
         </div>
       ) : (
         <VideoConferenceComponent
@@ -279,10 +329,13 @@ function VideoConferenceComponent(props: {
   const lowPowerMode = useLowCPUOptimizer(room);
 
   const router = useRouter();
+  const [hasLeft, setHasLeft] = React.useState(false);
   const handleOnLeave = React.useCallback(() => {
-    // Defer navigation one tick so LiveKit can finish internal layout teardown.
-    window.setTimeout(() => router.push('/'), 0);
-  }, [router]);
+    // Defer one tick so LiveKit can finish internal layout teardown. Used to push
+    // straight to the landing page; a study participant needs their completion
+    // code first, and this is the only moment they are guaranteed to see it.
+    window.setTimeout(() => setHasLeft(true), 0);
+  }, []);
   const handleError = React.useCallback((error: Error) => {
     console.error(error);
     alert(`Encountered an unexpected error, check the console logs for details: ${error.message}`);
@@ -299,6 +352,15 @@ function VideoConferenceComponent(props: {
       console.warn('Low power mode enabled');
     }
   }, [lowPowerMode]);
+
+  if (hasLeft) {
+    return (
+      <CompletionScreen
+        code={props.connectionDetails.completionCode}
+        onDone={() => router.push('/')}
+      />
+    );
+  }
 
   return (
     <div className="lk-room-container">
@@ -333,5 +395,56 @@ function VideoConferenceComponent(props: {
         <SessionTimer room={room} limitSeconds={props.connectionDetails.sessionLimitSeconds ?? 0} />
       </RoomContext.Provider>
     </div>
+  );
+}
+
+/**
+ * What a participant sees after leaving. The code is the only thing on it,
+ * because the only thing they have to do is paste it into the survey — the bot
+ * says as much on its way out (bot_config.closing_message).
+ */
+function CompletionScreen(props: { code: string; onDone: () => void }) {
+  const [copied, setCopied] = React.useState(false);
+  const copy = React.useCallback(() => {
+    // Clipboard access is denied in some embedded contexts; the code is on screen
+    // either way, so a failure just means they type it.
+    navigator.clipboard?.writeText(props.code).then(
+      () => setCopied(true),
+      () => setCopied(false),
+    );
+  }, [props.code]);
+
+  return (
+    <main
+      data-lk-theme="default"
+      style={{ display: 'grid', placeItems: 'center', height: '100%', padding: '1rem' }}
+    >
+      <div style={{ display: 'grid', gap: '1rem', justifyItems: 'center', maxWidth: '32rem' }}>
+        <h2 style={{ margin: 0 }}>Thanks for taking part</h2>
+        <p style={{ margin: 0, textAlign: 'center', color: 'var(--lk-fg2)' }}>
+          Copy this completion code into the survey to finish the study.
+        </p>
+        <code
+          style={{
+            fontSize: '2rem',
+            letterSpacing: '0.25em',
+            padding: '0.75rem 1.25rem',
+            borderRadius: 8,
+            background: 'var(--lk-bg2)',
+            userSelect: 'all',
+          }}
+        >
+          {props.code}
+        </code>
+        <div style={{ display: 'flex', gap: '0.5rem' }}>
+          <button className="lk-button" onClick={copy}>
+            {copied ? 'Copied' : 'Copy code'}
+          </button>
+          <button className="lk-button" onClick={props.onDone}>
+            Done
+          </button>
+        </div>
+      </div>
+    </main>
   );
 }

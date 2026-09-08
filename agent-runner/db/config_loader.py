@@ -4,6 +4,7 @@ from sqlalchemy import select
 
 from db.engine import AsyncSessionLocal
 from db.models import BotConfig
+from study_support import CLOSING_MESSAGE
 
 
 @dataclass
@@ -28,6 +29,8 @@ class EffectiveBotConfig:
     # Second half of the turn-end window (see stt_endpointing_ms above). Defaulted
     # so callers predating the field keep the calibrated behaviour.
     user_speech_timeout_ms: int = 300
+    # Spoken when the session limit elapses. Only used when a limit is set.
+    closing_message: str = CLOSING_MESSAGE
 
 
 async def load_bot_config(room_name: str | None = None) -> EffectiveBotConfig:
@@ -70,6 +73,7 @@ async def load_bot_config(room_name: str | None = None) -> EffectiveBotConfig:
                 user_speech_timeout_ms=300,
                 auto_record=False,
                 session_limit_minutes=0,
+                closing_message=CLOSING_MESSAGE,
             )
 
         return EffectiveBotConfig(
@@ -86,4 +90,5 @@ async def load_bot_config(room_name: str | None = None) -> EffectiveBotConfig:
             user_speech_timeout_ms=int(getattr(row, "user_speech_timeout_ms", 300) or 300),
             auto_record=bool(getattr(row, "auto_record", False)),
             session_limit_minutes=int(getattr(row, "session_limit_minutes", 0) or 0),
+            closing_message=getattr(row, "closing_message", None) or CLOSING_MESSAGE,
         )

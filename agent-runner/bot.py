@@ -53,6 +53,7 @@ from db.config_loader import load_bot_config
 from db.engine import AsyncSessionLocal
 from db.models import Conversation, MediaFile, Speaker, Utterance
 from interruption import InterruptionTracker
+from study_support import closing_due, prolific_id
 from multi_speaker_stt import MultiSpeakerSTT, SpeakerLabelInjector
 from speech_onset_vad import build_speech_onset_silero
 from runner_types import LiveKitRunnerArguments
@@ -112,6 +113,11 @@ _STT_SPIKE_THRESHOLD_MS = float(os.getenv("STT_SPIKE_THRESHOLD_MS", "2000"))
 _SELF_ECHO_SIMILARITY = float(os.getenv("STT_SELF_ECHO_SIMILARITY", "0.65"))
 # How many recent bot utterances to compare incoming user transcripts against.
 _RECENT_BOT_TEXT_WINDOW = 5
+
+# How long the closing message waits for a gap in the conversation before saying
+# itself anyway. Long enough to outlast a normal turn, short enough that the
+# participant hears it before they wander off.
+_CLOSING_QUIET_WAIT_S = 20
 
 _WORD_RE = re.compile(r"[a-z0-9]+")
 
@@ -988,6 +994,35 @@ async def bot(runner_args: LiveKitRunnerArguments):
         except Exception as e:
             logger.warning(f"Avatar publish failed (non-fatal): {e}")
 
+    async def _announce_close(joined_at: float) -> None:
+        """Tell the participant the session is over, once, when time runs out.
+
+        bot_config.session_limit_minutes has existed since July but only the
+        browser ever read it (meet/lib/SessionTimer.tsx): the countdown hit zero
+        and the bot carried on as if nothing had happened. A paid study needs the
+        opposite — the participant has to know the session ended and that they
+        must copy their completion code into the survey, or the run is unpaid
+        work.
+
+        Polls rather than sleeping once so the decision stays in the tested pure
+        function, matching how the browser derives the same deadline.
+        """
+        while not closing_due(
+            joined_at=joined_at,
+            now=time.monotonic(),
+            limit_minutes=bot_config.session_limit_minutes,
+        ):
+            await asyncio.sleep(1)
+        # Speak into a gap: anything started while someone is mid-sentence gets
+        # interrupted away by design (see interruption.py). Bounded, because a
+        # participant who never stops talking still has to hear the instructions.
+        for _ in range(_CLOSING_QUIET_WAIT_S):
+            if interruptions.idle(time.monotonic()):
+                break
+            await asyncio.sleep(1)
+        logger.info("Session limit reached — speaking the closing message")
+        await task.queue_frame(TTSSpeakFrame(bot_config.closing_message))
+
     @transport.event_handler("on_participant_connected")
     async def on_participant_connected(transport, participant_id: str):
         room = transport._client.room
@@ -999,15 +1034,35 @@ async def bot(runner_args: LiveKitRunnerArguments):
         _sid_to_identity[participant_id] = identity
         _sid_to_name[participant_id] = p.name or identity.split("__")[0]
         logger.info(f"Participant connected: {identity} (sid={participant_id})")
+        meta = {
+            "role": "participant",
+            "display_name": _sid_to_name[participant_id],
+        }
+        # The Prolific ID rides in on the participant's token metadata, set by
+        # /api/connection-details from the pre-join form. It is what a paid study
+        # matches and pays a session on, so it is stored on the speaker rather
+        # than left in a JWT nobody keeps.
+        raw = (getattr(p, "metadata", "") or "").strip()
+        pid = prolific_id(raw)
+        if pid:
+            meta["prolific_id"] = pid
+        elif raw:
+            # The form validates before joining, so this means a bypassed or stale
+            # client. Keep what they typed anyway — an unmatched session is a
+            # participant who worked and cannot be paid.
+            meta["prolific_id_invalid"] = raw[:200]
+        stmt = pg_insert(Speaker).values(id=identity, meta=meta)
         async with AsyncSessionLocal() as db:
             async with db.begin():
                 await db.execute(
-                    pg_insert(Speaker)
-                    .values(id=identity, meta={
-                        "role": "participant",
-                        "display_name": _sid_to_name[participant_id],
-                    })
-                    .on_conflict_do_nothing(index_elements=["id"])
+                    stmt.on_conflict_do_update(
+                        index_elements=["id"],
+                        # Merge rather than replace: the row may already exist from
+                        # the late-identity recovery path in resolve_speaker_identity,
+                        # and a reconnect without the URL parameter must not erase an
+                        # ID captured on the first join.
+                        set_={"meta": Speaker.meta + stmt.excluded.meta},
+                    )
                 )
 
     @transport.event_handler("on_active_speaker_changed")
@@ -1066,6 +1121,10 @@ async def bot(runner_args: LiveKitRunnerArguments):
             rec_task.add_done_callback(_bg_tasks.discard)
         await asyncio.sleep(1)
         await task.queue_frame(TTSSpeakFrame(bot_config.greeting))
+        if bot_config.session_limit_minutes > 0:
+            close_task = asyncio.create_task(_announce_close(time.monotonic()))
+            _bg_tasks.add(close_task)
+            close_task.add_done_callback(_bg_tasks.discard)
 
     @transport.event_handler("on_data_received")
     async def on_data_received(transport, data, participant_id):

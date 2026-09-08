@@ -252,6 +252,7 @@ class BotConfigAdmin(ModelView, model=BotConfig):
         BotConfig.tts_voice,
         BotConfig.stt_endpointing_ms,
         BotConfig.user_speech_timeout_ms,
+        BotConfig.session_limit_minutes,
         BotConfig.updated_at,
     ]
     form_overrides = {
@@ -608,6 +609,7 @@ async def get_config(room: str | None = None, _=Depends(verify_api_key)):
         "user_speech_timeout_ms": cfg.user_speech_timeout_ms,
         "auto_record": cfg.auto_record,
         "session_limit_minutes": cfg.session_limit_minutes,
+        "closing_message": cfg.closing_message,
     }
 
 
@@ -711,6 +713,10 @@ async def update_config(request: Request, _=Depends(verify_api_key)):
                 status_code=400,
             )
         fields["session_limit_minutes"] = v
+    if "closing_message" in body:
+        if not isinstance(body["closing_message"], str):
+            return JSONResponse({"error": "closing_message must be a string"}, status_code=400)
+        fields["closing_message"] = body["closing_message"]
 
     async with AsyncSessionLocal() as session:
         async with session.begin():
@@ -740,6 +746,7 @@ async def update_config(request: Request, _=Depends(verify_api_key)):
         "user_speech_timeout_ms": cfg.user_speech_timeout_ms,
         "auto_record": cfg.auto_record,
         "session_limit_minutes": cfg.session_limit_minutes,
+        "closing_message": cfg.closing_message,
     }
 
 

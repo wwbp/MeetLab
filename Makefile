@@ -50,6 +50,7 @@ test-unit:
 	$(COMPOSE) exec -T agent-runner uv run alembic upgrade head
 	$(COMPOSE) exec -T agent-runner uv run python -m unittest discover -s tests -p "test_*.py" -v
 	$(COMPOSE) exec -T meet pnpm test
+	$(COMPOSE) exec -T meet pnpm lint
 
 test-integration:
 	$(COMPOSE) up -d transport-server agent-runner meet

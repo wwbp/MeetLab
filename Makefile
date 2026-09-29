@@ -26,6 +26,14 @@ start: up migrate
 
 stop: down
 
+# Documentation uses an isolated uv environment, independently of Docker.
+.PHONY: docs docs-build
+docs:
+	uv run --no-project --with-requirements requirements-docs.txt mkdocs serve
+
+docs-build:
+	uv run --no-project --with-requirements requirements-docs.txt mkdocs build --strict
+
 migrate:
 	$(COMPOSE) exec -T agent-runner uv run alembic upgrade head
 
@@ -42,6 +50,7 @@ test-unit:
 	$(COMPOSE) exec -T agent-runner uv run alembic upgrade head
 	$(COMPOSE) exec -T agent-runner uv run python -m unittest discover -s tests -p "test_*.py" -v
 	$(COMPOSE) exec -T meet pnpm test
+	$(COMPOSE) exec -T meet pnpm lint
 
 test-integration:
 	$(COMPOSE) up -d transport-server agent-runner meet

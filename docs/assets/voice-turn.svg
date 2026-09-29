@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 130" role="img" aria-labelledby="title desc">
+  <title id="title">A spoken response</title>
+  <desc id="desc">Speech flows through speech recognition, a language model, and speech synthesis.</desc>
+  <defs>
+    <marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+      <path d="M0 0L8 4L0 8Z" fill="#0f766e"/>
+    </marker>
+  </defs>
+  <rect width="720" height="130" rx="12" fill="#f0fdfa"/>
+  <g fill="#fff" stroke="#0f766e" stroke-width="2">
+    <rect x="20" y="35" width="140" height="60" rx="8"/>
+    <rect x="200" y="35" width="140" height="60" rx="8"/>
+    <rect x="380" y="35" width="140" height="60" rx="8"/>
+    <rect x="560" y="35" width="140" height="60" rx="8"/>
+  </g>
+  <g stroke="#0f766e" stroke-width="2" marker-end="url(#arrow)">
+    <path d="M160 65H194"/>
+    <path d="M340 65H374"/>
+    <path d="M520 65H554"/>
+  </g>
+  <g fill="#134e4a" font-family="system-ui, sans-serif" font-size="18" text-anchor="middle">
+    <text x="90" y="72">Speech</text>
+    <text x="270" y="72">STT</text>
+    <text x="450" y="72">LLM</text>
+    <text x="630" y="72">TTS</text>
+  </g>
+</svg>

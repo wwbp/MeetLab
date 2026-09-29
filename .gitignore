@@ -5,6 +5,9 @@ Thumbs.db
 # Logs
 *.log
 
+# Built documentation
+/site/
+
 # Recordings written by egress container
 recordings/
 

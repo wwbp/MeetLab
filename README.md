@@ -2,6 +2,16 @@
 
 A self-hosted conferencing and voice agent stack. One `make start` brings up a LiveKit media server, a FastAPI bot runner, and a Next.js app covering the conference UI, voice agent UI, and operator console — all in Docker.
 
+## Learn the repository
+
+Start with the [architecture guide](docs/architecture.md) for system diagrams,
+runtime flows, infrastructure, data, and design choices. With
+[uv](https://docs.astral.sh/uv/getting-started/installation/) installed, run
+`make docs` and open <http://127.0.0.1:8000> for the searchable documentation site.
+It supports Mermaid, SVG/PNG figures, and LaTeX math; see
+[writing diagrams](docs/writing-diagrams.md). `make docs-build` checks the site
+and writes static HTML to `site/`.
+
 ## Services
 
 | Service | Port | Role |

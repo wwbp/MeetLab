@@ -59,6 +59,11 @@ When the participant leaves, the room is replaced by a screen showing their
 **completion code** — eight characters, with a copy button. That is the string
 they paste into the survey.
 
+That screen only appears if they press **Leave**. Closing the tab or window
+mid-call would skip it, so while they are in the call the browser asks
+"Leave site?" first. The wording is the browser's own and cannot be changed;
+pressing Leave in the call switches the prompt off.
+
 The code is derived, not stored: `HMAC-SHA256(LIVEKIT_API_SECRET, "<room>:<prolific id>")`,
 rendered in an alphabet with no `O`/`0` or `I`/`1` because those are the
 characters people get wrong when retyping. So:

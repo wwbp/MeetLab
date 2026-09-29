@@ -3,7 +3,7 @@
 **Status:** investigation complete, no fixes applied yet.
 **Prod version during pilot:** `a4e24bb` (deployed 2026-07-29 21:38 UTC) — still live.
 **Author's note:** every number below is pulled from prod (Grafana Cloud Prometheus, CloudWatch
-Logs, and the `meetlab` RDS Postgres). Queries are listed in [Appendix A](#appendix-a--how-to-reproduce)
+Logs, and the `meetlab` RDS Postgres). Queries are listed in [Appendix A](#appendix-a-how-to-reproduce)
 so anyone can re-run them.
 
 ---
@@ -105,7 +105,7 @@ class LLMUserAggregatorParams:
     vad_analyzer: VADAnalyzer | None = None
 ```
 
-And in [`agent-runner/bot.py:418-421`](../agent-runner/bot.py#L418-L421) we construct the aggregator
+And in [`agent-runner/bot.py:418-421`](https://github.com/wwbp/MeetLab/blob/main/agent-runner/bot.py#L418-L421) we construct the aggregator
 with **no VAD and no timeout override**:
 
 ```python
@@ -139,7 +139,7 @@ The bot is fastest with the people who say the least. That is the "lagging" comp
 ### The real setting
 
 The per-participant VAD is built from `stt_endpointing_ms`
-([`bot.py:158-160`](../agent-runner/bot.py#L158-L160)):
+([`bot.py:158-160`](https://github.com/wwbp/MeetLab/blob/main/agent-runner/bot.py#L158-L160)):
 
 ```python
 endpointing_ms = getattr(bot_config, "stt_endpointing_ms", 200) or 200
@@ -164,7 +164,7 @@ Average 2.1 fragments per turn; **worst single turn was split into 31 fragments*
 
 `bot_config.vad_stop_secs` is set to **0.1** on all 42 config rows — someone was clearly trying to
 tune responsiveness. It has **no effect whatsoever**. Its only appearance in the pipeline is inside
-a log string ([`bot.py:346`](../agent-runner/bot.py#L346)):
+a log string ([`bot.py:346`](https://github.com/wwbp/MeetLab/blob/main/agent-runner/bot.py#L346)):
 
 ```python
 f"model={bot_config.llm_model} voice={bot_config.tts_voice} vad={bot_config.vad_stop_secs}s"
@@ -240,7 +240,7 @@ Auto-record is on (`auto_record=true` on every config), so **every session shoul
 | 2026-08-05 | 3 | **0** |
 
 The pilot ran many meetings at once and blew LiveKit's concurrent-egress quota. `_auto_record`
-([`bot.py:831-839`](../agent-runner/bot.py#L831-L839)) logs the failure and **gives up permanently** —
+([`bot.py:831-839`](https://github.com/wwbp/MeetLab/blob/main/agent-runner/bot.py#L831-L839)) logs the failure and **gives up permanently** —
 one attempt, no backoff, no retry when a slot frees. Nobody is told; the meeting proceeds and the
 video is simply gone.
 
@@ -249,7 +249,7 @@ Only composite *video* egress fails — which is exactly "no video available."
 
 ### Cause B — the egress webhook has never fired, in the entire history of the service
 
-`_handle_egress_event` ([`runner.py:443-484`](../agent-runner/runner.py#L443-L484)) is supposed to
+`_handle_egress_event` ([`runner.py:443-484`](https://github.com/wwbp/MeetLab/blob/main/agent-runner/runner.py#L443-L484)) is supposed to
 flip a recording from `pending` → `available` when LiveKit reports egress finished.
 
 **Count of `egress_ended` / `egress_updated` events ever received in prod: `0`.**
@@ -308,11 +308,11 @@ bot:bot:912 - Bot session 0b5b2647… ended (completed) — interruptions=6 talk
 ### Why it never yields
 
 - **`allow_interruptions` is set in exactly zero files** in the repo.
-- `LiveKitParams` ([`bot.py:332-336`](../agent-runner/bot.py#L332-L336)) is constructed with **no
+- `LiveKitParams` ([`bot.py:332-336`](https://github.com/wwbp/MeetLab/blob/main/agent-runner/bot.py#L332-L336)) is constructed with **no
   `vad_analyzer`**, so the transport never emits the speech-start signal Pipecat's built-in
   interruption path depends on.
 - `InterruptionTracker` is wired to an *observer* — it counts and emits metrics
-  ([`interruption.py:36-52`](../agent-runner/interruption.py#L36-L52)) and pushes nothing back into
+  ([`interruption.py:36-52`](https://github.com/wwbp/MeetLab/blob/main/agent-runner/interruption.py#L36-L52)) and pushes nothing back into
   the pipeline.
 
 We built the instrument and skipped the mechanism. The dashboard has been faithfully reporting a

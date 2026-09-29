@@ -37,7 +37,7 @@ sidecar, and the standard NVIDIA deployment to move to.
 > research/testing, 1 GPU), so **no AI Enterprise eval/license is needed now**. The boundary is
 > *use type*, not capacity — **revisit and start the free 90-day AI Enterprise eval (then
 > ~$4,500/GPU/yr) if** the deployment becomes genuine production (real external end-users at scale)
-> or grows beyond the Developer Program terms. See [reference: NIM licensing](../infra/stt-nim/README.md).
+> or grows beyond the Developer Program terms. See [reference: NIM licensing](https://github.com/wwbp/MeetLab/blob/main/infra/stt-nim/README.md).
 
 ## Why not just keep Shadowfita
 
@@ -79,7 +79,7 @@ The current `meetlab-stt-gpu` is a **T4 (CC 7.5) → unsupported**. Chosen targe
 - **NGC API key** ("NGC Catalog" scope) → GitHub secret `NGC_API_KEY` (prod use is governed by
   NVIDIA AI Enterprise licensing — confirm before relying on it).
 - Terraform state backend (S3 + DynamoDB), repo vars for VPC/subnet/SG/zone, and expanded OIDC role
-  perms — see [infra/stt-nim/README.md](../infra/stt-nim/README.md).
+  perms — see [infra/stt-nim/README.md](https://github.com/wwbp/MeetLab/blob/main/infra/stt-nim/README.md).
 
 ### Deploy (as-code — not hand-CLI)
 Provisioning and the container both live in the repo and roll out via GitHub Actions:
@@ -138,7 +138,7 @@ The migration is done; kept as a record of the sequence used (prod never pointed
 wasn't up yet):
 
 1. **Prereqs** (one-time): `NGC_API_KEY` secret, TF state backend, repo vars, OIDC role perms,
-   licensing — see [infra/stt-nim/README.md](../infra/stt-nim/README.md). ✓
+   licensing — see [infra/stt-nim/README.md](https://github.com/wwbp/MeetLab/blob/main/infra/stt-nim/README.md). ✓
 2. **Stood up the NIM:** Actions → **Deploy STT NIM** → `plan` → `apply`; SSM health reported ready. ✓
 3. **Benchmarked** (from inside the VPC): `make bench-stt-concurrency STT_URL=http://<nim>:9000` —
    ~22× vs the serialized baseline, errors=0 (Experiment 7). ✓

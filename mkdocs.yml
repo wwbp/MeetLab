@@ -1,0 +1,53 @@
+site_name: MeetLab
+site_description: Learn the system, follow a meeting, and understand the design choices.
+repo_url: https://github.com/wwbp/MeetLab
+edit_uri: edit/main/docs/
+
+theme:
+  name: material
+  font: false
+  features:
+    - navigation.sections
+    - navigation.top
+    - content.code.copy
+  palette:
+    primary: teal
+    accent: teal
+
+nav:
+  - Start here: index.md
+  - Architecture: architecture.md
+  - Writing diagrams: writing-diagrams.md
+  - Using MeetLab:
+      - Use cases: use-cases.md
+      - Study support: study-support.md
+      - Session limits: session-limits.md
+      - Events and errors: event-log.md
+  - Testing and operations:
+      - Performance tests: performance-tests.md
+      - Meeting simulations: meeting-simulations.md
+      - Parakeet soak tests: test-plan-parakeet-soak.md
+  - Historical investigations:
+      - Latency experiments: latency-experiments.md
+      - GPU deployment: gpu-stt-deployment.md
+      - Scale readiness: scale-readiness-plan.md
+      - Pilot postmortem: pilot-postmortem-2026-08.md
+      - Distillation audit: distillation-audit.md
+
+exclude_docs: |
+  team-update-2026-06-11.md
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.arithmatex:
+      generic: true
+
+extra_javascript:
+  - javascripts/mathjax.js
+  - https://cdn.jsdelivr.net/npm/mathjax@3.2.2/es5/tex-svg.js

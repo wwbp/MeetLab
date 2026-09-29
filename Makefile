@@ -26,6 +26,14 @@ start: up migrate
 
 stop: down
 
+# Documentation uses an isolated uv environment, independently of Docker.
+.PHONY: docs docs-build
+docs:
+	uv run --no-project --with-requirements requirements-docs.txt mkdocs serve
+
+docs-build:
+	uv run --no-project --with-requirements requirements-docs.txt mkdocs build --strict
+
 migrate:
 	$(COMPOSE) exec -T agent-runner uv run alembic upgrade head
 

@@ -1,8 +1,17 @@
 import { describe, expect, it } from 'vitest';
 import { armLeaveWarning } from './leave-warning';
 
+// Node has no BeforeUnloadEvent, and its plain Event.returnValue is read-only.
+class FakeBeforeUnloadEvent extends Event {
+  declare returnValue: unknown;
+  constructor() {
+    super('beforeunload', { cancelable: true });
+    Object.defineProperty(this, 'returnValue', { value: true, writable: true });
+  }
+}
+
 function closeTab(target: EventTarget) {
-  const e = new Event('beforeunload', { cancelable: true }) as Event & { returnValue: unknown };
+  const e = new FakeBeforeUnloadEvent();
   target.dispatchEvent(e);
   return e;
 }

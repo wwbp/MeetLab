@@ -31,6 +31,7 @@ import { useRouter } from 'next/navigation';
 import { useSetupE2EE } from '@/lib/useSetupE2EE';
 import { useLowCPUOptimizer } from '@/lib/usePerfomanceOptimiser';
 import { normalizeProlificId, prolificIdFromParams } from '@/lib/study';
+import { armLeaveWarning } from '@/lib/leave-warning';
 
 const CONN_DETAILS_ENDPOINT =
   process.env.NEXT_PUBLIC_CONN_DETAILS_ENDPOINT ?? '/api/connection-details';
@@ -336,6 +337,8 @@ function VideoConferenceComponent(props: {
     // code first, and this is the only moment they are guaranteed to see it.
     window.setTimeout(() => setHasLeft(true), 0);
   }, []);
+  // Closing the tab mid-call skips the completion screen; Leave disarms this.
+  React.useEffect(() => (hasLeft ? undefined : armLeaveWarning(window)), [hasLeft]);
   const handleError = React.useCallback((error: Error) => {
     console.error(error);
     alert(`Encountered an unexpected error, check the console logs for details: ${error.message}`);

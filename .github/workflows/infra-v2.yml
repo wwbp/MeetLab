@@ -1,8 +1,13 @@
-# Terraform for the v2 staging stack (infra/v2/staging).
+# The v2 staging pipeline: Terraform for infra/v2/staging, then the images.
 #
-#   PR into v2  -> offline tests + plan, posted on the PR (read-only role)
-#   merge to v2 -> apply (the `staging` environment, which only v2 may deploy to, is
-#                  the only thing that can assume the apply role)
+#   PR into v2  -> offline tests + plan, posted on the PR (read-only role);
+#                  images built but not pushed
+#   merge to v2 -> apply, then build and push images tagged with the commit SHA
+#                  (the `staging` environment, which only v2 may deploy to, is the
+#                  only thing that can assume the apply role)
+#
+# One workflow, not two: chaining workflows (workflow_run) also only works from the
+# default branch, and images need the repositories the apply creates.
 #
 # The gate is the merge: GitHub's free plan has no required reviewers, so a PR into v2
 # is merged only after its plan has been read and approved.
@@ -18,10 +23,10 @@ name: Infra v2
 on:
   pull_request:
     branches: [v2]
-    paths: ["infra/v2/**", ".github/workflows/infra-v2.yml", "Makefile"]
+    paths: ["infra/v2/**", ".github/workflows/infra-v2.yml", "Makefile", "meet/**", "agent-runner/**"]
   push:
     branches: [v2]
-    paths: ["infra/v2/**", ".github/workflows/infra-v2.yml"]
+    paths: ["infra/v2/**", ".github/workflows/infra-v2.yml", "meet/**", "agent-runner/**"]
 
 permissions:
   contents: read
@@ -111,3 +116,66 @@ jobs:
       - name: Verify no drift after apply
         working-directory: infra/v2/staging
         run: terraform plan -input=false -no-color -detailed-exitcode
+
+  # PRs: prove both images still build. No credentials.
+  build:
+    if: github.event_name == 'pull_request'
+    needs: test
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - { name: meet, context: meet, target: runner }
+          - { name: agent-runner, context: agent-runner, target: "" }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          target: ${{ matrix.target }}
+          platforms: linux/amd64
+          push: false
+          cache-from: type=gha,scope=${{ matrix.name }}
+
+  # Merges: push images tagged with the commit SHA, after the apply that owns the
+  # repositories.
+  images:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/v2'
+    needs: apply
+    runs-on: ubuntu-latest
+    environment: staging
+    permissions:
+      contents: read
+      id-token: write
+    strategy:
+      matrix:
+        include:
+          - { name: meet, context: meet, target: runner }
+          - { name: agent-runner, context: agent-runner, target: "" }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.TF_APPLY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+      - id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+      - name: Skip if this SHA is already pushed
+        id: exists
+        run: |
+          if aws ecr describe-images --repository-name "meetlab-v2/${{ matrix.name }}" \
+               --image-ids imageTag=${{ github.sha }} >/dev/null 2>&1; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: docker/build-push-action@v6
+        if: steps.exists.outputs.skip != 'true'
+        with:
+          context: ${{ matrix.context }}
+          target: ${{ matrix.target }}
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.ecr.outputs.registry }}/meetlab-v2/${{ matrix.name }}:${{ github.sha }}
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.name }}

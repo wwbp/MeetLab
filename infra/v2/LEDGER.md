@@ -19,12 +19,13 @@ $7.1k in September, all lab projects). So this is priced from what runs:
 | NAT (vivaprox-vpc) | 33 |
 | meet: `t3.medium` | 30 |
 
-**v2 staging, running total:** **$62/month**
+**v2 staging, running total:** **$63/month**
 
 | Added | PR | Resource | $/month | Notes |
 |---|---|---|---|---|
-| 2026-09-30 | data | RDS `db.t4g.small`, 20 GB gp3, single-AZ | 26 | Backups up to 20 GB are free |
-| 2026-09-30 | data | S3 media bucket | ~0 | $0.023/GB-month once recordings land |
+| 2026-09-30 | images | 2 ECR repositories, last 30 images each | ~1 | $0.10/GB-month |
+| 2026-09-30 | #86 | RDS `db.t4g.small`, 20 GB gp3, single-AZ | 26 | Backups up to 20 GB are free |
+| 2026-09-30 | #86 | S3 media bucket | ~0 | $0.023/GB-month once recordings land |
 | 2026-09-30 | #85 | NAT gateway + elastic IP | 36 | $0.045/GB processed on top |
 | 2026-09-30 | #84 | Terraform pipeline, IAM roles | 0 | |
 
@@ -32,6 +33,9 @@ $7.1k in September, all lab projects). So this is priced from what runs:
 
 | Date | Decision | Why | Revisit when |
 |---|---|---|---|
+| 2026-09-30 | Images tagged with the git SHA, immutable; one image per service for every environment | A task definition's image can never change under it; staging and prod run the same bytes | — |
+| 2026-09-30 | The bot task reuses the agent-runner image with another command | One image to build and scan; the bot code already lives there | If the bot's dependencies diverge |
+| 2026-09-30 | One pipeline on `v2`: test → apply → images | Chained workflows only run from the default branch, and images need the repositories the apply creates | When `v2` becomes the default branch |
 | 2026-09-30 | CI roles can't read or write objects in `meetlab-v2-*` buckets | They hold study recordings, and any PR can assume the plan role | A task that needs objects gets its own task role |
 | 2026-09-30 | RDS `db.t4g.small`, single-AZ, deletion protection on | ~10 writes/s at 100 sessions; v1's database has deletion protection off | Size up and go multi-AZ before a study |
 | 2026-09-30 | Postgres 17 with the default parameter group | Same major version as v1, so data moves by dump/restore; SSL is already forced by default | — |

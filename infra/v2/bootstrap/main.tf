@@ -168,9 +168,36 @@ locals {
     ]
   })
 
+  images_read = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect   = "Allow"
+      Action   = ["ecr:Describe*", "ecr:List*", "ecr:GetLifecyclePolicy", "ecr:GetRepositoryPolicy"]
+      Resource = "*"
+    }]
+  })
+
+  # Manage and push to our repositories. GetAuthorizationToken has no resource scope;
+  # the token alone grants nothing without repository permissions.
+  images_write = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = "ecr:*"
+        Resource = ["arn:aws:ecr:us-east-1:${data.aws_caller_identity.current.account_id}:repository/meetlab-v2/*"]
+      },
+      { Effect = "Allow", Action = "ecr:GetAuthorizationToken", Resource = "*" },
+    ]
+  })
+
   policies = {
-    plan  = { state = local.state, ec2 = local.ec2_read, data = local.data_read }
-    apply = { state = local.state, ec2 = local.ec2_read, ec2_write = local.ec2_write, data = local.data_read, data_write = local.data_write }
+    plan = { state = local.state, ec2 = local.ec2_read, data = local.data_read, images_read = local.images_read }
+    apply = {
+      state       = local.state, ec2 = local.ec2_read, ec2_write = local.ec2_write,
+      data        = local.data_read, data_write = local.data_write,
+      images_read = local.images_read, images = local.images_write,
+    }
   }
 }
 

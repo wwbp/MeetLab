@@ -3,7 +3,7 @@ import { armLeaveWarning } from './leave-warning';
 
 // Node has no BeforeUnloadEvent, and its plain Event.returnValue is read-only.
 class FakeBeforeUnloadEvent extends Event {
-  declare returnValue: unknown;
+  declare returnValue: boolean;
   constructor() {
     super('beforeunload', { cancelable: true });
     Object.defineProperty(this, 'returnValue', { value: true, writable: true });

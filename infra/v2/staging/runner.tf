@@ -7,7 +7,7 @@ resource "aws_cloudwatch_log_group" "runner" {
   retention_in_days = 30
 }
 
-resource "aws_ecs_task_definition" "runner" {
+resource "aws_ecs_task_definition" "runner_app" {
   family                   = "meetlab-v2-staging-agent-runner"
   requires_compatibilities = ["EC2"]
   network_mode             = "bridge"
@@ -54,7 +54,7 @@ resource "aws_ecs_task_definition" "runner" {
 resource "aws_ecs_service" "runner" {
   name                  = "meetlab-v2-staging-agent-runner"
   cluster               = aws_ecs_cluster.this.id
-  task_definition       = aws_ecs_task_definition.runner.arn
+  task_definition       = aws_ecs_task_definition.runner_app.arn
   desired_count         = 1
   wait_for_steady_state = true
   capacity_provider_strategy {
@@ -78,4 +78,12 @@ resource "aws_ecs_service" "runner" {
     }
   }
   depends_on = [aws_ecs_cluster_capacity_providers.this]
+}
+
+# Same as meet's (meet.tf): the first revision's state predates skip_destroy.
+removed {
+  from = aws_ecs_task_definition.runner
+  lifecycle {
+    destroy = false
+  }
 }

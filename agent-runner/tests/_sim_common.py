@@ -22,6 +22,11 @@ LIVEKIT_URL = os.getenv("LIVEKIT_URL", "ws://transport-server:7880")
 API_KEY = os.getenv("LIVEKIT_API_KEY", "devkey")
 API_SECRET = os.getenv("LIVEKIT_API_SECRET", "secret")
 BOT_RUNNER_SECRET = os.getenv("BOT_RUNNER_SECRET")
+# Set MEET_URL (+ CONSOLE_PASSWORD) to start bots the way an operator does, through
+# meet's console API, instead of calling agent-runner directly. v2 keeps the runner
+# private, so this is the only way in from outside, and it exercises the whole chain.
+MEET_URL = os.getenv("MEET_URL", "").rstrip("/")
+CONSOLE_PASSWORD = os.getenv("CONSOLE_PASSWORD", "")
 FIXTURE = Path(__file__).parent / "fixtures" / "benchmark_prompt.wav"
 
 
@@ -53,6 +58,25 @@ def request(method: str, path: str, body: dict | None = None) -> dict:
     req = urllib.request.Request(f"{RUNNER_URL}{path}", data=data, headers=headers, method=method)
     with urllib.request.urlopen(req, timeout=15) as resp:
         return json.loads(resp.read())
+
+
+_meet = urllib.request.build_opener(urllib.request.HTTPCookieProcessor())
+
+
+def _meet_post(path: str, body: dict) -> dict:
+    req = urllib.request.Request(f"{MEET_URL}{path}", data=json.dumps(body).encode(),
+                                 headers={"Content-Type": "application/json"}, method="POST")
+    with _meet.open(req, timeout=30) as resp:
+        return json.loads(resp.read())
+
+
+def start_bot(room_name: str) -> dict:
+    """Start a bot in room_name: via meet's console when MEET_URL is set, else /start."""
+    if not MEET_URL:
+        return request("POST", "/start", {"room_name": room_name})
+    _meet_post("/api/console/login", {"password": CONSOLE_PASSWORD})  # sets the session cookie
+    _meet_post("/api/concierge/rooms", {"name": room_name})
+    return _meet_post(f"/api/concierge/rooms/{room_name}/bots", {})
 
 
 def set_config(scope: str, stt_model: str = "", endpointing_ms: str = "",

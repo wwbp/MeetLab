@@ -70,9 +70,38 @@ run "plan_role_cannot_write_anything_but_its_lock" {
 
   assert {
     condition = alltrue([
-      for s in jsondecode(aws_iam_role_policy.plan.policy).Statement :
+      for s in flatten([for p in aws_iam_role_policy.plan : jsondecode(p.policy).Statement]) :
       alltrue([for a in flatten([s.Action]) : can(regex("^[a-z0-9-]+:(Describe|List|Get)", a)) || contains(["s3:PutObject", "s3:DeleteObject"], a)])
     ])
     error_message = "plan role is read-only apart from writing the state lock"
+  }
+}
+
+run "plan_role_can_read_the_network" {
+  command = plan
+
+  assert {
+    condition     = contains(flatten([for p in aws_iam_role_policy.plan : [for s in jsondecode(p.policy).Statement : s.Action]]), "ec2:Describe*")
+    error_message = "plan needs ec2:Describe* to refresh the VPC"
+  }
+}
+
+# The shared account holds other projects' VPCs and instances. Every EC2 write the
+# apply role holds must be pinned to our tag: on the resource, on the create request,
+# or (for CreateTags) only as part of a create, so it can't adopt someone else's.
+run "apply_role_ec2_writes_are_confined_to_meetlab_v2" {
+  command = plan
+
+  assert {
+    condition = alltrue([
+      for s in flatten([for p in aws_iam_role_policy.apply : jsondecode(p.policy).Statement]) :
+      anytrue([
+        alltrue([for a in flatten([s.Action]) : !startswith(a, "ec2:") || startswith(a, "ec2:Describe")]),
+        try(s.Condition.StringEquals["aws:ResourceTag/Project"], "") == "meetlab-v2",
+        try(s.Condition.StringEquals["aws:RequestTag/Project"], "") == "meetlab-v2",
+        try(s.Condition.Null["ec2:CreateAction"], "") == "false",
+      ])
+    ])
+    error_message = "an ec2 write statement is not scoped to Project=meetlab-v2"
   }
 }

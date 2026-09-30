@@ -23,18 +23,31 @@ $7.1k in September, all lab projects). So this is priced from what runs:
 
 | Added | PR | Resource | $/month | Notes |
 |---|---|---|---|---|
-| 2026-09-30 | compute | ECS instance `t3.medium` + 30 GB disk | 33 | Services only; bots get their own group |
-| 2026-09-30 | compute | Application load balancer | 18 | $16.40 base + usage |
+| 2026-09-30 | runner | agent-runner service + Service Connect namespace | ~0 | Shares the t3.medium; a rolling deploy may briefly add a second |
+| 2026-09-30 | #88 | ECS instance `t3.medium` + 30 GB disk | 33 | Services only; bots get their own group |
+| 2026-09-30 | #88 | Application load balancer | 18 | $16.40 base + usage |
 | 2026-09-30 | #87 | 2 ECR repositories, last 30 images each | ~1 | $0.10/GB-month |
 | 2026-09-30 | #86 | RDS `db.t4g.small`, 20 GB gp3, single-AZ | 26 | Backups up to 20 GB are free |
 | 2026-09-30 | #86 | S3 media bucket | ~0 | $0.023/GB-month once recordings land |
 | 2026-09-30 | #85 | NAT gateway + elastic IP | 36 | $0.045/GB processed on top |
 | 2026-09-30 | #84 | Terraform pipeline, IAM roles | 0 | |
 
+## On hold
+
+| Since | Item | Why | Resume when |
+|---|---|---|---|
+| 2026-09-30 | **Load testing (50 / 100 sessions)** | Staging uses v1's vendor keys (OpenAI, ElevenLabs, Deepgram, LiveKit), which share v1's quotas and bill; an exhausted ElevenLabs quota makes bots silent with no error | Staging has its own keys, or free drop-in models for STT/TTS/LLM, so scale tests measure our infrastructure without spending vendor quota |
+
 ## Decisions
 
 | Date | Decision | Why | Revisit when |
 |---|---|---|---|
+| 2026-09-30 | agent-runner is private; meet reaches it as `http://agent-runner:7860` via ECS Service Connect | meet already proxies the console, SQLAdmin and bot API; no second load balancer | — |
+| 2026-09-30 | Bots still run inside agent-runner on staging, for now | Parity first: v1 behaviour on v2 infra gives a baseline before per-session bot tasks | Bot-pool PR (design iterations 7–8) |
+| 2026-09-30 | Staging recordings stay on the container disk | Tasks have no S3 role yet | Bot-pool PR |
+| 2026-09-30 | Staging reuses v1's vendor keys and LiveKit project, for sanity runs only | Fastest path to a working call; the user chose it | Before load tests: own keys. Room names share v1's LiveKit project, so staging rooms must not reuse study room names |
+| 2026-09-30 | Secrets copied EB → SSM by `infra/v2/seed-staging-secrets.sh`, run by a person | Values never printed or in Terraform state; CI roles can't read v1's EB settings | — |
+| 2026-09-30 | `BOT_RUNNER_SECRET` generated for staging, not copied | Only meet and agent-runner use it; no reason to share it with v1 | — |
 | 2026-09-30 | Staging URL `meet-staging.wwbp.org`, reusing the `*.wwbp.org` certificate | One level under the zone, so no new certificate; `staging.wwbp.org` already belongs to another project. CI may change only this one record in the shared zone | — |
 | 2026-09-30 | Every CI-created role is `meetlab-v2-staging-*` and carries `meetlab-v2-boundary` | Otherwise the apply role could create a role more powerful than itself. CI can't edit the boundary, its own roles, or remove a boundary | — |
 | 2026-09-30 | Bridge networking on EC2, not awsvpc | awsvpc gives each task a network interface; a `c6i.xlarge` has 4, which would cap bots at 3 per instance | If per-task security groups are needed (then ENI trunking) |

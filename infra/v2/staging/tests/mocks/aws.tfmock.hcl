@@ -32,3 +32,14 @@ mock_resource "aws_lb_target_group" {
 mock_resource "aws_launch_template" {
   defaults = { id = "lt-0123456789abcdef0" }
 }
+
+mock_resource "aws_db_instance" {
+  defaults = {
+    address            = "meetlab-v2-staging.abc.us-east-1.rds.amazonaws.com"
+    master_user_secret = [{ secret_arn = "arn:aws:secretsmanager:us-east-1:123456789012:secret:rds!db-0000-AbCdEf", kms_key_id = "", secret_status = "active" }]
+  }
+}
+
+mock_resource "aws_service_discovery_http_namespace" {
+  defaults = { arn = "arn:aws:servicediscovery:us-east-1:123456789012:namespace/ns-0000000000000000" }
+}

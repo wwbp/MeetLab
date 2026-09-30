@@ -21,6 +21,7 @@ locals {
           "logs:Describe*", "logs:ListTagsForResource", "acm:DescribeCertificate", "acm:GetCertificate", "acm:ListCertificates",
           "acm:ListTagsForCertificate", "route53:GetHostedZone", "route53:ListHostedZones",
           "route53:ListResourceRecordSets", "route53:GetChange", "route53:ListTagsForResource",
+          "servicediscovery:Get*", "servicediscovery:List*",
         ]
         Resource = "*"
       },
@@ -94,6 +95,22 @@ locals {
         Effect   = "Allow"
         Action   = "logs:*"
         Resource = [format(local.arn, "logs", "log-group:/meetlab-v2/*"), format(local.arn, "logs", "log-group:/meetlab-v2/*:*")]
+      },
+      {
+        # Cloud Map ids are random, so our tag is the handle; ECS registers the
+        # runner as a service inside the (tagged) namespace.
+        Sid       = "CreateTaggedNamespaces"
+        Effect    = "Allow"
+        Action    = ["servicediscovery:CreateHttpNamespace", "servicediscovery:TagResource"]
+        Resource  = "*"
+        Condition = { StringEquals = { "aws:RequestTag/Project" = "meetlab-v2" } }
+      },
+      {
+        Sid       = "OwnNamespaces"
+        Effect    = "Allow"
+        Action    = "servicediscovery:*"
+        Resource  = "*"
+        Condition = { StringEquals = { "aws:ResourceTag/Project" = "meetlab-v2" } }
       },
       {
         Sid       = "OneDnsName"

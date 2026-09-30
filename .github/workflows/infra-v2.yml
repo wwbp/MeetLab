@@ -1,0 +1,113 @@
+# Terraform for the v2 staging stack (infra/v2/staging).
+#
+#   PR into v2  -> offline tests + plan, posted on the PR (read-only role)
+#   merge to v2 -> apply (the `staging` environment, which only v2 may deploy to, is
+#                  the only thing that can assume the apply role)
+#
+# The gate is the merge: GitHub's free plan has no required reviewers, so a PR into v2
+# is merged only after its plan has been read and approved.
+#
+# infra/v2/bootstrap is deliberately absent: it defines these roles and is applied by
+# a person, so CI can never widen its own permissions.
+#
+# No nightly drift check yet: scheduled workflows run only from the default branch
+# (main, frozen). Every PR plan doubles as a drift check until v2 becomes the default.
+
+name: Infra v2
+
+on:
+  pull_request:
+    branches: [v2]
+    paths: ["infra/v2/**", ".github/workflows/infra-v2.yml", "Makefile"]
+  push:
+    branches: [v2]
+    paths: ["infra/v2/**", ".github/workflows/infra-v2.yml"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: infra-v2-staging
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: us-east-1
+  TF_IN_AUTOMATION: "1"
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with: { terraform_version: "1.15.1" }
+      - run: make test-infra
+
+  plan:
+    if: github.event_name == 'pull_request'
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with: { terraform_version: "1.15.1", terraform_wrapper: false }
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.TF_PLAN_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+      - name: Plan
+        working-directory: infra/v2/staging
+        run: |
+          set -euo pipefail
+          terraform init -input=false
+          terraform plan -input=false -no-color -lock-timeout=5m -out=tfplan
+          terraform show -no-color tfplan > plan.txt
+      - name: Post plan on the PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          {
+            echo "### Terraform plan — infra/v2/staging"
+            echo
+            grep -E '^(Plan:|No changes)' infra/v2/staging/plan.txt || true
+            echo
+            echo '<details><summary>Full plan</summary>'
+            echo
+            echo '```'
+            head -c 60000 infra/v2/staging/plan.txt
+            echo '```'
+            echo '</details>'
+          } > comment.md
+          gh pr comment "${{ github.event.pull_request.number }}" --body-file comment.md
+
+  apply:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/v2'
+    needs: test
+    runs-on: ubuntu-latest
+    environment: staging
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with: { terraform_version: "1.15.1", terraform_wrapper: false }
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.TF_APPLY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+      - name: Apply
+        working-directory: infra/v2/staging
+        run: |
+          set -euo pipefail
+          terraform init -input=false
+          terraform plan -input=false -no-color -lock-timeout=5m -out=tfplan
+          terraform apply -input=false -no-color tfplan
+      - name: Verify no drift after apply
+        working-directory: infra/v2/staging
+        run: terraform plan -input=false -no-color -detailed-exitcode

@@ -65,13 +65,16 @@ run "the_edge_is_https_only" {
   }
 }
 
-run "only_the_load_balancer_reaches_the_app" {
+# Bridge mode: Service Connect proxies talk to each other on host ports, across
+# instances (meet -> agent-runner found them on different hosts on 2026-09-30, and
+# every call hung). So app tasks accept each other and the ALB, and nothing else.
+run "only_the_load_balancer_and_other_app_tasks_reach_the_app" {
   command = apply
 
   assert {
     condition = length(aws_security_group.app.ingress) == 1 && alltrue([for r in aws_security_group.app.ingress :
-    r.security_groups == toset([aws_security_group.alb.id]) && try(length(r.cidr_blocks), 0) == 0])
-    error_message = "app ingress comes from the ALB security group only"
+    r.security_groups == toset([aws_security_group.alb.id]) && r.self && try(length(r.cidr_blocks), 0) == 0])
+    error_message = "app ingress: the ALB and the app group itself, on the ephemeral range; no CIDRs"
   }
 }
 

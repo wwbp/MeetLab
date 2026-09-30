@@ -158,3 +158,18 @@ run "ci_roles_cannot_read_recordings" {
     error_message = "a CI role can reach objects in a meetlab-v2 bucket"
   }
 }
+
+run "ci_can_read_and_push_images" {
+  command = plan
+
+  assert {
+    condition = alltrue([for a in ["ecr:Describe*", "ecr:List*", "ecr:GetLifecyclePolicy"] :
+    contains(flatten([for p in aws_iam_role_policy.plan : [for s in jsondecode(p.policy).Statement : s.Action]]), a)])
+    error_message = "plan needs to refresh the repositories"
+  }
+  assert {
+    condition = anytrue([for s in jsondecode(aws_iam_role_policy.apply["images"].policy).Statement :
+    contains(flatten([s.Action]), "ecr:*") && flatten([s.Resource]) == ["arn:aws:ecr:us-east-1:123456789012:repository/meetlab-v2/*"]])
+    error_message = "apply manages and pushes to meetlab-v2/* repositories only"
+  }
+}

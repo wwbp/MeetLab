@@ -4,6 +4,12 @@ node_modules
 .git
 .env.local
 .env*.local
+*.zip
+tsconfig.tsbuildinfo
+# `**/` matters: a bare pattern only matches at the context root, which let
+# lib/*.test.ts into `next build` and failed its type check. Mirrors the
+# exclusions in scripts/build-meet-eb-deploy-package.sh.
 tests
-*.test.ts
-*.test.mjs
+**/*.test.ts
+**/*.test.tsx
+**/*.test.mjs

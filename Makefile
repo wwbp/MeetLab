@@ -14,7 +14,7 @@ BENCHMARK_PARALLEL ?= 3
 
 MSG ?= migration
 
-.PHONY: up down start stop logs migrate migration test test-unit test-integration test-bot-longevity test-multi-speaker test-multi-speaker-audio test-session-lifecycle setup-livekit-cloud revert-livekit-local test-livekit-tooling scan scan-agent-runner scan-meet benchmark benchmark-audio benchmark-audio-long benchmark-audio-paused benchmark-full benchmark-exp2 benchmark-report simulate soak soak-sanity bench-stt-concurrency bench-idle-room
+.PHONY: up down start stop logs migrate migration test test-unit test-integration test-bot-longevity test-multi-speaker test-multi-speaker-audio test-session-lifecycle setup-livekit-cloud revert-livekit-local test-livekit-tooling test-infra scan scan-agent-runner scan-meet benchmark benchmark-audio benchmark-audio-long benchmark-audio-paused benchmark-full benchmark-exp2 benchmark-report simulate soak soak-sanity bench-stt-concurrency bench-idle-room
 
 up:
 	$(COMPOSE) up --build -d
@@ -51,6 +51,17 @@ test-unit:
 	$(COMPOSE) exec -T agent-runner uv run python -m unittest discover -s tests -p "test_*.py" -v
 	$(COMPOSE) exec -T meet pnpm test
 	$(COMPOSE) exec -T meet pnpm lint
+
+# Offline: fmt, validate and `terraform test` (mock provider) for every infra/v2 stack.
+# No AWS credentials needed, so it runs in CI and before any plan.
+test-infra:
+	@for d in infra/v2/*/; do \
+		echo "== $$d"; \
+		terraform -chdir=$$d fmt -check -recursive && \
+		terraform -chdir=$$d init -backend=false -input=false >/dev/null && \
+		terraform -chdir=$$d validate -no-color && \
+		terraform -chdir=$$d test -no-color || exit 1; \
+	done
 
 test-integration:
 	$(COMPOSE) up -d transport-server agent-runner meet

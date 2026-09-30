@@ -105,3 +105,56 @@ run "apply_role_ec2_writes_are_confined_to_meetlab_v2" {
     error_message = "an ec2 write statement is not scoped to Project=meetlab-v2"
   }
 }
+
+run "plan_role_can_read_the_data_layer" {
+  command = plan
+
+  assert {
+    condition = alltrue([for a in ["rds:Describe*", "rds:ListTagsForResource", "s3:Get*", "s3:List*"] :
+    contains(flatten([for p in aws_iam_role_policy.plan : [for s in jsondecode(p.policy).Statement : s.Action]]), a)])
+    error_message = "plan needs to refresh the database and bucket"
+  }
+}
+
+# Every non-read statement the apply role holds must name our resources, carry our
+# tag, or be usable only through a named AWS service. The allowed non-meetlab ARNs
+# are the ones RDS insists on at create time (default parameter/option groups, and
+# the rds!... secret it makes for the managed master password).
+run "apply_role_writes_are_scoped_to_meetlab_v2" {
+  command = plan
+
+  assert {
+    condition = alltrue([
+      for s in flatten([for p in aws_iam_role_policy.apply : jsondecode(p.policy).Statement]) :
+      anytrue([
+        alltrue([for a in flatten([s.Action]) : can(regex(":(Describe|List|Get)", a))]),
+        alltrue([for r in flatten([s.Resource]) : anytrue([
+          strcontains(r, "meetlab-v2"),
+          strcontains(r, "meetlab-tfstate-123456789012"),
+          strcontains(r, ":secret:rds!"),
+          strcontains(r, ":pg:default.postgres17"),
+          strcontains(r, ":og:default:postgres-17"),
+        ])]),
+        try(s.Condition.StringEquals["aws:ResourceTag/Project"], "") == "meetlab-v2",
+        try(s.Condition.StringEquals["aws:RequestTag/Project"], "") == "meetlab-v2",
+        try(s.Condition.Null["ec2:CreateAction"], "") == "false",
+        length(try(s.Condition.StringEquals["kms:ViaService"], [])) > 0,
+      ])
+    ])
+    error_message = "an apply statement can write outside meetlab-v2"
+  }
+}
+
+# The media bucket holds study participants' recordings. Terraform manages buckets,
+# never objects, and any PR can assume the plan role, so neither role may reach objects.
+run "ci_roles_cannot_read_recordings" {
+  command = plan
+
+  assert {
+    condition = alltrue([
+      for s in flatten([for p in merge(aws_iam_role_policy.plan, aws_iam_role_policy.apply) : jsondecode(p.policy).Statement]) :
+      alltrue([for r in flatten([s.Resource]) : !(startswith(r, "arn:aws:s3:::meetlab-v2-") && strcontains(r, "/"))])
+    ])
+    error_message = "a CI role can reach objects in a meetlab-v2 bucket"
+  }
+}

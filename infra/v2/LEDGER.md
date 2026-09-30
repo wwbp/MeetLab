@@ -1,0 +1,49 @@
+# v2 ledger — decisions and costs
+
+A running record, updated in the PR that makes each change. Newest first within each
+section. Costs are on-demand us-east-1 list prices per month (730 h), before data
+transfer. Budget rule (2026-09-30): staging may cost up to v1 production's average.
+
+## Cost
+
+**v1 production, estimated:** about **$1,110/month**. v1 resources have no cost tags, and
+Cost Explorer only shows the whole shared account ($5.4k in July, $6.1k in August,
+$7.1k in September, all lab projects). So this is priced from what runs:
+
+| v1 resource | $/month |
+|---|---|
+| NIM `g6.xlarge` + 250 GB disk | 608 |
+| agent-runner: 2 × `c6i.xlarge` | 248 |
+| RDS `meetlab` `db.m5.large` + 200 GB | 148 |
+| 2 load balancers | 40 |
+| NAT (vivaprox-vpc) | 33 |
+| meet: `t3.medium` | 30 |
+
+**v2 staging, running total:** **$62/month**
+
+| Added | PR | Resource | $/month | Notes |
+|---|---|---|---|---|
+| 2026-09-30 | data | RDS `db.t4g.small`, 20 GB gp3, single-AZ | 26 | Backups up to 20 GB are free |
+| 2026-09-30 | data | S3 media bucket | ~0 | $0.023/GB-month once recordings land |
+| 2026-09-30 | #85 | NAT gateway + elastic IP | 36 | $0.045/GB processed on top |
+| 2026-09-30 | #84 | Terraform pipeline, IAM roles | 0 | |
+
+## Decisions
+
+| Date | Decision | Why | Revisit when |
+|---|---|---|---|
+| 2026-09-30 | CI roles can't read or write objects in `meetlab-v2-*` buckets | They hold study recordings, and any PR can assume the plan role | A task that needs objects gets its own task role |
+| 2026-09-30 | RDS `db.t4g.small`, single-AZ, deletion protection on | ~10 writes/s at 100 sessions; v1's database has deletion protection off | Size up and go multi-AZ before a study |
+| 2026-09-30 | Postgres 17 with the default parameter group | Same major version as v1, so data moves by dump/restore; SSL is already forced by default | — |
+| 2026-09-30 | DB master password managed by RDS in Secrets Manager | Never in Terraform state or env vars | — |
+| 2026-09-30 | One NAT for staging | Saves $33/month; losing us-east-1a only cuts staging egress | Before staging becomes production: one NAT per AZ |
+| 2026-09-30 | VPC `10.20.0.0/16` | Clear of v1's `10.0.0.0/16`, so the two can peer | — |
+| 2026-09-30 | Apply gate = merging a PR into `v2` | GitHub's free plan has no required reviewers on private repos; the `staging` environment still accepts deploys from `v2` only | If the org upgrades: add a required reviewer |
+| 2026-09-30 | No nightly drift check yet | Scheduled workflows run only from the default branch (`main`, frozen) | When `v2` becomes the default branch |
+| 2026-09-30 | Bootstrap is applied by a person | The apply role must not be able to widen its own permissions | Never |
+| 2026-09-30 | Permissions grow per PR, scoped by `meetlab-v2` name or `Project=meetlab-v2` tag | Shared lab account; the old Actions role trusts every `wwbp/*` repo | — |
+| 2026-09-30 | v2 gets its own NIM, switched on only for tests | Load tests must not touch v1's STT | — |
+| 2026-09-30 | v2 gets its own LiveKit project and key | Load tests must not use v1's quota | — |
+| 2026-09-30 | ECS on EC2 now, not EB | Per-session bot tasks and scaling as code; no dispatcher to write | — |
+| 2026-09-30 | `main` frozen (CD, Capacity, Deploy STT NIM disabled); work on `v2` | No accidental v1 deploys while v2 is built | Cutover |
+| 2026-09-30 | Staging is built first; it becomes production once tested | Test the whole stack before it carries a study | Cutover |

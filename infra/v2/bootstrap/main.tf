@@ -31,9 +31,12 @@ variable "state_bucket" {
   default = "meetlab-tfstate-848180123498"
 }
 
+data "aws_caller_identity" "current" {}
+
 locals {
   repo = "repo:wwbp/MeetLab"
   oidc = "token.actions.githubusercontent.com"
+  rds  = "arn:aws:rds:us-east-1:${data.aws_caller_identity.current.account_id}"
 }
 
 # Shared with every other lab repo; referenced, never managed here.
@@ -114,9 +117,60 @@ locals {
     ]
   })
 
+  data_read = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      { Effect = "Allow", Action = ["rds:Describe*", "rds:ListTagsForResource"], Resource = "*" },
+      { Effect = "Allow", Action = ["s3:Get*", "s3:List*"], Resource = "arn:aws:s3:::meetlab-v2-*" },
+    ]
+  })
+
+  data_write = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid    = "OwnDatabases"
+        Effect = "Allow"
+        Action = "rds:*"
+        Resource = [
+          "${local.rds}:db:meetlab-v2-*",
+          "${local.rds}:subgrp:meetlab-v2-*",
+          "${local.rds}:snapshot:meetlab-v2-*",
+        ]
+      },
+      {
+        # CreateDBInstance is also authorized against the defaults it attaches.
+        Sid      = "DefaultGroupsAtCreate"
+        Effect   = "Allow"
+        Action   = "rds:CreateDBInstance"
+        Resource = ["${local.rds}:pg:default.postgres17", "${local.rds}:og:default:postgres-17"]
+      },
+      {
+        # manage_master_user_password: RDS creates an rds!db-... secret as the caller.
+        Sid      = "ManagedMasterPassword"
+        Effect   = "Allow"
+        Action   = ["secretsmanager:CreateSecret", "secretsmanager:TagResource"]
+        Resource = "arn:aws:secretsmanager:us-east-1:${data.aws_caller_identity.current.account_id}:secret:rds!*"
+      },
+      {
+        Sid       = "DefaultKeysViaService"
+        Effect    = "Allow"
+        Action    = ["kms:DescribeKey", "kms:CreateGrant", "kms:Decrypt", "kms:GenerateDataKey*"]
+        Resource  = "*"
+        Condition = { StringEquals = { "kms:ViaService" = ["rds.us-east-1.amazonaws.com", "secretsmanager.us-east-1.amazonaws.com"] } }
+      },
+      {
+        Sid      = "OwnBuckets"
+        Effect   = "Allow"
+        Action   = "s3:*"
+        Resource = "arn:aws:s3:::meetlab-v2-*"
+      },
+    ]
+  })
+
   policies = {
-    plan  = { state = local.state, ec2 = local.ec2_read }
-    apply = { state = local.state, ec2 = local.ec2_read, ec2_write = local.ec2_write }
+    plan  = { state = local.state, ec2 = local.ec2_read, data = local.data_read }
+    apply = { state = local.state, ec2 = local.ec2_read, ec2_write = local.ec2_write, data = local.data_read, data_write = local.data_write }
   }
 }
 

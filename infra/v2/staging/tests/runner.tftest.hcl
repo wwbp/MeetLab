@@ -29,7 +29,7 @@ run "meet_reaches_the_runner_by_name" {
     error_message = "meet must join the Service Connect namespace as a client"
   }
   assert {
-    condition = contains([for e in jsondecode(aws_ecs_task_definition.meet.container_definitions)[0].environment : e.value if e.name == "BOT_RUNNER_URL"],
+    condition = contains([for e in jsondecode(aws_ecs_task_definition.meet_app.container_definitions)[0].environment : e.value if e.name == "BOT_RUNNER_URL"],
     "http://agent-runner:7860/")
     error_message = "BOT_RUNNER_URL points at the Service Connect name"
   }
@@ -39,12 +39,12 @@ run "secrets_are_injected_never_written_into_task_definitions" {
   command = apply
 
   assert {
-    condition = alltrue([for td in [aws_ecs_task_definition.meet, aws_ecs_task_definition.runner] :
+    condition = alltrue([for td in [aws_ecs_task_definition.meet_app, aws_ecs_task_definition.runner_app] :
     alltrue([for e in jsondecode(td.container_definitions)[0].environment : !contains(["OPENAI_API_KEY", "ELEVENLABS_API_KEY", "DEEPGRAM_API_KEY", "LIVEKIT_API_KEY", "LIVEKIT_API_SECRET", "CONSOLE_PASSWORD", "BOT_RUNNER_SECRET", "DB_PASSWORD", "DATABASE_URL"], e.name)])])
     error_message = "a secret is a plain environment value in a task definition"
   }
   assert {
-    condition = alltrue(flatten([for td in [aws_ecs_task_definition.meet, aws_ecs_task_definition.runner] :
+    condition = alltrue(flatten([for td in [aws_ecs_task_definition.meet_app, aws_ecs_task_definition.runner_app] :
       [for s in jsondecode(td.container_definitions)[0].secrets :
     strcontains(s.valueFrom, ":parameter/meetlab-v2/staging/") || startswith(s.valueFrom, aws_db_instance.this.master_user_secret[0].secret_arn)]]))
     error_message = "secrets come from /meetlab-v2/staging/* or the RDS-managed secret only"
@@ -55,12 +55,12 @@ run "the_runner_reaches_the_database_by_parts" {
   command = apply
 
   assert {
-    condition = contains([for e in jsondecode(aws_ecs_task_definition.runner.container_definitions)[0].environment : e.value if e.name == "DB_HOST"],
+    condition = contains([for e in jsondecode(aws_ecs_task_definition.runner_app.container_definitions)[0].environment : e.value if e.name == "DB_HOST"],
     aws_db_instance.this.address)
     error_message = "DB_HOST is the RDS endpoint (db/url.py builds the URL)"
   }
   assert {
-    condition = contains([for s in jsondecode(aws_ecs_task_definition.runner.container_definitions)[0].secrets : s.valueFrom if s.name == "DB_PASSWORD"],
+    condition = contains([for s in jsondecode(aws_ecs_task_definition.runner_app.container_definitions)[0].secrets : s.valueFrom if s.name == "DB_PASSWORD"],
     "${aws_db_instance.this.master_user_secret[0].secret_arn}:password::")
     error_message = "DB_PASSWORD is the password key of the RDS-managed secret"
   }
@@ -85,7 +85,19 @@ run "runner_deploys_safely" {
     error_message = "a runner that never becomes healthy fails the apply and rolls back"
   }
   assert {
-    condition     = jsondecode(aws_ecs_task_definition.runner.container_definitions)[0].image == "${aws_ecr_repository.this["agent-runner"].repository_url}:0123abc"
+    condition     = jsondecode(aws_ecs_task_definition.runner_app.container_definitions)[0].image == "${aws_ecr_repository.this["agent-runner"].repository_url}:0123abc"
     error_message = "the runner runs the SHA the pipeline just pushed"
+  }
+}
+
+# ecs:DeregisterTaskDefinition can't be scoped to a resource, so granting it would let
+# CI deregister any project's task definitions in the shared account. Old revisions
+# stay registered instead (ECS allows a million per family).
+run "task_definition_revisions_are_never_deregistered" {
+  command = apply
+
+  assert {
+    condition     = aws_ecs_task_definition.meet_app.skip_destroy && aws_ecs_task_definition.runner_app.skip_destroy
+    error_message = "a task definition replace would call DeregisterTaskDefinition, which CI must not hold"
   }
 }

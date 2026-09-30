@@ -19,10 +19,11 @@ resource "aws_lb_target_group" "meet" {
   }
 }
 
-resource "aws_ecs_task_definition" "meet" {
+resource "aws_ecs_task_definition" "meet_app" {
   family                   = "meetlab-v2-staging-meet"
   requires_compatibilities = ["EC2"]
   network_mode             = "bridge"
+  skip_destroy             = true # see tests/runner.tftest.hcl
   execution_role_arn       = aws_iam_role.execution.arn
   container_definitions = jsonencode([{
     name              = "meet"
@@ -51,7 +52,7 @@ resource "aws_ecs_task_definition" "meet" {
 resource "aws_ecs_service" "meet" {
   name                  = "meetlab-v2-staging-meet"
   cluster               = aws_ecs_cluster.this.id
-  task_definition       = aws_ecs_task_definition.meet.arn
+  task_definition       = aws_ecs_task_definition.meet_app.arn
   desired_count         = 1
   wait_for_steady_state = true
   capacity_provider_strategy {
@@ -72,4 +73,14 @@ resource "aws_ecs_service" "meet" {
     namespace = aws_service_discovery_http_namespace.this.arn
   }
   depends_on = [aws_lb_listener.https, aws_ecs_cluster_capacity_providers.this]
+}
+
+# Revision 1 was recorded without skip_destroy, so replacing it would call
+# DeregisterTaskDefinition, which CI must not hold. Forget it instead: it stays
+# registered and unused. (Hence the meet_app address.)
+removed {
+  from = aws_ecs_task_definition.meet
+  lifecycle {
+    destroy = false
+  }
 }

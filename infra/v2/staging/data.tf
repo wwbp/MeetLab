@@ -6,11 +6,14 @@ resource "aws_security_group" "app" {
   description = "meet, control API and bot tasks"
   vpc_id      = aws_vpc.this.id
   # Bridge networking: ECS maps container ports to the ephemeral range on the host.
+  # The ALB reaches meet there, and Service Connect proxies reach each other there,
+  # across instances (self).
   ingress {
     from_port       = 32768
     to_port         = 65535
     protocol        = "tcp"
     security_groups = [aws_security_group.alb.id]
+    self            = true
   }
   egress {
     from_port   = 0

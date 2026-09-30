@@ -42,6 +42,8 @@ $7.1k in September, all lab projects). So this is priced from what runs:
 
 | Date | Decision | Why | Revisit when |
 |---|---|---|---|
+| 2026-09-30 | App tasks accept each other on host ports (security-group self rule) | In bridge mode, Service Connect proxies talk across instances on host ports; without it meet → agent-runner hung whenever the two landed on different hosts | awsvpc + ENI trunking would allow per-service groups |
+| 2026-09-30 | Task definitions are never deregistered (`skip_destroy`) | `ecs:DeregisterTaskDefinition` can't be scoped to a resource; granting it would let CI deregister any project's task definitions | — |
 | 2026-09-30 | agent-runner is private; meet reaches it as `http://agent-runner:7860` via ECS Service Connect | meet already proxies the console, SQLAdmin and bot API; no second load balancer | — |
 | 2026-09-30 | Bots still run inside agent-runner on staging, for now | Parity first: v1 behaviour on v2 infra gives a baseline before per-session bot tasks | Bot-pool PR (design iterations 7–8) |
 | 2026-09-30 | Staging recordings stay on the container disk | Tasks have no S3 role yet | Bot-pool PR |

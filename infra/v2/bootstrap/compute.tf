@@ -18,7 +18,7 @@ locals {
         Effect = "Allow"
         Action = [
           "ecs:Describe*", "ecs:List*", "elasticloadbalancing:Describe*", "autoscaling:Describe*",
-          "logs:Describe*", "logs:ListTagsForResource", "acm:DescribeCertificate", "acm:ListCertificates",
+          "logs:Describe*", "logs:ListTagsForResource", "acm:DescribeCertificate", "acm:GetCertificate", "acm:ListCertificates",
           "acm:ListTagsForCertificate", "route53:GetHostedZone", "route53:ListHostedZones",
           "route53:ListResourceRecordSets", "route53:GetChange", "route53:ListTagsForResource",
         ]

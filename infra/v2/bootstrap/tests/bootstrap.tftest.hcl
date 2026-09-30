@@ -184,7 +184,7 @@ run "plan_role_can_read_compute" {
   command = plan
 
   assert {
-    condition = alltrue([for a in ["ecs:Describe*", "elasticloadbalancing:Describe*", "autoscaling:Describe*", "logs:Describe*", "iam:GetRole", "acm:DescribeCertificate", "route53:GetHostedZone"] :
+    condition = alltrue([for a in ["ecs:Describe*", "elasticloadbalancing:Describe*", "autoscaling:Describe*", "logs:Describe*", "iam:GetRole", "acm:DescribeCertificate", "acm:GetCertificate", "route53:GetHostedZone"] :
     contains(flatten([for p in aws_iam_role_policy.plan : [for s in jsondecode(p.policy).Statement : s.Action]]), a)])
     error_message = "plan needs to refresh the compute layer"
   }

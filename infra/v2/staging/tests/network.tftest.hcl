@@ -1,6 +1,12 @@
 # Offline: mock provider, no AWS. `apply` so mocked ids are known to the asserts.
 
-mock_provider "aws" {}
+mock_provider "aws" {
+  source = "./tests/mocks"
+}
+
+variables {
+  image_tag = "test"
+}
 
 run "two_azs_each_with_a_public_and_a_private_subnet" {
   command = apply

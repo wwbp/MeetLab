@@ -19,11 +19,13 @@ $7.1k in September, all lab projects). So this is priced from what runs:
 | NAT (vivaprox-vpc) | 33 |
 | meet: `t3.medium` | 30 |
 
-**v2 staging, running total:** **$63/month**
+**v2 staging, running total:** **$114/month**
 
 | Added | PR | Resource | $/month | Notes |
 |---|---|---|---|---|
-| 2026-09-30 | images | 2 ECR repositories, last 30 images each | ~1 | $0.10/GB-month |
+| 2026-09-30 | compute | ECS instance `t3.medium` + 30 GB disk | 33 | Services only; bots get their own group |
+| 2026-09-30 | compute | Application load balancer | 18 | $16.40 base + usage |
+| 2026-09-30 | #87 | 2 ECR repositories, last 30 images each | ~1 | $0.10/GB-month |
 | 2026-09-30 | #86 | RDS `db.t4g.small`, 20 GB gp3, single-AZ | 26 | Backups up to 20 GB are free |
 | 2026-09-30 | #86 | S3 media bucket | ~0 | $0.023/GB-month once recordings land |
 | 2026-09-30 | #85 | NAT gateway + elastic IP | 36 | $0.045/GB processed on top |
@@ -33,6 +35,13 @@ $7.1k in September, all lab projects). So this is priced from what runs:
 
 | Date | Decision | Why | Revisit when |
 |---|---|---|---|
+| 2026-09-30 | Staging URL `meet-staging.wwbp.org`, reusing the `*.wwbp.org` certificate | One level under the zone, so no new certificate; `staging.wwbp.org` already belongs to another project. CI may change only this one record in the shared zone | — |
+| 2026-09-30 | Every CI-created role is `meetlab-v2-staging-*` and carries `meetlab-v2-boundary` | Otherwise the apply role could create a role more powerful than itself. CI can't edit the boundary, its own roles, or remove a boundary | — |
+| 2026-09-30 | Bridge networking on EC2, not awsvpc | awsvpc gives each task a network interface; a `c6i.xlarge` has 4, which would cap bots at 3 per instance | If per-task security groups are needed (then ENI trunking) |
+| 2026-09-30 | Separate capacity providers for services and bots | Bots scale 0..N per study; meet and the control API stay up | — |
+| 2026-09-30 | Pipeline order: images → apply; apply waits for healthy services, and a failing deploy rolls back | The task definition points at the SHA just pushed | — |
+| 2026-09-30 | IMDSv2 required on instances | A container can't read the instance role with a plain GET | — |
+| 2026-09-30 | CI permissions are inline policies, at 7.1k of the 10.2k-character limit per role | Simplest while small | Move to managed policies when the next PR would pass the limit |
 | 2026-09-30 | Images tagged with the git SHA, immutable; one image per service for every environment | A task definition's image can never change under it; staging and prod run the same bytes | — |
 | 2026-09-30 | The bot task reuses the agent-runner image with another command | One image to build and scan; the bot code already lives there | If the bot's dependencies diverge |
 | 2026-09-30 | One pipeline on `v2`: test → apply → images | Chained workflows only run from the default branch, and images need the repositories the apply creates | When `v2` becomes the default branch |

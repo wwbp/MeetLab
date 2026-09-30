@@ -100,6 +100,7 @@ run "apply_role_ec2_writes_are_confined_to_meetlab_v2" {
         try(s.Condition.StringEquals["aws:ResourceTag/Project"], "") == "meetlab-v2",
         try(s.Condition.StringEquals["aws:RequestTag/Project"], "") == "meetlab-v2",
         try(s.Condition.Null["ec2:CreateAction"], "") == "false",
+        can(s.Condition.ArnLike["ec2:LaunchTemplate"]),
       ])
     ])
     error_message = "an ec2 write statement is not scoped to Project=meetlab-v2"
@@ -127,6 +128,7 @@ run "apply_role_writes_are_scoped_to_meetlab_v2" {
     condition = alltrue([
       for s in flatten([for p in aws_iam_role_policy.apply : jsondecode(p.policy).Statement]) :
       anytrue([
+        s.Effect == "Deny",
         alltrue([for a in flatten([s.Action]) : can(regex(":(Describe|List|Get)", a))]),
         alltrue([for r in flatten([s.Resource]) : anytrue([
           strcontains(r, "meetlab-v2"),
@@ -139,6 +141,10 @@ run "apply_role_writes_are_scoped_to_meetlab_v2" {
         try(s.Condition.StringEquals["aws:RequestTag/Project"], "") == "meetlab-v2",
         try(s.Condition.Null["ec2:CreateAction"], "") == "false",
         length(try(s.Condition.StringEquals["kms:ViaService"], [])) > 0,
+        # DNS: only our one record name in the shared wwbp.org zone.
+        length(try(s.Condition["ForAllValues:StringEquals"]["route53:ChangeResourceRecordSetsNormalizedRecordNames"], [])) > 0,
+        # RunInstances from a launch template; the template itself must carry our tag.
+        can(s.Condition.ArnLike["ec2:LaunchTemplate"]),
       ])
     ])
     error_message = "an apply statement can write outside meetlab-v2"
@@ -171,5 +177,78 @@ run "ci_can_read_and_push_images" {
     condition = anytrue([for s in jsondecode(aws_iam_role_policy.apply["images"].policy).Statement :
     contains(flatten([s.Action]), "ecr:*") && flatten([s.Resource]) == ["arn:aws:ecr:us-east-1:123456789012:repository/meetlab-v2/*"]])
     error_message = "apply manages and pushes to meetlab-v2/* repositories only"
+  }
+}
+
+run "plan_role_can_read_compute" {
+  command = plan
+
+  assert {
+    condition = alltrue([for a in ["ecs:Describe*", "elasticloadbalancing:Describe*", "autoscaling:Describe*", "logs:Describe*", "iam:GetRole", "acm:DescribeCertificate", "acm:GetCertificate", "route53:GetHostedZone"] :
+    contains(flatten([for p in aws_iam_role_policy.plan : [for s in jsondecode(p.policy).Statement : s.Action]]), a)])
+    error_message = "plan needs to refresh the compute layer"
+  }
+}
+
+# The boundary is the ceiling for every role CI creates. It must not grant IAM
+# (beyond passing our own roles to ECS) or reach other projects' secrets.
+run "boundary_caps_what_ci_created_roles_can_do" {
+  command = plan
+
+  assert {
+    condition     = aws_iam_policy.boundary.name == "meetlab-v2-boundary"
+    error_message = "staging references the boundary by this name"
+  }
+  assert {
+    condition = alltrue([for s in jsondecode(aws_iam_policy.boundary.policy).Statement :
+      alltrue([for a in flatten([s.Action]) : !startswith(a, "iam:") || (a == "iam:PassRole" && flatten([s.Resource]) == ["arn:aws:iam::123456789012:role/meetlab-v2-staging-*"])])
+    ])
+    error_message = "the boundary grants no IAM beyond passing meetlab-v2-staging roles"
+  }
+  assert {
+    condition = alltrue([for s in jsondecode(aws_iam_policy.boundary.policy).Statement :
+      alltrue([for r in flatten([s.Resource]) : r == "*" || anytrue([
+        strcontains(r, "meetlab-v2"), strcontains(r, ":secret:rds!"), strcontains(r, "parameter/aws/service/"),
+      ])])
+      if anytrue([for a in flatten([s.Action]) : can(regex("^(ssm|secretsmanager|s3):", a))])
+    ])
+    error_message = "the boundary reaches parameters, secrets or buckets outside meetlab-v2"
+  }
+}
+
+run "ci_can_only_create_roles_that_carry_the_boundary" {
+  command = plan
+
+  assert {
+    condition = alltrue([for s in flatten([for p in aws_iam_role_policy.apply : jsondecode(p.policy).Statement]) :
+      try(s.Condition.StringEquals["iam:PermissionsBoundary"], "") == "arn:aws:iam::123456789012:policy/meetlab-v2-boundary"
+      if s.Effect == "Allow" && anytrue([for a in flatten([s.Action]) : contains(["iam:CreateRole", "iam:PutRolePermissionsBoundary"], a)])
+    ])
+    error_message = "CreateRole must require meetlab-v2-boundary"
+  }
+}
+
+run "ci_cannot_touch_its_own_roles_or_the_boundary" {
+  command = plan
+
+  assert {
+    condition = alltrue([for s in flatten([for p in aws_iam_role_policy.apply : jsondecode(p.policy).Statement]) :
+      alltrue([for r in flatten([s.Resource]) : !strcontains(r, "meetlab-v2-tf-") && !strcontains(r, "policy/meetlab-v2-boundary")])
+      if s.Effect == "Allow"
+    ])
+    error_message = "an allow reaches the CI roles or the boundary"
+  }
+  assert {
+    condition = anytrue([for s in flatten([for p in aws_iam_role_policy.apply : jsondecode(p.policy).Statement]) :
+      s.Effect == "Deny" && contains(flatten([s.Action]), "iam:*") &&
+      contains(flatten([s.Resource]), "arn:aws:iam::123456789012:role/meetlab-v2-tf-*") &&
+      contains(flatten([s.Resource]), "arn:aws:iam::123456789012:policy/meetlab-v2-boundary")
+    ])
+    error_message = "an explicit deny must protect the CI roles and the boundary"
+  }
+  assert {
+    condition = anytrue([for s in flatten([for p in aws_iam_role_policy.apply : jsondecode(p.policy).Statement]) :
+    s.Effect == "Deny" && contains(flatten([s.Action]), "iam:DeleteRolePermissionsBoundary")])
+    error_message = "no role may lose its boundary"
   }
 }

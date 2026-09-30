@@ -79,6 +79,45 @@ locals {
       },
     ]
   })
+
+  ec2_read = jsonencode({
+    Version   = "2012-10-17"
+    Statement = [{ Effect = "Allow", Action = "ec2:Describe*", Resource = "*" }]
+  })
+
+  # Allow-only, keyed on our tag, so nothing here can reach another project's
+  # resources: ec2 ids aren't name-prefixed, so the tag is the only handle.
+  ec2_write = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid       = "OwnResources"
+        Effect    = "Allow"
+        Action    = "ec2:*"
+        Resource  = "*"
+        Condition = { StringEquals = { "aws:ResourceTag/Project" = "meetlab-v2" } }
+      },
+      {
+        Sid       = "CreateTagged"
+        Effect    = "Allow"
+        Action    = ["ec2:Create*", "ec2:AllocateAddress"]
+        Resource  = "*"
+        Condition = { StringEquals = { "aws:RequestTag/Project" = "meetlab-v2" } }
+      },
+      {
+        Sid       = "TagOnlyOnCreate"
+        Effect    = "Allow"
+        Action    = "ec2:CreateTags"
+        Resource  = "*"
+        Condition = { Null = { "ec2:CreateAction" = "false" } }
+      },
+    ]
+  })
+
+  policies = {
+    plan  = { state = local.state, ec2 = local.ec2_read }
+    apply = { state = local.state, ec2 = local.ec2_read, ec2_write = local.ec2_write }
+  }
 }
 
 resource "aws_iam_role" "plan" {
@@ -88,9 +127,10 @@ resource "aws_iam_role" "plan" {
 }
 
 resource "aws_iam_role_policy" "plan" {
-  name   = "state"
-  role   = aws_iam_role.plan.id
-  policy = local.state
+  for_each = local.policies.plan
+  name     = each.key
+  role     = aws_iam_role.plan.id
+  policy   = each.value
 }
 
 resource "aws_iam_role" "apply" {
@@ -100,10 +140,21 @@ resource "aws_iam_role" "apply" {
 }
 
 resource "aws_iam_role_policy" "apply" {
-  name   = "state"
-  role   = aws_iam_role.apply.id
-  policy = local.state
+  for_each = local.policies.apply
+  name     = each.key
+  role     = aws_iam_role.apply.id
+  policy   = each.value
 }
 
 output "plan_role_arn" { value = aws_iam_role.plan.arn }
 output "apply_role_arn" { value = aws_iam_role.apply.arn }
+
+moved {
+  from = aws_iam_role_policy.plan
+  to   = aws_iam_role_policy.plan["state"]
+}
+
+moved {
+  from = aws_iam_role_policy.apply
+  to   = aws_iam_role_policy.apply["state"]
+}

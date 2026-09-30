@@ -252,3 +252,18 @@ run "ci_cannot_touch_its_own_roles_or_the_boundary" {
     error_message = "no role may lose its boundary"
   }
 }
+
+run "ci_can_manage_our_service_connect_namespace" {
+  command = plan
+
+  assert {
+    condition = alltrue([for a in ["servicediscovery:Get*", "servicediscovery:List*"] :
+    contains(flatten([for p in aws_iam_role_policy.plan : [for s in jsondecode(p.policy).Statement : s.Action]]), a)])
+    error_message = "plan needs to refresh the namespace"
+  }
+  assert {
+    condition = anytrue([for s in flatten([for p in aws_iam_role_policy.apply : jsondecode(p.policy).Statement]) :
+    contains(flatten([s.Action]), "servicediscovery:CreateHttpNamespace") && try(s.Condition.StringEquals["aws:RequestTag/Project"], "") == "meetlab-v2"])
+    error_message = "namespaces are created only with our tag (their ARNs are random ids)"
+  }
+}

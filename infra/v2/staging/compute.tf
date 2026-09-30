@@ -17,6 +17,15 @@ resource "aws_ecs_cluster" "this" {
     name  = "containerInsights"
     value = "disabled"
   }
+  service_connect_defaults {
+    namespace = aws_service_discovery_http_namespace.this.arn
+  }
+}
+
+# Service Connect: services find each other by name (meet -> http://agent-runner:7860)
+# without a second load balancer.
+resource "aws_service_discovery_http_namespace" "this" {
+  name = "meetlab-v2-staging"
 }
 
 data "aws_ssm_parameter" "ecs_ami" {
@@ -121,6 +130,30 @@ resource "aws_iam_role" "execution" {
   assume_role_policy = jsonencode({
     Version   = "2012-10-17"
     Statement = [{ Effect = "Allow", Action = "sts:AssumeRole", Principal = { Service = "ecs-tasks.amazonaws.com" } }]
+  })
+}
+
+locals {
+  parameters = "arn:aws:ssm:us-east-1:${data.aws_caller_identity.current.account_id}:parameter/meetlab-v2/staging"
+  db_secret  = aws_db_instance.this.master_user_secret[0].secret_arn
+}
+
+# Values are written by infra/v2/seed-staging-secrets.sh; Terraform only names them.
+resource "aws_iam_role_policy" "execution_secrets" {
+  name = "staging-secrets"
+  role = aws_iam_role.execution.id
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      { Effect = "Allow", Action = "ssm:GetParameters", Resource = "${local.parameters}/*" },
+      { Effect = "Allow", Action = "secretsmanager:GetSecretValue", Resource = local.db_secret },
+      {
+        Effect    = "Allow"
+        Action    = "kms:Decrypt"
+        Resource  = "*"
+        Condition = { StringEquals = { "kms:ViaService" = ["ssm.us-east-1.amazonaws.com", "secretsmanager.us-east-1.amazonaws.com"] } }
+      },
+    ]
   })
 }
 

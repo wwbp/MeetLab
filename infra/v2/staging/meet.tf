@@ -1,5 +1,5 @@
-# The meet service. Secrets and the control API arrive in the next PR; meet boots
-# without them (its config is read per request) and serves /api/health.
+# The meet service: the public app and console. It reaches agent-runner by name
+# through Service Connect.
 
 resource "aws_cloudwatch_log_group" "meet" {
   name              = "/meetlab-v2/staging/meet"
@@ -28,12 +28,15 @@ resource "aws_ecs_task_definition" "meet" {
     name              = "meet"
     image             = "${aws_ecr_repository.this["meet"].repository_url}:${var.image_tag}"
     essential         = true
-    cpu               = 512
-    memoryReservation = 768
+    cpu               = 256
+    memoryReservation = 512
     portMappings      = [{ containerPort = 3000, hostPort = 0, protocol = "tcp" }]
     environment = [
       { name = "MEET_BASE_URL", value = "https://meet-staging.wwbp.org" },
+      { name = "BOT_RUNNER_URL", value = "http://agent-runner:7860/" },
     ]
+    secrets = [for n in ["LIVEKIT_URL", "LIVEKIT_API_KEY", "LIVEKIT_API_SECRET", "BOT_RUNNER_SECRET", "CONSOLE_PASSWORD"] :
+    { name = n, valueFrom = "${local.parameters}/${n}" }]
     logConfiguration = {
       logDriver = "awslogs"
       options = {
@@ -63,6 +66,10 @@ resource "aws_ecs_service" "meet" {
     target_group_arn = aws_lb_target_group.meet.arn
     container_name   = "meet"
     container_port   = 3000
+  }
+  service_connect_configuration {
+    enabled   = true
+    namespace = aws_service_discovery_http_namespace.this.arn
   }
   depends_on = [aws_lb_listener.https, aws_ecs_cluster_capacity_providers.this]
 }

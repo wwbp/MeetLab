@@ -38,10 +38,19 @@ $7.1k in September, all lab projects). So this is priced from what runs:
 |---|---|---|---|
 | 2026-09-30 | **Load testing (50 / 100 sessions)** | Staging uses v1's vendor keys (OpenAI, ElevenLabs, Deepgram, LiveKit), which share v1's quotas and bill; an exhausted ElevenLabs quota makes bots silent with no error | Staging has its own keys, or free drop-in models for STT/TTS/LLM, so scale tests measure our infrastructure without spending vendor quota |
 
+## Follow-ups found along the way
+
+| Found | Item | Where | Why it matters |
+|---|---|---|---|
+| 2026-09-30 | **Bot goes silent instead of failing when its STT backend is missing** | `bot.py` / `nemotron_stt.py`: `parakeet-*` with no `NEMOTRON_STT_URL` posts to a bare `/v1/audio/transcriptions`; every turn errors, the session stays "running" | Same failure would hit prod if the NIM URL were lost. Fail the session at start with a clear reason (design plan iteration 5) |
+| 2026-09-30 | Flaky integration test: `room delete clears bot claim…` | `meet/tests/concierge-api.test.mjs:378`, 30 s wait for local LiveKit to drop the room | Failed once on #91 (Terraform-only), passed on re-run |
+| 2026-09-30 | Harness logs `KeyError` on LiveKit reconnect | `livekit.rtc` `local_track_published` after a signal resume | Noise, but hides real errors in sanity output |
+
 ## Decisions
 
 | Date | Decision | Why | Revisit when |
 |---|---|---|---|
+| 2026-09-30 | Staging bots use Deepgram (`STT_MODEL_OVERRIDE=nova-3-general`) | No staging NIM yet; the DB default (Parakeet NIM) left the sanity bot silent | Staging NIM lands (bot-pool PR): remove the override, set `NEMOTRON_STT_URL` |
 | 2026-09-30 | App tasks accept each other on host ports (security-group self rule) | In bridge mode, Service Connect proxies talk across instances on host ports; without it meet → agent-runner hung whenever the two landed on different hosts | awsvpc + ENI trunking would allow per-service groups |
 | 2026-09-30 | Task definitions are never deregistered (`skip_destroy`) | `ecs:DeregisterTaskDefinition` can't be scoped to a resource; granting it would let CI deregister any project's task definitions | — |
 | 2026-09-30 | agent-runner is private; meet reaches it as `http://agent-runner:7860` via ECS Service Connect | meet already proxies the console, SQLAdmin and bot API; no second load balancer | — |

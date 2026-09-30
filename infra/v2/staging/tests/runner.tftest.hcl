@@ -101,3 +101,16 @@ run "task_definition_revisions_are_never_deregistered" {
     error_message = "a task definition replace would call DeregisterTaskDefinition, which CI must not hold"
   }
 }
+
+# The DB default STT is the Parakeet NIM. Staging has no NIM yet, and without one the
+# bot posts to a bare /v1/audio/transcriptions, every transcription fails and it stays
+# silent (sanity run, 2026-09-30). Until the staging NIM lands, force Deepgram.
+run "staging_bots_can_hear_without_a_nim" {
+  command = apply
+
+  assert {
+    condition = contains([for e in jsondecode(aws_ecs_task_definition.runner_app.container_definitions)[0].environment : e.value if e.name == "STT_MODEL_OVERRIDE"],
+    "nova-3-general")
+    error_message = "no NIM on staging: STT must be overridden to Deepgram"
+  }
+}

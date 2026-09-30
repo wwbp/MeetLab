@@ -27,6 +27,9 @@ resource "aws_ecs_task_definition" "runner_app" {
       # ponytail: recordings stay on the container disk (lost on restart) until the
       # bot-pool PR gives tasks a role for the media bucket.
       { name = "STORAGE_BACKEND", value = "local" },
+      # ponytail: Deepgram until staging has its own NIM (bot-pool PR); then remove
+      # this and set NEMOTRON_STT_URL, so staging runs prod's STT.
+      { name = "STT_MODEL_OVERRIDE", value = "nova-3-general" },
     ]
     secrets = concat(
       [for n in ["OPENAI_API_KEY", "ELEVENLABS_API_KEY", "DEEPGRAM_API_KEY", "LIVEKIT_URL", "LIVEKIT_API_KEY", "LIVEKIT_API_SECRET", "BOT_RUNNER_SECRET", "CONSOLE_PASSWORD"] :

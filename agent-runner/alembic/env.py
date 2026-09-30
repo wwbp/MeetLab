@@ -6,6 +6,7 @@ from alembic import context
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from db.models import Base
+from db.url import database_url
 
 config = context.config
 if config.config_file_name is not None:
@@ -13,7 +14,7 @@ if config.config_file_name is not None:
 
 target_metadata = Base.metadata
 
-DATABASE_URL = os.environ["DATABASE_URL"]
+DATABASE_URL = database_url(os.environ)
 
 
 def run_migrations_offline() -> None:

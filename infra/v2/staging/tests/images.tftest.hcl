@@ -1,6 +1,12 @@
 # Offline: mock provider, no AWS.
 
-mock_provider "aws" {}
+mock_provider "aws" {
+  source = "./tests/mocks"
+}
+
+variables {
+  image_tag = "test"
+}
 
 run "one_repository_per_image_under_the_meetlab_v2_prefix" {
   command = apply

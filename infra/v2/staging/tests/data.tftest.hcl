@@ -1,6 +1,12 @@
 # Offline: mock provider, no AWS.
 
-mock_provider "aws" {}
+mock_provider "aws" {
+  source = "./tests/mocks"
+}
+
+variables {
+  image_tag = "test"
+}
 
 run "database_is_private_encrypted_and_hard_to_lose" {
   command = apply

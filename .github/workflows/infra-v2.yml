@@ -2,12 +2,13 @@
 #
 #   PR into v2  -> offline tests + plan, posted on the PR (read-only role);
 #                  images built but not pushed
-#   merge to v2 -> apply, then build and push images tagged with the commit SHA
+#   merge to v2 -> build and push images tagged with the commit SHA, then apply,
+#                  which points the services at that SHA and waits for them to be healthy
 #                  (the `staging` environment, which only v2 may deploy to, is the
 #                  only thing that can assume the apply role)
 #
 # One workflow, not two: chaining workflows (workflow_run) also only works from the
-# default branch, and images need the repositories the apply creates.
+# default branch.
 #
 # The gate is the merge: GitHub's free plan has no required reviewers, so a PR into v2
 # is merged only after its plan has been read and approved.
@@ -69,7 +70,8 @@ jobs:
         run: |
           set -euo pipefail
           terraform init -input=false
-          terraform plan -input=false -no-color -lock-timeout=5m -out=tfplan
+          terraform plan -input=false -no-color -lock-timeout=5m -out=tfplan \
+            -var="image_tag=${{ github.event.pull_request.head.sha }}"
           terraform show -no-color tfplan > plan.txt
       - name: Post plan on the PR
         env:
@@ -92,7 +94,7 @@ jobs:
 
   apply:
     if: github.event_name == 'push' && github.ref == 'refs/heads/v2'
-    needs: test
+    needs: images
     runs-on: ubuntu-latest
     environment: staging
     permissions:
@@ -111,11 +113,11 @@ jobs:
         run: |
           set -euo pipefail
           terraform init -input=false
-          terraform plan -input=false -no-color -lock-timeout=5m -out=tfplan
+          terraform plan -input=false -no-color -lock-timeout=5m -out=tfplan -var="image_tag=${{ github.sha }}"
           terraform apply -input=false -no-color tfplan
       - name: Verify no drift after apply
         working-directory: infra/v2/staging
-        run: terraform plan -input=false -no-color -detailed-exitcode
+        run: terraform plan -input=false -no-color -detailed-exitcode -var="image_tag=${{ github.sha }}"
 
   # PRs: prove both images still build. No credentials.
   build:
@@ -138,11 +140,10 @@ jobs:
           push: false
           cache-from: type=gha,scope=${{ matrix.name }}
 
-  # Merges: push images tagged with the commit SHA, after the apply that owns the
-  # repositories.
+  # Merges: push images tagged with the commit SHA; apply then deploys that SHA.
   images:
     if: github.event_name == 'push' && github.ref == 'refs/heads/v2'
-    needs: apply
+    needs: test
     runs-on: ubuntu-latest
     environment: staging
     permissions:

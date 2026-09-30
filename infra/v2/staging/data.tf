@@ -5,6 +5,13 @@ resource "aws_security_group" "app" {
   name        = "meetlab-v2-staging-app"
   description = "meet, control API and bot tasks"
   vpc_id      = aws_vpc.this.id
+  # Bridge networking: ECS maps container ports to the ephemeral range on the host.
+  ingress {
+    from_port       = 32768
+    to_port         = 65535
+    protocol        = "tcp"
+    security_groups = [aws_security_group.alb.id]
+  }
   egress {
     from_port   = 0
     to_port     = 0

@@ -192,11 +192,15 @@ locals {
   })
 
   policies = {
-    plan = { state = local.state, ec2 = local.ec2_read, data = local.data_read, images_read = local.images_read }
+    plan = {
+      state        = local.state, ec2 = local.ec2_read, data = local.data_read, images_read = local.images_read,
+      compute_read = local.compute_read,
+    }
     apply = {
-      state       = local.state, ec2 = local.ec2_read, ec2_write = local.ec2_write,
-      data        = local.data_read, data_write = local.data_write,
-      images_read = local.images_read, images = local.images_write,
+      state        = local.state, ec2 = local.ec2_read, ec2_write = local.ec2_write,
+      data         = local.data_read, data_write = local.data_write,
+      images_read  = local.images_read, images = local.images_write,
+      compute_read = local.compute_read, compute = local.compute_write, iam = local.iam_write,
     }
   }
 }

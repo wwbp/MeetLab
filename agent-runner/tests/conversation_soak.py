@@ -49,7 +49,7 @@ from conversation_script import (  # noqa: E402
     reply_verdict,
     summarise_replies,
 )
-from _sim_common import RUNNER_URL, env, request, token  # noqa: E402
+from _sim_common import MEET_URL, RUNNER_URL, env, start_bot, token  # noqa: E402
 from harness_sharding import combine_shards, shard_rooms, shard_worker_count  # noqa: E402
 from generate_conversation_audio import FIXTURES, fixture_name  # noqa: E402
 
@@ -172,7 +172,7 @@ async def run_room(idx: int) -> dict:
               "pairs": [], "error": None, "disconnected": False}
 
     try:
-        resp = request("POST", "/start", {"room_name": room_name})
+        resp = start_bot(room_name)
         result["session_id"] = resp.get("session_id")
     except Exception as e:
         result["error"] = f"/start failed: {e!r}"
@@ -314,7 +314,7 @@ def main() -> int:
     workers = shard_worker_count(rooms=ROOMS, cpus=int(env("HARNESS_WORKERS", "0")) or (os.cpu_count() or 2))
     shards = shard_rooms(ROOMS, workers)
     print(f"\nconversation soak — {ROOMS} room(s) across {len(shards)} process(es)")
-    print(f"target: {RUNNER_URL}\n")
+    print(f"target: {MEET_URL or RUNNER_URL}\n")
 
     if len(shards) <= 1:
         results = asyncio.run(_run_shard(shards[0] if shards else []))

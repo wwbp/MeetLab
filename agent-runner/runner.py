@@ -403,15 +403,30 @@ async def start_bot(request: Request, background_tasks: BackgroundTasks, _=Depen
                     .values(id=bot_identity, meta={"role": "bot"})
                     .on_conflict_do_nothing(index_elements=["id"])
                 )
-                session.add(
-                    Conversation(
-                        id=session_id,
-                        room_name=room_name,
-                        bot_identity=bot_identity,
-                        status="running",
-                        meta=conv_meta,
-                    )
-                )
+                # One running session per room (uq_conversations_one_running_per_room):
+                # a repeated start returns the session already running, no second bot.
+                inserted = (await session.execute(
+                    pg_insert(Conversation)
+                    .values(id=session_id, room_name=room_name, bot_identity=bot_identity,
+                            status="running", meta=conv_meta)
+                    .on_conflict_do_nothing(index_elements=["room_name"],
+                                            index_where=text("status = 'running'"))
+                    .returning(Conversation.id)
+                )).scalar_one_or_none()
+                running = None if inserted else (await session.execute(
+                    select(Conversation).where(Conversation.room_name == room_name,
+                                               Conversation.status == "running")
+                )).scalar_one()
+
+        if running is not None:
+            logger.info(f"Room {room_name} already has running session {running.id}; not starting another bot")
+            return {
+                "session_id": running.id,
+                "room_name": room_name,
+                "bot_identity": running.bot_identity,
+                "message": "Bot already running in this room",
+                "already_running": True,
+            }
 
         if os.environ.get("BOT_DISPATCHER") == "ecs":
             # One ECS task per meeting (step 4c): the task reads this row and mints its

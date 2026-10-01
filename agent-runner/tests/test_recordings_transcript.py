@@ -25,6 +25,7 @@ exist in LiveKit, so start_room_composite_egress always raises TwirpError
 
 import os
 import unittest
+import uuid
 
 import requests
 
@@ -40,7 +41,13 @@ def _post(path, **kwargs):
 
 
 def _start_bot(room_name: str) -> str:
-    """Create a running Conversation via POST /start; return session_id."""
+    """Create a running Conversation via POST /start; return session_id.
+
+    The room gets a unique suffix: a room holds one running session at a time, and
+    these sessions never end (no LiveKit room), so a fixed name would return the
+    previous run's session instead of a fresh one.
+    """
+    room_name = f"{room_name}-{uuid.uuid4().hex[:6]}"
     r = _post("/start", json={"room_name": room_name})
     assert r.status_code == 200, f"bot start failed for {room_name!r}: {r.text}"
     return r.json()["session_id"]

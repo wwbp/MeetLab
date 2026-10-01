@@ -7,8 +7,10 @@ from sqlalchemy import (
     DateTime,
     Float,
     ForeignKey,
+    Index,
     String,
     Text,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
@@ -50,6 +52,12 @@ class Conversation(Base):
     """
 
     __tablename__ = "conversations"
+    # One running session per room, enforced by Postgres so it holds across runner
+    # processes and instances; /start returns the running one instead of a second bot.
+    __table_args__ = (
+        Index("uq_conversations_one_running_per_room", "room_name",
+              unique=True, postgresql_where=text("status = 'running'")),
+    )
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True, default=_uuid)
     room_name: Mapped[str] = mapped_column(String(256), nullable=False)

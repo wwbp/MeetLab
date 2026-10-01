@@ -9,6 +9,12 @@ from unittest import mock
 from fastapi.testclient import TestClient
 
 
+def _room(name: str) -> str:
+    """A fresh room name. A room holds one running session at a time, and the stubbed
+    bots here never end, so a fixed name would meet the previous run's session."""
+    return f"{name}-{uuid.uuid4().hex[:6]}"
+
+
 class RunnerStartApiTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -142,7 +148,7 @@ class RunnerStartApiTests(unittest.TestCase):
         identity = "bot_" + "x" * 124
         response = self.client.post(
             "/start",
-            json={"room_name": "test-room", "bot_identity": identity},
+            json={"room_name": _room("test-room"), "bot_identity": identity},
         )
         self.assertEqual(response.status_code, 200, response.text)
         self.assertEqual(response.json().get("bot_identity"), identity)
@@ -152,7 +158,7 @@ class RunnerStartApiTests(unittest.TestCase):
     # ------------------------------------------------------------------
 
     def test_explicit_bot_identity_echoed(self):
-        room_name = "runner-test-room"
+        room_name = _room("runner-test-room")
         bot_identity = "bot_runner_test_identity"
         response = self.client.post(
             "/start",
@@ -164,7 +170,7 @@ class RunnerStartApiTests(unittest.TestCase):
         self.assertEqual(payload.get("bot_identity"), bot_identity)
 
     def test_generated_bot_identity_has_bot_prefix(self):
-        response = self.client.post("/start", json={"room_name": "auto-id-room"})
+        response = self.client.post("/start", json={"room_name": _room("auto-id-room")})
         self.assertEqual(response.status_code, 200, response.text)
         bot_identity = response.json().get("bot_identity", "")
         self.assertTrue(
@@ -173,7 +179,7 @@ class RunnerStartApiTests(unittest.TestCase):
         )
 
     def test_response_contains_session_id_and_room_name(self):
-        response = self.client.post("/start", json={"room_name": "session-id-room"})
+        response = self.client.post("/start", json={"room_name": _room("session-id-room")})
         self.assertEqual(response.status_code, 200, response.text)
         payload = response.json()
         self.assertIn("session_id", payload)
@@ -182,9 +188,67 @@ class RunnerStartApiTests(unittest.TestCase):
         self.assertIn("message", payload)
 
     def test_room_name_is_stripped(self):
-        response = self.client.post("/start", json={"room_name": "  padded-room  "})
+        room = _room("padded-room")
+        response = self.client.post("/start", json={"room_name": f"  {room}  "})
         self.assertEqual(response.status_code, 200, response.text)
-        self.assertEqual(response.json().get("room_name"), "padded-room")
+        self.assertEqual(response.json().get("room_name"), room)
+
+    # ------------------------------------------------------------------
+    # One running session per room (design iteration 2, diagnosis F3): a repeated
+    # start -- a double click, a retry after meet's 10 s timeout -- returns the
+    # session already running instead of putting a second bot in the meeting.
+    # ------------------------------------------------------------------
+
+    def _db(self, fn):
+        """Run an async DB function on the TestClient's event loop (its pool lives there)."""
+        async def go():
+            async with self.runner_module.AsyncSessionLocal() as db:
+                async with db.begin():
+                    return await fn(db)
+        return self.client.portal.call(go)
+
+    def test_a_second_start_for_a_room_returns_its_running_session(self):
+        room, started = _room("double-start"), []
+        with mock.patch.object(sys.modules["bot"], "bot", side_effect=lambda a: started.append(a)):
+            first = self.client.post("/start", json={"room_name": room})
+            second = self.client.post("/start", json={"room_name": room})
+        self.assertEqual((first.status_code, second.status_code), (200, 200), second.text)
+        self.assertEqual(second.json()["session_id"], first.json()["session_id"])
+        self.assertEqual(second.json()["bot_identity"], first.json()["bot_identity"])
+        self.assertEqual(len(started), 1, "a second start must not start a second bot")
+
+    def test_a_second_start_launches_no_second_ecs_task(self):
+        ecs = mock.Mock()
+        ecs.run_task.return_value = {"tasks": [{"taskArn": "arn:task/1"}], "failures": []}
+        room = _room("double-start-ecs")
+        with mock.patch.dict(os.environ, self.ECS_ENV), \
+             mock.patch.object(self.runner_module, "_ecs_client", return_value=ecs):
+            self.client.post("/start", json={"room_name": room})
+            self.client.post("/start", json={"room_name": room})
+        self.assertEqual(ecs.run_task.call_count, 1)
+
+    def test_a_room_can_start_again_once_its_session_has_ended(self):
+        room = _room("restart")
+        first = self.client.post("/start", json={"room_name": room}).json()["session_id"]
+        Conversation = self.runner_module.Conversation
+        self._db(lambda db: db.execute(
+            self.runner_module.update(Conversation).where(Conversation.id == first).values(status="completed")))
+        second = self.client.post("/start", json={"room_name": room}).json()["session_id"]
+        self.assertNotEqual(second, first)
+
+    def test_the_database_refuses_a_second_running_session_for_a_room(self):
+        # The rule lives in Postgres, so it holds across runner processes and instances.
+        from sqlalchemy.exc import IntegrityError
+
+        Conversation, room = self.runner_module.Conversation, _room("db-rule")
+
+        async def two_running(db):
+            db.add(Conversation(id=str(uuid.uuid4()), room_name=room, status="running"))
+            await db.flush()
+            db.add(Conversation(id=str(uuid.uuid4()), room_name=room, status="running"))
+            await db.flush()
+        with self.assertRaises(IntegrityError):
+            self._db(two_running)
 
     # ------------------------------------------------------------------
     # BOT_DISPATCHER=ecs: the bot runs as its own ECS task (step 4c)
@@ -199,7 +263,7 @@ class RunnerStartApiTests(unittest.TestCase):
         with mock.patch.dict(os.environ, self.ECS_ENV), \
              mock.patch.object(self.runner_module, "_ecs_client", return_value=ecs), \
              mock.patch.object(sys.modules["bot"], "bot", side_effect=lambda a: started.append(a)):
-            response = self.client.post("/start", json={"room_name": "ecs-room"})
+            response = self.client.post("/start", json={"room_name": _room("ecs-room")})
         self.assertEqual(response.status_code, 200, response.text)
         self.assertEqual(ecs.run_task.call_args.kwargs["clientToken"], response.json()["session_id"])
         self.assertEqual(started, [], "the API process must not also run the bot")
@@ -209,7 +273,7 @@ class RunnerStartApiTests(unittest.TestCase):
         ecs.run_task.return_value = {"tasks": [], "failures": [{"reason": "RESOURCE:MEMORY"}]}
         with mock.patch.dict(os.environ, self.ECS_ENV), \
              mock.patch.object(self.runner_module, "_ecs_client", return_value=ecs):
-            response = self.client.post("/start", json={"room_name": "ecs-full-room"})
+            response = self.client.post("/start", json={"room_name": _room("ecs-full-room")})
         self.assertEqual(response.status_code, 503, response.text)
         self.assertIn("RESOURCE:MEMORY", response.json()["error"])
 
@@ -536,7 +600,7 @@ class RunnerStartApiTests(unittest.TestCase):
         self.assertEqual(conv["meta"].get("requested_by"), "start-link")
 
     def test_start_without_custom_data_has_empty_meta(self):
-        response = self.client.post("/start", json={"room_name": "room-no-meta"})
+        response = self.client.post("/start", json={"room_name": _room("room-no-meta")})
         self.assertEqual(response.status_code, 200, response.text)
         session_id = response.json()["session_id"]
         convs = self.client.get("/conversations", params={"limit": 200}).json()["conversations"]

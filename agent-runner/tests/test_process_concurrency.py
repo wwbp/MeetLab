@@ -30,8 +30,6 @@ import unittest
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 from process_concurrency import (
-    RECONCILER_LOCK_KEY,
-    should_run_singleton,
     worker_count,
 )
 
@@ -73,27 +71,6 @@ class TestWorkerCount(unittest.TestCase):
     def test_it_can_be_pinned_to_one_for_local_work(self):
         """Debugging is far easier in a single process."""
         self.assertEqual(worker_count(env={"AGENT_RUNNER_WORKERS": "1"}), 1)
-
-
-class TestSingletonElection(unittest.TestCase):
-    """Exactly one process across the whole fleet runs the periodic jobs."""
-
-    def test_the_process_holding_the_lock_runs_it(self):
-        self.assertTrue(should_run_singleton(acquired=True))
-
-    def test_every_other_process_stands_down(self):
-        self.assertFalse(should_run_singleton(acquired=False))
-
-    def test_an_unavailable_database_does_not_elect_anyone(self):
-        """Failing closed is right here: the reconciler is a safety net, and a
-        fleet that all decide they are the leader is worse than a delayed
-        cleanup."""
-        self.assertFalse(should_run_singleton(acquired=None))
-
-    def test_the_lock_key_is_a_stable_constant(self):
-        """Two different keys elect two leaders, which defeats the point."""
-        self.assertIsInstance(RECONCILER_LOCK_KEY, int)
-        self.assertEqual(RECONCILER_LOCK_KEY, abs(RECONCILER_LOCK_KEY))
 
 
 if __name__ == "__main__":

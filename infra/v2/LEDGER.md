@@ -43,6 +43,9 @@ $7.1k in September, all lab projects). So this is priced from what runs:
 
 | Found | Item | Where | Why it matters |
 |---|---|---|---|
+| 2026-10-01 | ~~**After every rolling deploy, nothing reconciles**~~ (fixed: every process reconciles) | `runner.py` advisory-lock election ran once at startup; the old task held the lock while the new one started, so every new process stood down for good (diagnosis F6). Found when a `kill -9`'d bot was never failed | In v1 too: stale sessions and silent bots are never cleaned up after a deploy until the next restart |
+| 2026-10-01 | Live acceptance tests from a laptop are unreliable | The Mac sleeps (6–10 min gaps): AWS signatures expire, LiveKit sockets drop, timeouts fire | Run live acceptance tests from inside AWS (a CI job or a one-off ECS task) |
+| 2026-10-01 | One intermittent failure in `test_recordings_transcript.test_fresh_session_always_returns_200` | Seen once during a laptop-sleep window; 3 full runs since pass | Watch for a recurrence |
 | 2026-10-01 | Cold bot start is 132 s from an empty pool | Instance boot (93 s) + image pull (35 s) | A participant must never wait that long: pre-scale the bot pool before a study; slimming the 1 GB image cuts the pull |
 | 2026-10-01 | ~~Bot dies on SIGTERM without leaving the room or writing `ended`~~ | `bot.py`, no signal handler (exit 143) | Fixed in 4c PR 4: bot tasks run Pipecat's runner with `handle_sigterm` |
 | 2026-10-01 | Managed scaling launched 2 instances for 1 pending task | `aws_ecs_capacity_provider.bots` | Doubles cold-start cost; check `maximum_scaling_step_size` when sizing |

@@ -33,7 +33,6 @@ from config import load_config, require
 from db.config_loader import load_bot_config
 from event_log import EVENT_SEVERITIES, install_error_event_sink, record_event
 from db.engine import AsyncSessionLocal, engine
-from process_concurrency import RECONCILER_LOCK_KEY, should_run_singleton
 from db.models import BotConfig, Conversation, Event, MediaFile, Speaker, Utterance
 from runner_types import LiveKitRunnerArguments
 from bot_token import bot_token
@@ -1115,44 +1114,14 @@ async def _install_event_log_sink() -> None:
 _RECONCILER_SESSION: list = []
 
 
-async def _claim_reconciler_role() -> bool | None:
-    """Try to become the fleet's single reconciler, via a Postgres advisory lock.
-
-    True if this process holds it, False if another does, None if the question
-    could not be answered. The lock lives as long as its database session and
-    Postgres frees it automatically when that ends, so the role moves on its own
-    if a process dies — no heartbeat, no lease to expire.
-    """
-    try:
-        db = AsyncSessionLocal()
-        got = await db.execute(
-            text("SELECT pg_try_advisory_lock(:k)"), {"k": RECONCILER_LOCK_KEY}
-        )
-        acquired = bool(got.scalar())
-        if acquired:
-            # Deliberately left open: closing it would release the lock and the
-            # role along with it.
-            _RECONCILER_SESSION.append(db)
-        else:
-            await db.close()
-        return acquired
-    except Exception as e:
-        logger.warning(f"could not determine reconciler role: {e}")
-        return None
-
-
-@app.on_event("startup")
-async def _start_conversation_reconcile_loop() -> None:
+async def _start_conversation_reconcile_loop() -> "asyncio.Task | None":
     if os.environ.get("DISABLE_CONVERSATION_RECONCILE", "").lower() in ("1", "true", "yes"):
         return
 
-    # Several worker processes per instance, several instances: without election
-    # this runs N*M times over. It is idempotent, so the cost is a redundant
-    # LiveKit round-trip per process per cycle rather than corruption — but that
-    # multiplies with exactly the scaling this change enables.
-    if not should_run_singleton(acquired=await _claim_reconciler_role()):
-        logger.info("conversation reconcile loop: another process holds the role")
-        return
+    # Every process reconciles; none is elected. An election that runs once at startup
+    # left nothing reconciling after every rolling deploy (the old task held the lock
+    # while the new one started). Each write below is conditional on 'running', so N
+    # processes cost N LiveKit round-trips per tick, never a wrong status.
 
     interval = int(os.environ.get("CONVERSATION_RECONCILE_INTERVAL_SECONDS", "120"))
 
@@ -1165,8 +1134,9 @@ async def _start_conversation_reconcile_loop() -> None:
             except Exception as e:
                 logger.warning(f"conversation reconcile loop error: {e}")
 
-    asyncio.create_task(_loop())
+    loop = asyncio.create_task(_loop())
     logger.info(f"conversation reconcile loop started (every {interval}s)")
+    return loop
 
 
 @app.post("/recordings/reconcile")

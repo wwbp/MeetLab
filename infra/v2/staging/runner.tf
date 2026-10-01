@@ -1,6 +1,26 @@
-# agent-runner: the control API, console backend and (for now) the bots, which still
-# run inside it. Private: only meet reaches it, by name, through Service Connect.
-# Per-session bot tasks replace the in-process bots in a later PR.
+# agent-runner: the control API and console backend. Private: only meet reaches it,
+# by name, through Service Connect. It starts each meeting's bot as an ECS task
+# (bots.tf); it no longer runs bots itself.
+
+# Shared by the runner and the bot task: the bot code runs in both images' processes.
+locals {
+  bot_environment = [
+    { name = "DB_HOST", value = aws_db_instance.this.address },
+    { name = "DB_NAME", value = aws_db_instance.this.db_name },
+    { name = "DB_USER", value = aws_db_instance.this.username },
+    # ponytail: recordings stay on the container disk (lost on restart) until PR 6
+    # gives bot tasks a role for the media bucket.
+    { name = "STORAGE_BACKEND", value = "local" },
+    # ponytail: Deepgram until staging has its own NIM; then remove this and set
+    # NEMOTRON_STT_URL, so staging runs prod's STT.
+    { name = "STT_MODEL_OVERRIDE", value = "nova-3-general" },
+  ]
+  bot_secrets = concat(
+    [for n in ["OPENAI_API_KEY", "ELEVENLABS_API_KEY", "DEEPGRAM_API_KEY", "LIVEKIT_URL", "LIVEKIT_API_KEY", "LIVEKIT_API_SECRET", "BOT_RUNNER_SECRET", "CONSOLE_PASSWORD"] :
+    { name = n, valueFrom = "${local.parameters}/${n}" }],
+    [{ name = "DB_PASSWORD", valueFrom = "${local.db_secret}:password::" }],
+  )
+}
 
 resource "aws_cloudwatch_log_group" "runner" {
   name              = "/meetlab-v2/staging/agent-runner"
@@ -13,6 +33,7 @@ resource "aws_ecs_task_definition" "runner_app" {
   network_mode             = "bridge"
   skip_destroy             = true # see tests/runner.tftest.hcl
   execution_role_arn       = aws_iam_role.execution.arn
+  task_role_arn            = aws_iam_role.runner_task.arn
   container_definitions = jsonencode([{
     name              = "agent-runner"
     image             = "${aws_ecr_repository.this["agent-runner"].repository_url}:${var.image_tag}"
@@ -20,22 +41,14 @@ resource "aws_ecs_task_definition" "runner_app" {
     cpu               = 1024
     memoryReservation = 1536
     portMappings      = [{ name = "http", containerPort = 7860, hostPort = 0, protocol = "tcp", appProtocol = "http" }]
-    environment = [
-      { name = "DB_HOST", value = aws_db_instance.this.address },
-      { name = "DB_NAME", value = aws_db_instance.this.db_name },
-      { name = "DB_USER", value = aws_db_instance.this.username },
-      # ponytail: recordings stay on the container disk (lost on restart) until the
-      # bot-pool PR gives tasks a role for the media bucket.
-      { name = "STORAGE_BACKEND", value = "local" },
-      # ponytail: Deepgram until staging has its own NIM (bot-pool PR); then remove
-      # this and set NEMOTRON_STT_URL, so staging runs prod's STT.
-      { name = "STT_MODEL_OVERRIDE", value = "nova-3-general" },
-    ]
-    secrets = concat(
-      [for n in ["OPENAI_API_KEY", "ELEVENLABS_API_KEY", "DEEPGRAM_API_KEY", "LIVEKIT_URL", "LIVEKIT_API_KEY", "LIVEKIT_API_SECRET", "BOT_RUNNER_SECRET", "CONSOLE_PASSWORD"] :
-      { name = n, valueFrom = "${local.parameters}/${n}" }],
-      [{ name = "DB_PASSWORD", valueFrom = "${local.db_secret}:password::" }],
-    )
+    environment = concat(local.bot_environment, [
+      # Step 4c: each meeting's bot is its own ECS task (dispatch.py), not a coroutine here.
+      { name = "BOT_DISPATCHER", value = "ecs" },
+      { name = "ECS_CLUSTER", value = aws_ecs_cluster.this.name },
+      { name = "BOT_TASK_DEFINITION", value = aws_ecs_task_definition.bot.family },
+      { name = "BOT_CAPACITY_PROVIDER", value = aws_ecs_capacity_provider.bots.name },
+    ])
+    secrets = local.bot_secrets
     healthCheck = {
       command     = ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:7860/health')\""]
       interval    = 15

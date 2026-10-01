@@ -36,6 +36,8 @@ from db.engine import AsyncSessionLocal, engine
 from process_concurrency import RECONCILER_LOCK_KEY, should_run_singleton
 from db.models import BotConfig, Conversation, Event, MediaFile, Speaker, Utterance
 from runner_types import LiveKitRunnerArguments
+from bot_token import bot_token
+from dispatch import DispatchError, EcsBotTarget, run_bot_task
 
 config = load_config()
 
@@ -315,27 +317,14 @@ async def _create_bot_token(
     participant_name: str = "bot",
     agent_name: Optional[str] = None,
 ) -> str:
-    token = (
-        api.AccessToken(LIVEKIT_API_KEY, LIVEKIT_API_SECRET)
-        .with_identity(participant_identity)
-        .with_name(participant_name)
-        .with_grants(
-            api.VideoGrants(
-                room_join=True,
-                room=room_name,
-                can_publish=True,
-                can_subscribe=True,
-                can_publish_data=True,
-                agent=True,
-            )
-        )
-        .with_ttl(timedelta(minutes=BOT_TOKEN_TTL_MINUTES))
-    )
-    if agent_name:
-        token = token.with_room_config(
-            api.RoomConfiguration(agents=[api.AgentDispatch(agent_name=agent_name)])
-        )
-    return token.to_jwt()
+    return bot_token(room_name, participant_identity, LIVEKIT_API_KEY, LIVEKIT_API_SECRET,
+                     BOT_TOKEN_TTL_MINUTES, name=participant_name, agent_name=agent_name)
+
+
+def _ecs_client():
+    import boto3
+
+    return boto3.client("ecs")
 
 
 @app.post("/start")
@@ -396,7 +385,9 @@ async def start_bot(request: Request, background_tasks: BackgroundTasks, _=Depen
         # Persist the caller's custom_data (e.g. requested_by, bot_config_scope from a
         # start link) on the conversation so "which config ran this session" is queryable.
         custom_data = body.get("custom_data")
-        conv_meta = custom_data if isinstance(custom_data, dict) else {}
+        conv_meta = dict(custom_data) if isinstance(custom_data, dict) else {}
+        if agent_name:
+            conv_meta["agent_name"] = agent_name  # bot_task re-mints the same token from the row
 
         async with AsyncSessionLocal() as session:
             async with session.begin():
@@ -415,17 +406,33 @@ async def start_bot(request: Request, background_tasks: BackgroundTasks, _=Depen
                     )
                 )
 
-        runner_args = LiveKitRunnerArguments(
-            url=LIVEKIT_URL,
-            token=bot_token,
-            room_name=room_name,
-            session_id=session_id,
-            bot_identity=bot_identity,
-            body=body,
-        )
+        if os.environ.get("BOT_DISPATCHER") == "ecs":
+            # One ECS task per meeting (step 4c): the task reads this row and mints its
+            # own token; the session ID is the clientToken, so a retry is the same bot.
+            try:
+                task_arn = await asyncio.to_thread(
+                    run_bot_task, _ecs_client(), session_id, EcsBotTarget.from_env(os.environ))
+            except DispatchError as e:
+                async with AsyncSessionLocal() as session:
+                    async with session.begin():
+                        await session.execute(
+                            update(Conversation).where(Conversation.id == session_id)
+                            .values(status="error", ended_at=func.now()))
+                logger.error(f"bot dispatch failed for {room_name}: {e}")
+                return JSONResponse({"error": str(e), "session_id": session_id}, status_code=503)
+            logger.info(f"Started bot task {task_arn} for session {session_id}")
+        else:
+            runner_args = LiveKitRunnerArguments(
+                url=LIVEKIT_URL,
+                token=bot_token,
+                room_name=room_name,
+                session_id=session_id,
+                bot_identity=bot_identity,
+                body=body,
+            )
 
-        from bot import bot
-        background_tasks.add_task(bot, runner_args)
+            from bot import bot
+            background_tasks.add_task(bot, runner_args)
 
         logger.info(f"Starting bot session {session_id} in room {room_name}")
 

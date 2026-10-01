@@ -19,11 +19,12 @@ $7.1k in September, all lab projects). So this is priced from what runs:
 | NAT (vivaprox-vpc) | 33 |
 | meet: `t3.medium` | 30 |
 
-**v2 staging, running total:** **$114/month**
+**v2 staging, running total:** **$114/month**, plus $0.085/hour per running bot instance (c6i.large, 0 when idle)
 
 | Added | PR | Resource | $/month | Notes |
 |---|---|---|---|---|
-| 2026-09-30 | runner | agent-runner service + Service Connect namespace | ~0 | Shares the t3.medium; a rolling deploy may briefly add a second |
+| 2026-09-30 | 4c PR 1 | Bot pool: c6i.large, 0 to 2 instances | 0 idle | $0.085/hour each while bots run |
+| 2026-09-30 | #89 | agent-runner service + Service Connect namespace | ~0 | Shares the t3.medium; a rolling deploy may briefly add a second |
 | 2026-09-30 | #88 | ECS instance `t3.medium` + 30 GB disk | 33 | Services only; bots get their own group |
 | 2026-09-30 | #88 | Application load balancer | 18 | $16.40 base + usage |
 | 2026-09-30 | #87 | 2 ECR repositories, last 30 images each | ~1 | $0.10/GB-month |
@@ -46,10 +47,26 @@ $7.1k in September, all lab projects). So this is priced from what runs:
 | 2026-09-30 | Flaky integration test: `room delete clears bot claim…` | `meet/tests/concierge-api.test.mjs:378`, 30 s wait for local LiveKit to drop the room | Failed once on #91 (Terraform-only), passed on re-run |
 | 2026-09-30 | Harness logs `KeyError` on LiveKit reconnect | `livekit.rtc` `local_track_published` after a signal resume | Noise, but hides real errors in sanity output |
 
+## Upgrade later (load testing)
+
+| Item | Staging now | At load testing |
+|---|---|---|
+| STT | Deepgram (`STT_MODEL_OVERRIDE`); NIM to come as `g6.xlarge` **spot**, 0 instances unless a test needs it (~$0.55/hour on) | On-demand or reserved NIM capacity, sized from the test |
+| Bot pool | `c6i.large`, 0 to 2 | Instance type, floor and ceiling from measured per-session load |
+| Services instance | one `t3.medium` | Sized from the test |
+| Database | `db.t4g.small`, single-AZ | Sized up, multi-AZ before a study |
+| NAT | one | One per AZ before production |
+
 ## Decisions
 
 | Date | Decision | Why | Revisit when |
 |---|---|---|---|
+| 2026-09-30 | Staging = target architecture on the smallest machines that run it | User's rule: stay close to the vision; right-size at load testing | Load testing |
+| 2026-09-30 | Bots run as ECS tasks on staging from 4c PR 1 (`BOT_DISPATCHER=ecs`) | The spike measures the real path through meet; reverting is one env var | — |
+| 2026-09-30 | The bot task gets only the session ID; it reads its row and mints its own LiveKit token | No token in RunTask overrides, which anyone with ecs:DescribeTasks can read | — |
+| 2026-09-30 | The runner's task role may RunTask only the bot family in this cluster, and Stop/Describe only this cluster's tasks | Least privilege for the one thing it launches | — |
+| 2026-09-30 | Local dispatcher: Docker via a socket proxy (create/start/stop/inspect only) | Mirrors ECS; limits what agent-runner can do to the laptop | — |
+| 2026-09-30 | 4c takes iterations 2, 5, 6, 7, 8; iterations 1, 3, 4, 9, 10 come after 4c | Only what a detached bot needs to be safe | After 4c PR 6 |
 | 2026-09-30 | Staging bots use Deepgram (`STT_MODEL_OVERRIDE=nova-3-general`) | No staging NIM yet; the DB default (Parakeet NIM) left the sanity bot silent | Staging NIM lands (bot-pool PR): remove the override, set `NEMOTRON_STT_URL` |
 | 2026-09-30 | App tasks accept each other on host ports (security-group self rule) | In bridge mode, Service Connect proxies talk across instances on host ports; without it meet → agent-runner hung whenever the two landed on different hosts | awsvpc + ENI trunking would allow per-service groups |
 | 2026-09-30 | Task definitions are never deregistered (`skip_destroy`) | `ecs:DeregisterTaskDefinition` can't be scoped to a resource; granting it would let CI deregister any project's task definitions | — |

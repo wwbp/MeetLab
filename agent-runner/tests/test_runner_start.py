@@ -4,6 +4,7 @@ import sys
 import types
 import unittest
 import uuid
+from unittest import mock
 
 from fastapi.testclient import TestClient
 
@@ -184,6 +185,33 @@ class RunnerStartApiTests(unittest.TestCase):
         response = self.client.post("/start", json={"room_name": "  padded-room  "})
         self.assertEqual(response.status_code, 200, response.text)
         self.assertEqual(response.json().get("room_name"), "padded-room")
+
+    # ------------------------------------------------------------------
+    # BOT_DISPATCHER=ecs: the bot runs as its own ECS task (step 4c)
+    # ------------------------------------------------------------------
+
+    ECS_ENV = {"BOT_DISPATCHER": "ecs", "ECS_CLUSTER": "c", "BOT_TASK_DEFINITION": "td", "BOT_CAPACITY_PROVIDER": "cp"}
+
+    def test_ecs_dispatch_runs_a_task_keyed_by_the_session_not_an_in_process_bot(self):
+        ecs = mock.Mock()
+        ecs.run_task.return_value = {"tasks": [{"taskArn": "arn:task/1"}], "failures": []}
+        started = []
+        with mock.patch.dict(os.environ, self.ECS_ENV), \
+             mock.patch.object(self.runner_module, "_ecs_client", return_value=ecs), \
+             mock.patch.object(sys.modules["bot"], "bot", side_effect=lambda a: started.append(a)):
+            response = self.client.post("/start", json={"room_name": "ecs-room"})
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(ecs.run_task.call_args.kwargs["clientToken"], response.json()["session_id"])
+        self.assertEqual(started, [], "the API process must not also run the bot")
+
+    def test_ecs_refusal_is_reported_not_swallowed(self):
+        ecs = mock.Mock()
+        ecs.run_task.return_value = {"tasks": [], "failures": [{"reason": "RESOURCE:MEMORY"}]}
+        with mock.patch.dict(os.environ, self.ECS_ENV), \
+             mock.patch.object(self.runner_module, "_ecs_client", return_value=ecs):
+            response = self.client.post("/start", json={"room_name": "ecs-full-room"})
+        self.assertEqual(response.status_code, 503, response.text)
+        self.assertIn("RESOURCE:MEMORY", response.json()["error"])
 
     # ------------------------------------------------------------------
     # Health check

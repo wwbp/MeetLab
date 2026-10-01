@@ -8,7 +8,8 @@ room-gone cleanup can never be what closes a session and hide a failure.
   stoptask   ECS StopTask (SIGTERM): exit 0, the bot leaves, it records 'completed'   (4c PR 4)
   removed    the bot removed from the room: its task stops by itself, exit 0          (4c PR 4)
   kill9      kill -9 inside the task (ECS Exec): exit 137, and the heartbeat check
-             fails the session within 60 s while the participant is still there       (4c PR 5)
+             fails the session within 60 s while the participant is still there, and
+             is able to stop its task (a hung bot must not keep running)              (4c PR 5)
 
 A scenario that cannot reach its situation (e.g. the participant drops before the
 kill) is a FAIL, not a skip: an acceptance test that didn't test anything passed nothing.
@@ -162,15 +163,17 @@ async def scenario_kill9():
                      120, "ECS Exec agent running")
         await asyncio.sleep(22)  # at least two heartbeats
         killed_at = time.time()
-        out = subprocess.run(["aws", "ecs", "execute-command", "--region", REGION, "--cluster", CLUSTER, "--task", m.task,
-                              "--container", "bot", "--interactive", "--command", f"sh -c '{_KILL9}'"],
-                             stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=90)
-        if "killing" not in out.stdout:
-            raise Fail(f"kill -9 not delivered: {out.stdout[-200:]} {out.stderr[-200:]}")
+        # An interactive Exec session never returns without a terminal, so don't wait for
+        # it: the evidence that the kill landed is the task's exit code (137 = SIGKILL).
+        exec_ = subprocess.Popen(["aws", "ecs", "execute-command", "--region", REGION, "--cluster", CLUSTER,
+                                  "--task", m.task, "--container", "bot", "--interactive",
+                                  "--command", f"sh -c '{_KILL9}'"],
+                                 stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         await _until(lambda: _describe(m.task)["lastStatus"] == "STOPPED", 120, "killed task stopped")
+        exec_.kill()
         code = _describe(m.task)["containers"][0].get("exitCode")
         if code != 137:
-            raise Fail(f"exit code {code}, expected 137 (SIGKILL)")
+            raise Fail(f"exit code {code}, expected 137 (SIGKILL): the kill did not land")
         if any("ended (" in l for l in _log_lines("/meetlab-v2/staging/bot", m.session, m.started)):
             raise Fail("the bot recorded its own end: this was not a silent death")
 
@@ -179,6 +182,8 @@ async def scenario_kill9():
             return any("heartbeat: failed" in l for l in _log_lines("/meetlab-v2/staging/agent-runner", m.session, killed_at))
         await _until(failed_by_heartbeat, 90, "session failed by the heartbeat check")
         after = time.time() - killed_at
+        if any("could not stop the bot" in l for l in _log_lines("/meetlab-v2/staging/agent-runner", m.session, killed_at)):
+            raise Fail("the reconciler failed the session but could not stop its bot (a hung bot would keep running)")
         if after > 60:
             raise Fail(f"failed by heartbeat only {after:.0f}s after the kill (limit 60 s)")
         return f"exit 137, failed by heartbeat {after:.0f}s after the kill, participant still in the room"

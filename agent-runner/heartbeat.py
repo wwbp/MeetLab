@@ -27,17 +27,35 @@ def silent_sessions(rows, now: datetime) -> list:
     ]
 
 
-async def beat(db_factory, session_id: str) -> None:
+async def beat(db_factory, session_id: str) -> bool:
+    """Mark the session alive; return whether recording has been requested for it."""
     async with db_factory() as db, db.begin():
-        await db.execute(update(Conversation)
-                         .where(Conversation.id == session_id, Conversation.status == "running")
-                         .values(heartbeat_at=datetime.now(timezone.utc)))
+        requested = (await db.execute(
+            update(Conversation)
+            .where(Conversation.id == session_id, Conversation.status == "running")
+            .values(heartbeat_at=datetime.now(timezone.utc))
+            .returning(Conversation.recording_requested))).scalar_one_or_none()
+    return bool(requested)
 
 
-async def beat_forever(db_factory, session_id: str) -> None:
+async def request_recording(db_factory, session_id: str) -> None:
+    """The runner's half of "record this session": the bot picks it up on its next beat."""
+    async with db_factory() as db, db.begin():
+        await db.execute(update(Conversation).where(Conversation.id == session_id)
+                         .values(recording_requested=True))
+
+
+async def beat_forever(db_factory, session_id: str, on_recording=None) -> None:
+    # ponytail: capture starts up to one BEAT after Record is pressed (that audio is
+    # missed); a push channel (LISTEN/NOTIFY) would close the gap if it ever matters.
+    recording = False
     while True:
         try:
-            await beat(db_factory, session_id)
+            requested = await beat(db_factory, session_id)
+            if requested and not recording and on_recording:
+                on_recording()
+                recording = True
+                logger.info(f"session {session_id}: recording requested, per-speaker capture on")
         except Exception as e:  # a missed beat is survivable; three in a row is not
             logger.warning(f"heartbeat for {session_id} failed: {e}")
         await asyncio.sleep(BEAT.total_seconds())

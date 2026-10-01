@@ -73,6 +73,9 @@ class Conversation(Base):
     meta: Mapped[dict] = mapped_column(JSONB, default=dict, server_default="{}")
     # Written by the running bot every heartbeat.BEAT; see heartbeat.py.
     heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Set by the runner when recording is requested; the bot (its own process since
+    # 4c) reads it back on each heartbeat and starts per-speaker capture.
+    recording_requested: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
 
     utterances: Mapped[list["Utterance"]] = relationship(back_populates="conversation")
     events: Mapped[list["Event"]] = relationship(back_populates="conversation")

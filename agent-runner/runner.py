@@ -47,7 +47,7 @@ from dispatch import (
     stop_bot_container,
     stop_bot_task,
 )
-from heartbeat import fail_silent_sessions
+from heartbeat import fail_silent_sessions, request_recording
 
 config = load_config()
 
@@ -1011,8 +1011,10 @@ async def start_recording_for_room(room_name: str) -> tuple[int, dict]:
         )
         already_recording = result.scalar_one_or_none() is not None
 
-    # Turn on per-speaker WAV capture for the running bot (no-op if none is
-    # registered). Idempotent, so a duplicate request just re-enables it.
+    # Turn on per-speaker WAV capture for the running bot. A bot in its own task or
+    # container (4c) reads the flag on its next heartbeat; an in-process bot's sink is
+    # in this process's registry. Both idempotent, so a duplicate request is harmless.
+    await request_recording(AsyncSessionLocal, conv.id)
     sink = audio_tracks.get_sink(room_name)
     if sink is not None:
         sink.enable()

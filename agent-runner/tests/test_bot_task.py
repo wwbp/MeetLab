@@ -10,13 +10,14 @@ Pure/offline: no LiveKit, no AWS, no database. Run with:
 """
 import time
 import unittest
+import unittest.mock
 from types import SimpleNamespace
 
 import jwt
 
 from bot_task import parse_args, runner_args_for
 from bot_token import bot_token
-from dispatch import DispatchError, EcsBotTarget, run_bot_task
+from dispatch import DispatchError, EcsBotTarget, run_bot_task, stop_bot_task
 
 
 class BotTokenTest(unittest.TestCase):
@@ -94,3 +95,18 @@ class DispatchTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class StopTest(unittest.TestCase):
+    def test_stopping_a_session_stops_the_task_started_for_it(self):
+        ecs = unittest.mock.Mock()
+        ecs.list_tasks.return_value = {"taskArns": ["arn:task/9"]}
+        stop_bot_task(ecs, "sess-123", TARGET)
+        ecs.list_tasks.assert_called_once_with(cluster="meetlab-v2-staging", startedBy="sess-123")
+        ecs.stop_task.assert_called_once_with(cluster="meetlab-v2-staging", task="arn:task/9", reason="session sess-123 stopped")
+
+    def test_no_task_is_fine(self):
+        ecs = unittest.mock.Mock()
+        ecs.list_tasks.return_value = {"taskArns": []}
+        stop_bot_task(ecs, "sess-123", TARGET)
+        ecs.stop_task.assert_not_called()

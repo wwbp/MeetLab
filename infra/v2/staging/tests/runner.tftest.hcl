@@ -114,3 +114,15 @@ run "staging_bots_can_hear_without_a_nim" {
     error_message = "no NIM on staging: STT must be overridden to Deepgram"
   }
 }
+
+# heartbeat.py fails a session silent for 30 s; the reconcile loop must look often
+# enough for that to mean ~30 s, not the 120 s default.
+run "silent_bots_are_noticed_within_seconds" {
+  command = apply
+
+  assert {
+    condition = contains([for e in jsondecode(aws_ecs_task_definition.runner_app.container_definitions)[0].environment : "${e.name}=${e.value}"],
+    "CONVERSATION_RECONCILE_INTERVAL_SECONDS=10")
+    error_message = "reconcile every 10 s on staging"
+  }
+}

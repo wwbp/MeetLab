@@ -42,3 +42,9 @@ def run_bot_task(ecs, session_id: str, target: EcsBotTarget) -> str:
     if failures or not tasks:
         raise DispatchError(f"RunTask for session {session_id} failed: {failures or 'no task returned'}")
     return tasks[0]["taskArn"]
+
+
+def stop_bot_task(ecs, session_id: str, target: EcsBotTarget) -> None:
+    """Stop the task started for session_id, if any. SIGTERM: the bot ends gracefully."""
+    for arn in ecs.list_tasks(cluster=target.cluster, startedBy=session_id)["taskArns"]:
+        ecs.stop_task(cluster=target.cluster, task=arn, reason=f"session {session_id} stopped")

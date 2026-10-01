@@ -63,6 +63,8 @@ class Conversation(Base):
     )  # running | completed | error | ended (reconciler-closed)
     root_utterance_id: Mapped[str | None] = mapped_column(String(64))
     meta: Mapped[dict] = mapped_column(JSONB, default=dict, server_default="{}")
+    # Written by the running bot every heartbeat.BEAT; see heartbeat.py.
+    heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     utterances: Mapped[list["Utterance"]] = relationship(back_populates="conversation")
     events: Mapped[list["Event"]] = relationship(back_populates="conversation")

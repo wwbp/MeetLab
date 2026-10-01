@@ -47,6 +47,8 @@ resource "aws_ecs_task_definition" "runner_app" {
       { name = "ECS_CLUSTER", value = aws_ecs_cluster.this.name },
       { name = "BOT_TASK_DEFINITION", value = aws_ecs_task_definition.bot.family },
       { name = "BOT_CAPACITY_PROVIDER", value = aws_ecs_capacity_provider.bots.name },
+      # heartbeat.py: a session silent for 30 s is failed; look every 10 s.
+      { name = "CONVERSATION_RECONCILE_INTERVAL_SECONDS", value = "10" },
     ])
     secrets = local.bot_secrets
     healthCheck = {

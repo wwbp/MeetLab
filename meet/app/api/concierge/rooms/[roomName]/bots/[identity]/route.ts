@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getBotRoomClaim, releaseBotRoomClaim } from '@/lib/concierge/bot-room-claim-store';
+import { callBotRunnerStop } from '@/lib/concierge/bot-runner';
 import { clearBotTrackSubscriptionSignalsForRoom } from '@/lib/concierge/bot-track-subscription-store';
 import { pushConciergeEvent } from '@/lib/concierge/events-store';
 import { noStoreHeaders } from '@/lib/concierge/http-utils';
@@ -7,6 +8,11 @@ import { getRoomServiceClient } from '@/lib/concierge/livekit-admin';
 import { noteRouteError } from '@/lib/concierge/event-log';
 
 export const dynamic = 'force-dynamic';
+
+function isNotFound(error: unknown): boolean {
+  const e = error as { code?: unknown; status?: unknown; message?: unknown };
+  return e?.code === 'not_found' || e?.status === 404 || /not.?found/i.test(String(e?.message ?? ''));
+}
 
 export async function DELETE(
   _request: Request,
@@ -34,8 +40,22 @@ export async function DELETE(
       );
     }
 
+    // Stop at the runner first: removing the participant alone does nothing while the
+    // bot is still starting, and it then joined anyway (acceptance stop_early).
+    const stop = await callBotRunnerStop(roomName);
+    if (!stop.ok) {
+      return NextResponse.json(
+        { error: `Bot runner could not stop the bot: ${stop.errorText ?? stop.status}` },
+        { status: 502, headers: noStoreHeaders() }
+      );
+    }
+
     const roomService = getRoomServiceClient();
-    await roomService.removeParticipant(roomName, identity);
+    try {
+      await roomService.removeParticipant(roomName, identity);
+    } catch (error) {
+      if (!isNotFound(error)) throw error; // not joined yet: the runner already stopped it
+    }
     releaseBotRoomClaim(roomName);
     clearBotTrackSubscriptionSignalsForRoom(roomName);
 

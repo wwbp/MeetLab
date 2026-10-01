@@ -251,6 +251,44 @@ class RunnerStartApiTests(unittest.TestCase):
             self._db(two_running)
 
     # ------------------------------------------------------------------
+    # /stop: the console's Stop button (plan iteration 6). Removing the bot from
+    # LiveKit does nothing before it has joined (5 s warm, up to 166 s cold), and
+    # the bot then joined anyway (acceptance stop_early, 2026-10-01).
+    # ------------------------------------------------------------------
+
+    def _status(self, session_id):
+        Conversation = self.runner_module.Conversation
+        return self._db(lambda db: db.scalar(
+            self.runner_module.select(Conversation.status).where(Conversation.id == session_id)))
+
+    def test_stop_ends_the_rooms_session_at_its_task(self):
+        ecs = mock.Mock()
+        ecs.run_task.return_value = {"tasks": [{"taskArn": "arn:task/1"}], "failures": []}
+        ecs.list_tasks.return_value = {"taskArns": ["arn:task/1"]}
+        room = _room("stop")
+        with mock.patch.dict(os.environ, self.ECS_ENV), \
+             mock.patch.object(self.runner_module, "_ecs_client", return_value=ecs):
+            sid = self.client.post("/start", json={"room_name": room}).json()["session_id"]
+            response = self.client.post("/stop", json={"room_name": room})
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["stopped"], sid)
+        ecs.stop_task.assert_called_once()
+        self.assertEqual(ecs.stop_task.call_args.kwargs["task"], "arn:task/1")
+        self.assertEqual(self._status(sid), "completed")
+
+    def test_a_stopped_room_can_start_a_new_bot_at_once(self):
+        room = _room("stop-restart")
+        first = self.client.post("/start", json={"room_name": room}).json()["session_id"]
+        self.client.post("/stop", json={"room_name": room})
+        second = self.client.post("/start", json={"room_name": room}).json()["session_id"]
+        self.assertNotEqual(second, first)
+
+    def test_stopping_a_room_with_no_bot_is_not_an_error(self):
+        response = self.client.post("/stop", json={"room_name": _room("never-started")})
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertIsNone(response.json()["stopped"])
+
+    # ------------------------------------------------------------------
     # BOT_DISPATCHER=ecs: the bot runs as its own ECS task (step 4c)
     # ------------------------------------------------------------------
 

@@ -27,6 +27,7 @@ import os
 import subprocess
 import sys
 import time
+import urllib.error
 import urllib.request
 import uuid
 from datetime import timedelta
@@ -50,6 +51,15 @@ def _post(path, body):
     req = urllib.request.Request(MEET + path, json.dumps(body).encode(),
                                  {"Content-Type": "application/json"}, method="POST")
     return json.loads(_web.open(req, timeout=30).read())
+
+
+def _console_stop(room, bot_identity):
+    """The console's Stop button."""
+    req = urllib.request.Request(f"{MEET}/api/concierge/rooms/{room}/bots/{bot_identity}", method="DELETE")
+    try:
+        return _web.open(req, timeout=30).status
+    except urllib.error.HTTPError as e:
+        return e.code
 
 
 def _token(room, identity):
@@ -87,14 +97,20 @@ async def _until(check, timeout, what):
 class Meeting:
     """A room with a stand-in participant and a bot started through meet."""
 
+    def __init__(self, wait_for_bot=True):
+        self.wait_for_bot = wait_for_bot
+
     async def __aenter__(self):
         self.room = f"accept-{uuid.uuid4().hex[:6]}"
         self.human = rtc.Room()
         await self.human.connect(os.environ["LIVEKIT_URL"], _token(self.room, "human_standin"))
         _post("/api/console/login", {"password": os.environ["CONSOLE_PASSWORD"]})
         _post("/api/concierge/rooms", {"name": self.room})
-        self.session = _post(f"/api/concierge/rooms/{self.room}/bots", {})["request"]["runnerSessionId"]
+        started = _post(f"/api/concierge/rooms/{self.room}/bots", {})["request"]
+        self.session, self.bot_identity = started["runnerSessionId"], started["botIdentity"]
         self.started = time.time()
+        if not self.wait_for_bot:
+            return self
         self.join_s = await _until(self.bot_present, 420, "bot in the room")
         self.task = _task(self.session)
         if not self.task:
@@ -189,7 +205,26 @@ async def scenario_kill9():
         return f"exit 137, failed by heartbeat {after:.0f}s after the kill, participant still in the room"
 
 
-SCENARIOS = {"start": scenario_start, "stoptask": scenario_stoptask, "removed": scenario_removed, "kill9": scenario_kill9}
+async def scenario_stop_early():
+    """Stop pressed before the bot has joined (it takes 5 s warm, up to 166 s cold).
+    Removing a participant who isn't there yet does nothing, so the bot must still
+    be stopped at its task, and must never turn up in the room afterwards."""
+    async with Meeting(wait_for_bot=False) as m:
+        _console_stop(m.room, m.bot_identity)
+        stopped_at = time.time()
+        while time.time() - stopped_at < 60:
+            m.require_participant()
+            if m.bot_present():
+                raise Fail(f"the bot joined {time.time() - stopped_at:.0f}s after Stop was pressed")
+            await asyncio.sleep(2)
+        task = _task(m.session)
+        if task and _describe(task)["lastStatus"] != "STOPPED":
+            raise Fail(f"the bot's task is still {_describe(task)['lastStatus']} 60 s after Stop")
+        return "Stop before join: the bot never joined, and its task is stopped"
+
+
+SCENARIOS = {"start": scenario_start, "stoptask": scenario_stoptask, "removed": scenario_removed,
+             "kill9": scenario_kill9, "stop_early": scenario_stop_early}
 
 
 async def main(names):

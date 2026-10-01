@@ -134,3 +134,35 @@ export async function callBotRunnerStart(
     clearTimeout(timeout);
   }
 }
+
+/**
+ * The console's Stop: ask the runner to stop the room's running bot at its task.
+ * Removing the participant from LiveKit alone does nothing before the bot has
+ * joined (5 s warm, up to 166 s cold), and the bot then joined anyway.
+ */
+export async function callBotRunnerStop(
+  roomName: string
+): Promise<{ ok: boolean; status: number; stopped?: string | null; errorText?: string }> {
+  const config = getServerConfig();
+  const botRunnerUrl = requireEnv(config.botRunnerUrl, 'BOT_RUNNER_URL');
+  const endpoint = `${botRunnerUrl.endsWith('/') ? botRunnerUrl : `${botRunnerUrl}/`}stop`;
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (config.botRunnerSecret) headers['Authorization'] = `Bearer ${config.botRunnerSecret}`;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 10000);
+  try {
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ room_name: roomName }),
+      signal: controller.signal,
+    });
+    const text = await response.text();
+    if (!response.ok) return { ok: false, status: response.status, errorText: text };
+    return { ok: true, status: response.status, stopped: (JSON.parse(text) as { stopped?: string | null }).stopped };
+  } catch (error) {
+    return { ok: false, status: 500, errorText: error instanceof Error ? error.message : 'Bot runner request failed' };
+  } finally {
+    clearTimeout(timeout);
+  }
+}

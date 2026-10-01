@@ -43,7 +43,6 @@ $7.1k in September, all lab projects). So this is priced from what runs:
 
 | Found | Item | Where | Why it matters |
 |---|---|---|---|
-| 2026-10-01 | **An apply replaced instances the reviewed plan didn't show** | Launch templates read the latest ECS AMI from SSM at plan time; AWS published a new one between the PR plan and the merge apply, so the merge rolled both instance groups | Pin the AMI ID in code and update it by PR, so every instance change is in a reviewed plan |
 | 2026-10-01 | ~~#99 dropped the reconcile loop's startup registration~~ (fixed in #100) | Its test called the loop directly; now it goes through app startup | Test through the real entry point, not the function |
 | 2026-10-01 | ~~**After every rolling deploy, nothing reconciles**~~ (fixed: every process reconciles) | `runner.py` advisory-lock election ran once at startup; the old task held the lock while the new one started, so every new process stood down for good (diagnosis F6). Found when a `kill -9`'d bot was never failed | In v1 too: stale sessions and silent bots are never cleaned up after a deploy until the next restart |
 | 2026-10-01 | Live acceptance tests from a laptop are unreliable | The Mac sleeps (6–10 min gaps): AWS signatures expire, LiveKit sockets drop, timeouts fire | Run live acceptance tests from inside AWS (a CI job or a one-off ECS task) |
@@ -83,6 +82,7 @@ Also seen: managed scaling launched **two** instances for one pending task.
 
 | Date | Decision | Why | Revisit when |
 |---|---|---|---|
+| 2026-10-01 | Instances use the **latest** ECS AMI; it is not pinned. Every merge to a deployed branch is a deployment that may replace instances (downtime); during studies, merges are timed around sessions | Pinning means hand-maintaining image IDs; a new AMI can arrive between a PR's plan and its apply, and that is accepted | If an unexpected instance replacement ever hurts a study |
 | 2026-10-01 | Live acceptance tests (`acceptance_staging.py`) run after every deploy in CI and from a laptop, same script | Catch failures at every stage; laptop runs alone are unreliable (the Mac sleeps) | — |
 | 2026-10-01 | CI acceptance uses its own role `meetlab-v2-acceptance`: 4 named secrets, staging tasks only (list, describe, stop, exec), staging logs only | Least privilege; the apply role doesn't read secrets | — |
 | 2026-09-30 | Staging = target architecture on the smallest machines that run it | User's rule: stay close to the vision; right-size at load testing | Load testing |

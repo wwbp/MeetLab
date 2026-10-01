@@ -1,6 +1,7 @@
 # The role the CI `acceptance` job uses to run agent-runner/tests/acceptance_staging.py
 # against staging after each deploy: read the four secrets the test needs, watch and
-# stop bot tasks, exec into one to kill -9 it, read staging logs. Nothing else.
+# stop bot tasks, exec into one to kill -9 it, read staging logs, and simulate the
+# staging roles' permissions (permission_contract.py). Nothing else.
 
 locals {
   cluster_arn = "arn:aws:ecs:us-east-1:${local.account}:cluster/meetlab-v2-staging"
@@ -39,6 +40,12 @@ resource "aws_iam_role_policy" "acceptance" {
         Effect   = "Allow"
         Action   = ["ecs:DescribeTasks", "ecs:StopTask", "ecs:ExecuteCommand"]
         Resource = ["arn:aws:ecs:us-east-1:${local.account}:task/meetlab-v2-staging/*", local.cluster_arn]
+      },
+      {
+        # agent-runner/tests/permission_contract.py
+        Effect   = "Allow"
+        Action   = "iam:SimulatePrincipalPolicy"
+        Resource = "arn:aws:iam::${local.account}:role/meetlab-v2-staging-*"
       },
       {
         Effect   = "Allow"

@@ -58,7 +58,10 @@ async def one_run(lk: api.LiveKitAPI, label: str) -> dict:
     r = {"run": label, "room": room}
     t0 = time.monotonic()
     resp = start_bot(room)
-    session_id = resp.get("runnerSessionId") or resp.get("session_id")
+    # meet answers {request: {runnerSessionId, ...}}; the runner itself answers {session_id}
+    session_id = (resp.get("request") or {}).get("runnerSessionId") or resp.get("session_id")
+    if not session_id:
+        return {**r, "error": f"no session id in start response: {resp}"}
     r["session_id"] = session_id
     arn = running_at = joined_at = None
     while time.monotonic() - t0 < TIMEOUT and not (running_at and joined_at):

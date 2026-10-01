@@ -144,6 +144,13 @@ resource "aws_iam_role_policy" "runner_dispatch" {
         Condition = { ArnEquals = { "ecs:cluster" = aws_ecs_cluster.this.arn } }
       },
       {
+        # heartbeat.py finds a silent session's task by startedBy before stopping it.
+        Effect    = "Allow"
+        Action    = "ecs:ListTasks"
+        Resource  = "*"
+        Condition = { ArnEquals = { "ecs:cluster" = aws_ecs_cluster.this.arn } }
+      },
+      {
         Effect   = "Allow"
         Action   = ["ecs:StopTask", "ecs:DescribeTasks", "ecs:TagResource"]
         Resource = "arn:aws:ecs:us-east-1:${data.aws_caller_identity.current.account_id}:task/${aws_ecs_cluster.this.name}/*"

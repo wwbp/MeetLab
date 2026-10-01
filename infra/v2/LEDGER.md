@@ -82,6 +82,7 @@ Also seen: managed scaling launched **two** instances for one pending task.
 
 | Date | Decision | Why | Revisit when |
 |---|---|---|---|
+| 2026-10-01 | A permission contract (`agent-runner/tests/permission_contract.py`) lists every AWS call the code makes and calls each role must never make; CI simulates it against the deployed roles before the live scenarios | Runtime permission gaps (`ListTasks`) surfaced only in live bots; simulation finds them in seconds. Adding an AWS call to the code means adding it to the contract | — |
 | 2026-10-01 | Instances use the **latest** ECS AMI; it is not pinned. Every merge to a deployed branch is a deployment that may replace instances (downtime); during studies, merges are timed around sessions | Pinning means hand-maintaining image IDs; a new AMI can arrive between a PR's plan and its apply, and that is accepted | If an unexpected instance replacement ever hurts a study |
 | 2026-10-01 | Live acceptance tests (`acceptance_staging.py`) run after every deploy in CI and from a laptop, same script | Catch failures at every stage; laptop runs alone are unreliable (the Mac sleeps) | — |
 | 2026-10-01 | CI acceptance uses its own role `meetlab-v2-acceptance`: 4 named secrets, staging tasks only (list, describe, stop, exec), staging logs only | Least privilege; the apply role doesn't read secrets | — |

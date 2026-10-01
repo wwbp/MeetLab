@@ -43,6 +43,8 @@ $7.1k in September, all lab projects). So this is priced from what runs:
 
 | Found | Item | Where | Why it matters |
 |---|---|---|---|
+| 2026-10-01 | The socket proxy passed a request to create an exec (400 from Docker, not 403 from the proxy); starting one is governed by `EXEC=0`, now set explicitly | `.devcontainer/docker-compose.yml` | Local laptop only; confirm exec start is refused before relying on it |
+| 2026-10-01 | A bot alone in a room never leaves, so tests that start bots in empty rooms leave containers running | `bot.py` (design iteration 4, `should_leave`); `make test-unit` cleans them up | Same leak existed in-process, just invisible |
 | 2026-10-01 | ~~Deleting a room left its session 'running' for a moment; a room recreated at once was handed the old bot~~ (fixed in #105: delete-room calls `/stop`) | Race introduced by one-session-per-room (#104); caught by the CI integration test `room delete clears bot claim…` | Without it, delete-and-recreate in the console could show a stale bot |
 | 2026-10-01 | Running `pnpm test:api` several times within a minute trips the start-link rate limit (5/min/IP) and fails tests 10 and 12 with 429 | `meet/app/api/start-link/route.ts` | Not a bug; wait a minute between local runs |
 | 2026-10-01 | ~~#99 dropped the reconcile loop's startup registration~~ (fixed in #100) | Its test called the loop directly; now it goes through app startup | Test through the real entry point, not the function |
@@ -84,6 +86,8 @@ Also seen: managed scaling launched **two** instances for one pending task.
 
 | Date | Decision | Why | Revisit when |
 |---|---|---|---|
+| 2026-10-01 | Local bots run as Docker containers (`BOT_DISPATCHER=docker`, the default in compose): each copies the runner's own container with the `bot_task` command, through a socket proxy allowing only container create, start, stop and inspect | Mirrors one ECS task per meeting (D5); a local code edit reaches local bots through the shared mount | — |
+| 2026-10-01 | Docker stop is sent without waiting for the container to exit | Docker's stop blocks up to the 120 s grace, ECS StopTask returns at once; meet gives /stop 10 s | — |
 | 2026-10-01 | Console Stop goes through the runner (`/stop`: StopTask + close the session) before removing the participant | Removal alone did nothing before the bot joined, and the bot joined anyway (acceptance `stop_early`); removal also threw (500) when the bot wasn't in the room yet | — |
 | 2026-10-01 | One running session per room (Postgres partial unique index); a repeated start returns the running session. `request_key` dropped | No caller retries the same request; the real duplicates are two starts for one room (double click, retry after meet's 10 s timeout), which this covers | If a caller ever needs to retry one request across rooms |
 | 2026-10-01 | A permission contract (`agent-runner/tests/permission_contract.py`) lists every AWS call the code makes and calls each role must never make; CI simulates it against the deployed roles before the live scenarios | Runtime permission gaps (`ListTasks`) surfaced only in live bots; simulation finds them in seconds. Adding an AWS call to the code means adding it to the contract | — |

@@ -21,6 +21,9 @@ class RunnerStartApiTests(unittest.TestCase):
         os.environ.setdefault("LIVEKIT_API_KEY", "devkey")
         os.environ.setdefault("LIVEKIT_API_SECRET", "secret")
         os.environ.setdefault("LIVEKIT_URL", "ws://transport-server:7880")
+        # Bots in-process (stubbed) unless a test patches a dispatcher in: the local
+        # stack sets BOT_DISPATCHER=docker, and these tests must never start real bots.
+        cls._dispatcher = os.environ.pop("BOT_DISPATCHER", None)
 
         # Stub out bot so /start does not spawn a real pipeline. This replaces a
         # GLOBAL — sys.modules is process-wide — so the real module is stashed and
@@ -54,6 +57,8 @@ class RunnerStartApiTests(unittest.TestCase):
     @classmethod
     def tearDownClass(cls):
         cls._client_ctx.__exit__(None, None, None)
+        if cls._dispatcher is not None:
+            os.environ["BOT_DISPATCHER"] = cls._dispatcher
         # Undo the sys.modules["bot"] stub so later test modules import the real one.
         if cls._real_bot_module is not None:
             sys.modules["bot"] = cls._real_bot_module
@@ -305,6 +310,52 @@ class RunnerStartApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.text)
         self.assertEqual(ecs.run_task.call_args.kwargs["clientToken"], response.json()["session_id"])
         self.assertEqual(started, [], "the API process must not also run the bot")
+
+    DOCKER_ENV = {"BOT_DISPATCHER": "docker", "DOCKER_HOST": "tcp://docker-socket-proxy:2375"}
+
+    def test_docker_dispatch_starts_a_container_not_an_in_process_bot(self):
+        started = []
+        with mock.patch.dict(os.environ, self.DOCKER_ENV), \
+             mock.patch.object(self.runner_module, "run_bot_container", return_value="meetlab-bot-x") as run, \
+             mock.patch.object(sys.modules["bot"], "bot", side_effect=lambda a: started.append(a)):
+            response = self.client.post("/start", json={"room_name": _room("docker-room")})
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(run.call_args.args[1], response.json()["session_id"])
+        self.assertEqual(started, [], "the API process must not also run the bot")
+
+    def test_docker_refusal_is_reported_not_swallowed(self):
+        with mock.patch.dict(os.environ, self.DOCKER_ENV), \
+             mock.patch.object(self.runner_module, "run_bot_container",
+                               side_effect=self.runner_module.DispatchError("starting meetlab-bot-x failed: 403")):
+            response = self.client.post("/start", json={"room_name": _room("docker-refused")})
+        self.assertEqual(response.status_code, 503, response.text)
+        self.assertIn("403", response.json()["error"])
+
+    def test_docker_stop_stops_the_sessions_container(self):
+        room = _room("docker-stop")
+        with mock.patch.dict(os.environ, self.DOCKER_ENV), \
+             mock.patch.object(self.runner_module, "run_bot_container", return_value="meetlab-bot-x"), \
+             mock.patch.object(self.runner_module, "stop_bot_container") as stop:
+            sid = self.client.post("/start", json={"room_name": room}).json()["session_id"]
+            self.client.post("/stop", json={"room_name": room})
+        self.assertEqual(stop.call_args.args[1], sid)
+
+    def test_docker_stop_does_not_wait_for_the_container_to_exit(self):
+        # Docker's stop call blocks until the container exits (up to the 120 s grace);
+        # ECS StopTask returns at once. meet gives /stop 10 s, so a slow exit under
+        # load left the session open (integration test, 2026-10-01).
+        import time as _time
+
+        room = _room("docker-slow-stop")
+        with mock.patch.dict(os.environ, self.DOCKER_ENV), \
+             mock.patch.object(self.runner_module, "run_bot_container", return_value="meetlab-bot-x"), \
+             mock.patch.object(self.runner_module, "stop_bot_container", side_effect=lambda *a: _time.sleep(3)):
+            self.client.post("/start", json={"room_name": room})
+            t0 = _time.monotonic()
+            response = self.client.post("/stop", json={"room_name": room})
+            took = _time.monotonic() - t0
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertLess(took, 1.0, f"/stop waited {took:.1f}s for the container to exit")
 
     def test_ecs_refusal_is_reported_not_swallowed(self):
         ecs = mock.Mock()

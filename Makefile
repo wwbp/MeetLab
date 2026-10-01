@@ -20,6 +20,8 @@ up:
 	$(COMPOSE) up --build -d
 
 down:
+	@# Bot containers (BOT_DISPATCHER=docker) are not part of the compose project.
+	-docker rm -f $$(docker ps -aq --filter label=meetlab.session) 2>/dev/null
 	$(COMPOSE) down -v
 
 start: up migrate
@@ -49,6 +51,9 @@ test-unit:
 	$(COMPOSE) up -d transport-server agent-runner meet
 	$(COMPOSE) exec -T agent-runner uv run alembic upgrade head
 	$(COMPOSE) exec -T agent-runner uv run python -m unittest discover -s tests -p "test_*.py" -v
+	@# Tests that call the live runner start real bot containers in rooms nobody joins;
+	@# a bot alone never leaves yet (design iteration 4, should_leave). Clean them up.
+	-docker rm -f $$(docker ps -aq --filter label=meetlab.session) 2>/dev/null
 	$(COMPOSE) exec -T meet pnpm test
 	$(COMPOSE) exec -T meet pnpm lint
 

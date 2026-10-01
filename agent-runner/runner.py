@@ -1,6 +1,8 @@
 import asyncio
 import io
 import os
+import socket
+import threading
 import traceback
 import uuid
 import zipfile
@@ -36,7 +38,15 @@ from db.engine import AsyncSessionLocal, engine
 from db.models import BotConfig, Conversation, Event, MediaFile, Speaker, Utterance
 from runner_types import LiveKitRunnerArguments
 from bot_token import bot_token
-from dispatch import DispatchError, EcsBotTarget, run_bot_task, stop_bot_task
+from dispatch import (
+    DispatchError,
+    DockerApi,
+    EcsBotTarget,
+    run_bot_container,
+    run_bot_task,
+    stop_bot_container,
+    stop_bot_task,
+)
 from heartbeat import fail_silent_sessions
 
 config = load_config()
@@ -332,6 +342,20 @@ def _stop_bot(session_id: str) -> None:
     # silent sessions per tick, move to asyncio.to_thread if that ever grows.
     if os.environ.get("BOT_DISPATCHER") == "ecs":
         stop_bot_task(_ecs_client(), session_id, EcsBotTarget.from_env(os.environ))
+    elif os.environ.get("BOT_DISPATCHER") == "docker":
+        # Docker's stop call blocks until the container exits (up to the 120 s grace);
+        # ECS StopTask returns at once. Send it and don't wait, as on ECS: the SIGTERM
+        # goes out immediately and the container exits on its own.
+        def stop():
+            try:
+                stop_bot_container(_docker_api(), session_id)
+            except Exception as e:
+                logger.warning(f"could not stop the bot container for session {session_id}: {e}")
+        threading.Thread(target=stop, daemon=True).start()
+
+
+def _docker_api() -> DockerApi:
+    return DockerApi(os.environ["DOCKER_HOST"])
 
 
 @app.post("/start")
@@ -428,12 +452,18 @@ async def start_bot(request: Request, background_tasks: BackgroundTasks, _=Depen
                 "already_running": True,
             }
 
-        if os.environ.get("BOT_DISPATCHER") == "ecs":
-            # One ECS task per meeting (step 4c): the task reads this row and mints its
-            # own token; the session ID is the clientToken, so a retry is the same bot.
+        dispatcher = os.environ.get("BOT_DISPATCHER")
+        if dispatcher in ("ecs", "docker"):
+            # One task (ECS) or container (local Docker) per meeting (step 4c): it reads
+            # this row and mints its own token; the session ID makes a retry the same bot
+            # (ECS clientToken, Docker container name).
             try:
-                task_arn = await asyncio.to_thread(
-                    run_bot_task, _ecs_client(), session_id, EcsBotTarget.from_env(os.environ))
+                if dispatcher == "ecs":
+                    task_arn = await asyncio.to_thread(
+                        run_bot_task, _ecs_client(), session_id, EcsBotTarget.from_env(os.environ))
+                else:
+                    task_arn = await asyncio.to_thread(
+                        run_bot_container, _docker_api(), session_id, socket.gethostname())
             except DispatchError as e:
                 async with AsyncSessionLocal() as session:
                     async with session.begin():

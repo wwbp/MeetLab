@@ -277,3 +277,38 @@ run "the_boundary_allows_ecs_exec_channels" {
     error_message = "ECS Exec needs these four in the boundary"
   }
 }
+
+# The CI acceptance job (infra-v2.yml) runs live tests against staging after each
+# deploy. Its role reads only what the test needs and acts only on staging tasks.
+run "acceptance_role_is_staging_only_and_least_privilege" {
+  command = plan
+
+  assert {
+    condition     = jsondecode(aws_iam_role.acceptance.assume_role_policy).Statement[0].Condition.StringEquals["token.actions.githubusercontent.com:sub"] == ["repo:wwbp/MeetLab:environment:staging"]
+    error_message = "assumable only from the staging environment"
+  }
+  assert {
+    condition = toset(flatten([for s in jsondecode(aws_iam_role_policy.acceptance.policy).Statement : s.Resource if contains(flatten([s.Action]), "ssm:GetParameter")])) == toset([
+      for n in ["CONSOLE_PASSWORD", "LIVEKIT_URL", "LIVEKIT_API_KEY", "LIVEKIT_API_SECRET"] : "arn:aws:ssm:us-east-1:123456789012:parameter/meetlab-v2/staging/${n}"
+    ])
+    error_message = "reads exactly the four secrets the acceptance test uses"
+  }
+  assert {
+    condition = alltrue([for s in jsondecode(aws_iam_role_policy.acceptance.policy).Statement :
+      alltrue([for r in flatten([s.Resource]) : strcontains(r, "meetlab-v2-staging") || strcontains(r, "/meetlab-v2/staging") || r == "*"])
+    ])
+    error_message = "every resource is staging"
+  }
+  assert {
+    condition = alltrue([for s in jsondecode(aws_iam_role_policy.acceptance.policy).Statement :
+      alltrue([for a in flatten([s.Action]) : contains([
+        "ssm:GetParameter", "kms:Decrypt", "ecs:ListTasks", "ecs:DescribeTasks", "ecs:StopTask", "ecs:ExecuteCommand", "logs:FilterLogEvents",
+    ], a)])])
+    error_message = "only the actions the acceptance test performs"
+  }
+  assert {
+    condition = alltrue([for s in jsondecode(aws_iam_role_policy.acceptance.policy).Statement :
+    length(try(s.Condition, {})) > 0 if contains(flatten([s.Resource]), "*")])
+    error_message = "any statement on * must be narrowed by a condition"
+  }
+}

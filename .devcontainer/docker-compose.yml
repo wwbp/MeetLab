@@ -70,6 +70,23 @@ services:
   # Local Parakeet/Nemotron STT (Experiment 6) — CPU here, same HTTP API as the
   # GPU build on AWS. Selected per-room via stt_model="parakeet-tdt-0.6b-v2".
   # Model (~2.4GB) downloads into the volume on first start.
+  # agent-runner's only way to Docker: container create, start, stop and inspect.
+  # No images, exec, volumes, networks or system calls. The raw socket is read-only
+  # and never mounted into agent-runner itself. Create is still powerful (a container
+  # can mount host paths), which is acceptable on a laptop and never used beyond it.
+  docker-socket-proxy:
+    image: tecnativa/docker-socket-proxy:latest
+    restart: unless-stopped
+    environment:
+      - CONTAINERS=1
+      - POST=1
+      - ALLOW_START=1
+      - ALLOW_STOP=1
+      - ALLOW_RESTARTS=0
+      - EXEC=0
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+
   agent-runner:
     build:
       context: ../agent-runner
@@ -93,6 +110,10 @@ services:
       # Zero-cost mock TTS for load/soak testing (no paid TTS calls). OFF by default —
       # `make soak MOCK=1` turns it on. Never enable in production.
       - BOT_MOCK_TTS=${BOT_MOCK_TTS:-0}
+      # Each meeting's bot runs as its own container, as each is its own ECS task in
+      # staging (dispatch.py). BOT_DISPATCHER= (empty) runs bots in-process instead.
+      - BOT_DISPATCHER=${BOT_DISPATCHER-docker}
+      - DOCKER_HOST=tcp://docker-socket-proxy:2375
     volumes:
       - ../agent-runner:/app:cached
       - agent-runner-venv:/app/.venv
@@ -105,6 +126,8 @@ services:
       transport-server:
         condition: service_started
       jaeger:
+        condition: service_started
+      docker-socket-proxy:
         condition: service_started
     healthcheck:
       test: ["CMD-SHELL", "python3 -c \"import urllib.request; urllib.request.urlopen('http://localhost:7860/health')\""]

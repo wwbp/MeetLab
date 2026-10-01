@@ -267,3 +267,13 @@ run "ci_can_manage_our_service_connect_namespace" {
     error_message = "namespaces are created only with our tag (their ARNs are random ids)"
   }
 }
+
+run "the_boundary_allows_ecs_exec_channels" {
+  command = plan
+
+  assert {
+    condition = alltrue([for a in ["ssmmessages:CreateControlChannel", "ssmmessages:CreateDataChannel", "ssmmessages:OpenControlChannel", "ssmmessages:OpenDataChannel"] :
+    contains(flatten([for s in jsondecode(aws_iam_policy.boundary.policy).Statement : s.Action]), a)])
+    error_message = "ECS Exec needs these four in the boundary"
+  }
+}

@@ -81,6 +81,13 @@ class DispatchTest(unittest.TestCase):
         self.assertEqual(call["startedBy"], "sess-123")
         self.assertEqual(call["capacityProviderStrategy"], [{"capacityProvider": "meetlab-v2-staging-bots", "weight": 1}])
 
+    def test_a_bot_task_can_be_exec_d_into(self):
+        # ECS Exec: a shell in a staging bot for debugging, and `kill -9` for the
+        # silent-death acceptance test (nothing outside the task can SIGKILL it).
+        ecs = FakeEcs({"tasks": [{"taskArn": "arn:task/1"}], "failures": []})
+        run_bot_task(ecs, "sess-123", TARGET)
+        self.assertTrue(ecs.calls[0]["enableExecuteCommand"])
+
     def test_returns_the_task_arn(self):
         ecs = FakeEcs({"tasks": [{"taskArn": "arn:task/1"}], "failures": []})
         self.assertEqual(run_bot_task(ecs, "sess-123", TARGET), "arn:task/1")

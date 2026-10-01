@@ -1114,6 +1114,7 @@ async def _install_event_log_sink() -> None:
 _RECONCILER_SESSION: list = []
 
 
+@app.on_event("startup")
 async def _start_conversation_reconcile_loop() -> "asyncio.Task | None":
     if os.environ.get("DISABLE_CONVERSATION_RECONCILE", "").lower() in ("1", "true", "yes"):
         return

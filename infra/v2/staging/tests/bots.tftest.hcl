@@ -68,6 +68,9 @@ run "the_runner_can_start_and_stop_bot_tasks_and_nothing_else" {
         strcontains(r, ":task-definition/meetlab-v2-staging-bot:"),
         strcontains(r, ":task/meetlab-v2-staging/"),
         r == aws_iam_role.execution.arn,
+        r == aws_iam_role.bot_task.arn,
+        # ListTasks takes no task resource; it is scoped by the cluster condition.
+        r == "*" && try(s.Condition.ArnEquals["ecs:cluster"], "") == aws_ecs_cluster.this.arn,
     ])])])
     error_message = "RunTask only the bot family, Stop/Describe only this cluster's tasks, pass only the execution role"
   }
@@ -98,5 +101,19 @@ run "a_bot_task_can_be_exec_d_into_and_nothing_more" {
       toset(flatten([s.Resource])) == toset([aws_iam_role.execution.arn, aws_iam_role.bot_task.arn])
     if contains(flatten([s.Action]), "iam:PassRole")])
     error_message = "to start a bot the runner passes its execution and task roles, and only those"
+  }
+}
+
+# heartbeat.py stops a silent session's task by finding it (ListTasks startedBy).
+# Without ListTasks the reconciler failed the session but could not stop the task:
+# AccessDenied on staging, 2026-10-01. A hung bot would have kept running.
+run "the_runner_can_find_a_sessions_task_in_this_cluster_only" {
+  command = apply
+
+  assert {
+    condition = anytrue([for s in jsondecode(aws_iam_role_policy.runner_dispatch.policy).Statement :
+      contains(flatten([s.Action]), "ecs:ListTasks") && try(s.Condition.ArnEquals["ecs:cluster"], "") == aws_ecs_cluster.this.arn
+    ])
+    error_message = "ListTasks, limited to this cluster"
   }
 }

@@ -74,7 +74,7 @@ resource "aws_launch_template" "ecs" {
   }
 }
 
-# ponytail: one t3.medium for meet (+ control API next). Bots get their own group.
+# ponytail: one t3.medium for meet and the runner; bots have their own group (bots.tf).
 resource "aws_autoscaling_group" "ecs" {
   name                  = "meetlab-v2-staging-ecs"
   min_size              = 1
@@ -117,7 +117,7 @@ resource "aws_ecs_capacity_provider" "ec2" {
 
 resource "aws_ecs_cluster_capacity_providers" "this" {
   cluster_name       = aws_ecs_cluster.this.name
-  capacity_providers = [aws_ecs_capacity_provider.ec2.name]
+  capacity_providers = [aws_ecs_capacity_provider.ec2.name, aws_ecs_capacity_provider.bots.name]
   default_capacity_provider_strategy {
     capacity_provider = aws_ecs_capacity_provider.ec2.name
     weight            = 1

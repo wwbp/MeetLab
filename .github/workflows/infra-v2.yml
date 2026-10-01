@@ -24,10 +24,10 @@ name: Infra v2
 on:
   pull_request:
     branches: [v2]
-    paths: ["infra/v2/**", ".github/workflows/infra-v2.yml", "Makefile", "meet/**", "agent-runner/**"]
+    paths: ["infra/v2/**", ".github/workflows/infra-v2.yml", "Makefile", "meet/**", "agent-runner/**", "!**/*.md"]
   push:
     branches: [v2]
-    paths: ["infra/v2/**", ".github/workflows/infra-v2.yml", "meet/**", "agent-runner/**"]
+    paths: ["infra/v2/**", ".github/workflows/infra-v2.yml", "meet/**", "agent-runner/**", "!**/*.md"]
 
 permissions:
   contents: read

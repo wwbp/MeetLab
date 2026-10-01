@@ -3,7 +3,8 @@
 #   PR into v2  -> offline tests + plan, posted on the PR (read-only role);
 #                  images built but not pushed
 #   merge to v2 -> build and push images tagged with the commit SHA, then apply,
-#                  which points the services at that SHA and waits for them to be healthy
+#                  which points the services at that SHA and waits for them to be healthy,
+#                  then live acceptance tests against staging (acceptance_staging.py)
 #                  (the `staging` environment, which only v2 may deploy to, is the
 #                  only thing that can assume the apply role)
 #
@@ -180,3 +181,36 @@ jobs:
           tags: ${{ steps.ecr.outputs.registry }}/meetlab-v2/${{ matrix.name }}:${{ github.sha }}
           cache-from: type=gha,scope=${{ matrix.name }}
           cache-to: type=gha,mode=max,scope=${{ matrix.name }}
+
+  # Live acceptance against staging after every deploy: a bot through meet, graceful
+  # stops, and a kill -9 the heartbeat must catch. Same script runs from a laptop.
+  acceptance:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/v2'
+    needs: apply
+    runs-on: ubuntu-latest
+    environment: staging
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.TF_ACCEPTANCE_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+      - name: Session Manager plugin (ECS Exec, for the kill -9 scenario)
+        run: |
+          set -euo pipefail
+          curl -fsSL -o smp.deb https://s3.amazonaws.com/session-manager-downloads/plugin/latest/ubuntu_64bit/session-manager-plugin.deb
+          sudo dpkg -i smp.deb
+      - uses: astral-sh/setup-uv@v6
+      - name: Staging acceptance
+        run: |
+          set -euo pipefail
+          get() { aws ssm get-parameter --with-decryption --name "/meetlab-v2/staging/$1" --query Parameter.Value --output text; }
+          for n in CONSOLE_PASSWORD LIVEKIT_URL LIVEKIT_API_KEY LIVEKIT_API_SECRET; do
+            v="$(get "$n")"; echo "::add-mask::$v"; export "$n=$v"
+          done
+          uv run --no-project --with livekit --with livekit-api --with boto3 \
+            python agent-runner/tests/acceptance_staging.py

@@ -47,8 +47,9 @@ data "aws_iam_openid_connect_provider" "github" {
 locals {
   trust = {
     for role, subjects in {
-      plan  = ["${local.repo}:pull_request", "${local.repo}:ref:refs/heads/v2"]
-      apply = ["${local.repo}:environment:staging"]
+      plan       = ["${local.repo}:pull_request", "${local.repo}:ref:refs/heads/v2"]
+      apply      = ["${local.repo}:environment:staging"]
+      acceptance = ["${local.repo}:environment:staging"]
     } :
     role => jsonencode({
       Version = "2012-10-17"

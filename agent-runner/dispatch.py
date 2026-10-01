@@ -32,6 +32,7 @@ def run_bot_task(ecs, session_id: str, target: EcsBotTarget) -> str:
         clientToken=session_id,
         startedBy=session_id,
         enableECSManagedTags=True,
+        enableExecuteCommand=True,  # ECS Exec: debugging, and kill -9 in the heartbeat acceptance test
         propagateTags="TASK_DEFINITION",
         overrides={"containerOverrides": [{
             "name": target.container,

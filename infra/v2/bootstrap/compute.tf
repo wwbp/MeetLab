@@ -217,6 +217,13 @@ resource "aws_iam_policy" "boundary" {
         Resource = ["arn:aws:s3:::meetlab-v2-*", "arn:aws:s3:::meetlab-v2-*/*"]
       },
       {
+        # ECS Exec into bot tasks: the Session Manager channels, nothing else of SSM.
+        Sid      = "EcsExecChannels"
+        Effect   = "Allow"
+        Action   = ["ssmmessages:CreateControlChannel", "ssmmessages:CreateDataChannel", "ssmmessages:OpenControlChannel", "ssmmessages:OpenDataChannel"]
+        Resource = "*"
+      },
+      {
         Sid      = "LaunchBots"
         Effect   = "Allow"
         Action   = "iam:PassRole"

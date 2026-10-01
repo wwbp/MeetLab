@@ -77,3 +77,26 @@ run "the_runner_can_start_and_stop_bot_tasks_and_nothing_else" {
     error_message = "staging runs bots as tasks"
   }
 }
+
+# ECS Exec into bot tasks (debugging, and kill -9 for the heartbeat acceptance test).
+# The bot's task role may open Session Manager channels and nothing else.
+run "a_bot_task_can_be_exec_d_into_and_nothing_more" {
+  command = apply
+
+  assert {
+    condition     = aws_ecs_task_definition.bot.task_role_arn == aws_iam_role.bot_task.arn && aws_iam_role.bot_task.permissions_boundary == "arn:aws:iam::123456789012:policy/meetlab-v2-boundary"
+    error_message = "bot tasks get their own role, capped by the boundary"
+  }
+  assert {
+    condition = toset(flatten([for s in jsondecode(aws_iam_role_policy.bot_exec.policy).Statement : s.Action])) == toset([
+      "ssmmessages:CreateControlChannel", "ssmmessages:CreateDataChannel", "ssmmessages:OpenControlChannel", "ssmmessages:OpenDataChannel",
+    ])
+    error_message = "only the four Session Manager channel actions ECS Exec needs"
+  }
+  assert {
+    condition = alltrue([for s in jsondecode(aws_iam_role_policy.runner_dispatch.policy).Statement :
+      toset(flatten([s.Resource])) == toset([aws_iam_role.execution.arn, aws_iam_role.bot_task.arn])
+    if contains(flatten([s.Action]), "iam:PassRole")])
+    error_message = "to start a bot the runner passes its execution and task roles, and only those"
+  }
+}

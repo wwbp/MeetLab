@@ -16,6 +16,7 @@ resource "aws_ecs_task_definition" "bot" {
   network_mode             = "bridge"
   skip_destroy             = true # see tests/runner.tftest.hcl
   execution_role_arn       = aws_iam_role.execution.arn
+  task_role_arn            = aws_iam_role.bot_task.arn
   container_definitions = jsonencode([{
     name              = "bot"
     image             = "${aws_ecr_repository.this["agent-runner"].repository_url}:${var.image_tag}"
@@ -96,6 +97,30 @@ resource "aws_ecs_capacity_provider" "bots" {
   }
 }
 
+# The bot's own role: only the Session Manager channels ECS Exec needs, so a person
+# can open a shell in a staging bot (and kill -9 it for the heartbeat test).
+resource "aws_iam_role" "bot_task" {
+  name                 = "meetlab-v2-staging-bot-task"
+  permissions_boundary = local.boundary
+  assume_role_policy = jsonencode({
+    Version   = "2012-10-17"
+    Statement = [{ Effect = "Allow", Action = "sts:AssumeRole", Principal = { Service = "ecs-tasks.amazonaws.com" } }]
+  })
+}
+
+resource "aws_iam_role_policy" "bot_exec" {
+  name = "ecs-exec"
+  role = aws_iam_role.bot_task.id
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect   = "Allow"
+      Action   = ["ssmmessages:CreateControlChannel", "ssmmessages:CreateDataChannel", "ssmmessages:OpenControlChannel", "ssmmessages:OpenDataChannel"]
+      Resource = "*"
+    }]
+  })
+}
+
 # agent-runner may start bot tasks, and stop or inspect tasks in this cluster.
 resource "aws_iam_role" "runner_task" {
   name                 = "meetlab-v2-staging-runner-task"
@@ -123,7 +148,7 @@ resource "aws_iam_role_policy" "runner_dispatch" {
         Action   = ["ecs:StopTask", "ecs:DescribeTasks", "ecs:TagResource"]
         Resource = "arn:aws:ecs:us-east-1:${data.aws_caller_identity.current.account_id}:task/${aws_ecs_cluster.this.name}/*"
       },
-      { Effect = "Allow", Action = "iam:PassRole", Resource = aws_iam_role.execution.arn },
+      { Effect = "Allow", Action = "iam:PassRole", Resource = [aws_iam_role.execution.arn, aws_iam_role.bot_task.arn] },
     ]
   })
 }

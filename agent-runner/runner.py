@@ -470,6 +470,38 @@ async def start_bot(request: Request, background_tasks: BackgroundTasks, _=Depen
         return JSONResponse({"error": str(e)}, status_code=500)
 
 
+@app.post("/stop")
+async def stop_bot(request: Request, _=Depends(verify_api_key)):
+    """Stop the room's running bot: the console's Stop button.
+
+    Removing the bot from LiveKit (meet does that too) does nothing before the bot
+    has joined, and a starting bot then joined anyway. So stop it at its task
+    (SIGTERM: a bot that is running ends gracefully, one still starting never runs)
+    and close the session, so the room can start a new bot at once.
+    """
+    body = await request.json()
+    room_name = (body.get("room_name") or "").strip() if isinstance(body, dict) else ""
+    if not room_name:
+        return JSONResponse({"error": "room_name is required"}, status_code=400)
+    async with AsyncSessionLocal() as session:
+        running = (await session.execute(
+            select(Conversation).where(Conversation.room_name == room_name, Conversation.status == "running")
+        )).scalar_one_or_none()
+    if running is None:
+        return {"stopped": None}
+    # ponytail: in-process bots (local dev) are only stopped by meet's LiveKit removal;
+    # the local Docker dispatcher (plan iteration 7) gives them a task to stop too.
+    await asyncio.to_thread(_stop_bot, running.id)
+    async with AsyncSessionLocal() as session:
+        async with session.begin():
+            await session.execute(
+                update(Conversation)
+                .where(Conversation.id == running.id, Conversation.status == "running")
+                .values(status="completed", ended_at=func.now()))
+    logger.info(f"Stopped bot session {running.id} in room {room_name}")
+    return {"stopped": running.id}
+
+
 # Reads are for a human scrolling a console, not for bulk export.
 EVENTS_MAX_LIMIT = 500
 EVENTS_DEFAULT_LIMIT = 100

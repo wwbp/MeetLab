@@ -466,7 +466,27 @@ async def _finalize_conversation(session_id: str, status: str) -> None:
         logger.error(f"Failed to finalize conversation {session_id}: {e}")
 
 
+def _require_stt_backend(bot_config) -> None:
+    """Fail at setup, not silently per turn: a parakeet-* model with no NIM URL posts
+    every utterance to a bare /v1/audio/transcriptions and the bot never replies."""
+    if bot_config.stt_model.startswith("parakeet-") and not os.environ.get("NEMOTRON_STT_URL"):
+        raise ValueError(f"stt_model={bot_config.stt_model} needs NEMOTRON_STT_URL (a Parakeet NIM)")
+
+
 async def bot(runner_args: LiveKitRunnerArguments):
+    """Run one bot session; whatever happens, the session ends with a recorded status.
+
+    _bot() records its own end once the pipeline is running (its finally). A failure
+    before that (transport, config, STT backend) is recorded here.
+    """
+    try:
+        await _bot(runner_args)
+    except Exception:
+        await _finalize_conversation(runner_args.session_id, "error")
+        raise
+
+
+async def _bot(runner_args: LiveKitRunnerArguments):
     logger.info(f"Bot starting - joining room: {runner_args.room_name}")
 
     # sid → identity lookup: populated at on_participant_connected / on_participant_disconnected
@@ -504,6 +524,7 @@ async def bot(runner_args: LiveKitRunnerArguments):
     elevenlabs_api_key = require(env_config.elevenlabs_api_key, "ELEVENLABS_API_KEY")
 
     bot_config = _apply_stt_model_override(await load_bot_config(runner_args.room_name))
+    _require_stt_backend(bot_config)
     logger.info(
         f"Loaded bot config for room '{runner_args.room_name}': "
         f"model={bot_config.llm_model} voice={bot_config.tts_voice} "
@@ -1101,6 +1122,13 @@ async def bot(runner_args: LiveKitRunnerArguments):
             logger.info("No participants remain — cancelling pipeline")
             await task.cancel()
 
+    @transport.event_handler("on_disconnected")
+    async def on_disconnected(transport):
+        # The bot itself left the room: removed by an operator, or the room closed.
+        # Without this the pipeline runs on, headless, and the session never ends.
+        logger.info("Bot disconnected from the room — ending the session")
+        await task.cancel()
+
     @transport.event_handler("on_first_participant_joined")
     async def on_first_participant_joined(transport, participant_id):
         logger.info(f"First participant joined: {participant_id}")
@@ -1168,7 +1196,7 @@ async def bot(runner_args: LiveKitRunnerArguments):
             ],
         )
 
-    runner = PipelineRunner()
+    runner = PipelineRunner(handle_sigterm=runner_args.handle_sigterm)
     status = "error"
     try:
         await runner.run(task)

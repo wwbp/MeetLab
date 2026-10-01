@@ -23,7 +23,8 @@ def parse_args(argv):
 
 def runner_args_for(row, url: str, token: str) -> LiveKitRunnerArguments:
     return LiveKitRunnerArguments(url=url, token=token, room_name=row.room_name,
-                                  session_id=row.id, bot_identity=row.bot_identity)
+                                  session_id=row.id, bot_identity=row.bot_identity,
+                                  handle_sigterm=True)  # ECS StopTask -> graceful end
 
 
 async def main(session_id: str) -> int:

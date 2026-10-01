@@ -44,9 +44,9 @@ $7.1k in September, all lab projects). So this is priced from what runs:
 | Found | Item | Where | Why it matters |
 |---|---|---|---|
 | 2026-10-01 | Cold bot start is 132 s from an empty pool | Instance boot (93 s) + image pull (35 s) | A participant must never wait that long: pre-scale the bot pool before a study; slimming the 1 GB image cuts the pull |
-| 2026-10-01 | Bot dies on SIGTERM without leaving the room or writing `ended` | `bot.py`, no signal handler (exit 143) | 4c PR 4 |
+| 2026-10-01 | ~~Bot dies on SIGTERM without leaving the room or writing `ended`~~ | `bot.py`, no signal handler (exit 143) | Fixed in 4c PR 4: bot tasks run Pipecat's runner with `handle_sigterm` |
 | 2026-10-01 | Managed scaling launched 2 instances for 1 pending task | `aws_ecs_capacity_provider.bots` | Doubles cold-start cost; check `maximum_scaling_step_size` when sizing |
-| 2026-09-30 | **Bot goes silent instead of failing when its STT backend is missing** | `bot.py` / `nemotron_stt.py`: `parakeet-*` with no `NEMOTRON_STT_URL` posts to a bare `/v1/audio/transcriptions`; every turn errors, the session stays "running" | Same failure would hit prod if the NIM URL were lost. Fail the session at start with a clear reason (design plan iteration 5) |
+| 2026-09-30 | ~~Bot goes silent instead of failing when its STT backend is missing~~ (fixed in 4c PR 4: fails at setup, session `error`) | `bot.py` / `nemotron_stt.py`: `parakeet-*` with no `NEMOTRON_STT_URL` posts to a bare `/v1/audio/transcriptions`; every turn errors, the session stays "running" | Same failure would hit prod if the NIM URL were lost. Fail the session at start with a clear reason (design plan iteration 5) |
 | 2026-09-30 | Flaky integration test: `room delete clears bot claim…` | `meet/tests/concierge-api.test.mjs:378`, 30 s wait for local LiveKit to drop the room | Failed once on #91 (Terraform-only), passed on re-run |
 | 2026-09-30 | Harness logs `KeyError` on LiveKit reconnect | `livekit.rtc` `local_track_published` after a signal resume | Noise, but hides real errors in sanity output |
 

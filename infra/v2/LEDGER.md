@@ -43,6 +43,8 @@ $7.1k in September, all lab projects). So this is priced from what runs:
 
 | Found | Item | Where | Why it matters |
 |---|---|---|---|
+| 2026-10-01 | ~~Deleting a room left its session 'running' for a moment; a room recreated at once was handed the old bot~~ (fixed in #105: delete-room calls `/stop`) | Race introduced by one-session-per-room (#104); caught by the CI integration test `room delete clears bot claim…` | Without it, delete-and-recreate in the console could show a stale bot |
+| 2026-10-01 | Running `pnpm test:api` several times within a minute trips the start-link rate limit (5/min/IP) and fails tests 10 and 12 with 429 | `meet/app/api/start-link/route.ts` | Not a bug; wait a minute between local runs |
 | 2026-10-01 | ~~#99 dropped the reconcile loop's startup registration~~ (fixed in #100) | Its test called the loop directly; now it goes through app startup | Test through the real entry point, not the function |
 | 2026-10-01 | ~~**After every rolling deploy, nothing reconciles**~~ (fixed: every process reconciles) | `runner.py` advisory-lock election ran once at startup; the old task held the lock while the new one started, so every new process stood down for good (diagnosis F6). Found when a `kill -9`'d bot was never failed | In v1 too: stale sessions and silent bots are never cleaned up after a deploy until the next restart |
 | 2026-10-01 | Live acceptance tests from a laptop are unreliable | The Mac sleeps (6–10 min gaps): AWS signatures expire, LiveKit sockets drop, timeouts fire | Run live acceptance tests from inside AWS (a CI job or a one-off ECS task) |

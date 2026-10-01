@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { releaseBotRoomClaim } from '@/lib/concierge/bot-room-claim-store';
+import { callBotRunnerStop } from '@/lib/concierge/bot-runner';
 import { clearBotTrackSubscriptionSignalsForRoom } from '@/lib/concierge/bot-track-subscription-store';
 import { pushConciergeEvent } from '@/lib/concierge/events-store';
 import { noStoreHeaders } from '@/lib/concierge/http-utils';
@@ -28,6 +29,12 @@ export async function DELETE(
         { status: 400, headers: noStoreHeaders() }
       );
     }
+
+    // Close the room's bot session now, not when the disconnected bot gets round to
+    // it: a room recreated straight away would otherwise be handed the old, still
+    // 'running' session (one running session per room). Best-effort: deleting the
+    // room disconnects the bot regardless.
+    await callBotRunnerStop(roomName);
 
     const roomService = getRoomServiceClient();
     await roomService.deleteRoom(roomName);

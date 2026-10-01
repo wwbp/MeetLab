@@ -50,6 +50,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 import audio_tracks
 from config import load_config, require
 from db.config_loader import load_bot_config
+from heartbeat import beat_forever
 from db.engine import AsyncSessionLocal
 from db.models import Conversation, MediaFile, Speaker, Utterance
 from interruption import InterruptionTracker
@@ -1198,6 +1199,8 @@ async def _bot(runner_args: LiveKitRunnerArguments):
 
     runner = PipelineRunner(handle_sigterm=runner_args.handle_sigterm)
     status = "error"
+    # Proof of life for the reconciler (heartbeat.py): a bot that dies hard stops beating.
+    heartbeat_task = asyncio.create_task(beat_forever(AsyncSessionLocal, runner_args.session_id))
     try:
         await runner.run(task)
         status = "completed"
@@ -1210,6 +1213,7 @@ async def _bot(runner_args: LiveKitRunnerArguments):
     except Exception as e:
         logger.error(f"Bot pipeline error in room {runner_args.room_name}: {e}")
     finally:
+        heartbeat_task.cancel()
         # Flush any audio still buffered (speakers who never fired a disconnect, or
         # the final drain). Shielded so end-of-call cancellation can't abort a write
         # mid-flight; then deregister the sink from the in-process registry.

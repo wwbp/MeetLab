@@ -37,7 +37,8 @@ from process_concurrency import RECONCILER_LOCK_KEY, should_run_singleton
 from db.models import BotConfig, Conversation, Event, MediaFile, Speaker, Utterance
 from runner_types import LiveKitRunnerArguments
 from bot_token import bot_token
-from dispatch import DispatchError, EcsBotTarget, run_bot_task
+from dispatch import DispatchError, EcsBotTarget, run_bot_task, stop_bot_task
+from heartbeat import fail_silent_sessions
 
 config = load_config()
 
@@ -325,6 +326,13 @@ def _ecs_client():
     import boto3
 
     return boto3.client("ecs")
+
+
+def _stop_bot(session_id: str) -> None:
+    # ponytail: blocking boto3 call inside the reconcile loop; fine for a handful of
+    # silent sessions per tick, move to asyncio.to_thread if that ever grows.
+    if os.environ.get("BOT_DISPATCHER") == "ecs":
+        stop_bot_task(_ecs_client(), session_id, EcsBotTarget.from_env(os.environ))
 
 
 @app.post("/start")
@@ -1153,6 +1161,7 @@ async def _start_conversation_reconcile_loop() -> None:
             await asyncio.sleep(interval)
             try:
                 await reconcile_stale_conversations()
+                await fail_silent_sessions(AsyncSessionLocal, stop=_stop_bot)
             except Exception as e:
                 logger.warning(f"conversation reconcile loop error: {e}")
 

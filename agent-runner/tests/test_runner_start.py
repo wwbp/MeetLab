@@ -285,6 +285,16 @@ class RunnerStartApiTests(unittest.TestCase):
             self.runner_module.select(Conversation.recording_requested).where(Conversation.id == sid)))
         self.assertTrue(requested)
 
+    def test_a_rooms_running_session_is_what_meet_shows(self):
+        # Iteration 9: meet keeps no claim of its own; it asks for the room's session.
+        room = _room("session")
+        self.assertIsNone(self.client.get(f"/rooms/{room}/session").json()["session"])
+        started = self.client.post("/start", json={"room_name": room}).json()
+        session = self.client.get(f"/rooms/{room}/session").json()["session"]
+        self.assertEqual((session["session_id"], session["bot_identity"]), (started["session_id"], started["bot_identity"]))
+        self.client.post("/stop", json={"room_name": room})
+        self.assertIsNone(self.client.get(f"/rooms/{room}/session").json()["session"])
+
     def test_stopping_a_room_with_no_bot_is_not_an_error(self):
         response = self.client.post("/stop", json={"room_name": _room("never-started")})
         self.assertEqual(response.status_code, 200, response.text)

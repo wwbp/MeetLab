@@ -235,11 +235,10 @@ test('mock load: 5 rooms with 5 mock users and 1 bot each', async () => {
 
     await Promise.all(
       rooms.map((roomName, roomIndex) =>
-        sendVerifiedWebhookEvent({
-          event: 'participant_left',
-          room: { name: roomName },
-          participant: { identity: botIdentities[roomIndex] },
-        })
+        jsonRequest(
+          `/api/concierge/rooms/${encodeURIComponent(roomName)}/bots/${encodeURIComponent(botIdentities[roomIndex])}`,
+          { method: 'DELETE' }
+        )
       )
     );
 
@@ -255,7 +254,7 @@ test('mock load: 5 rooms with 5 mock users and 1 bot each', async () => {
             }
             return result.json?.assignedBotIdentity === undefined ? result : null;
           },
-          { description: `claim cleanup after bot-leave webhook for room ${roomName}` }
+          { description: `the room's bot cleared after Stop for room ${roomName}` }
         )
       )
     );

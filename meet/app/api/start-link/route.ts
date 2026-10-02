@@ -1,6 +1,4 @@
 import { NextResponse } from 'next/server';
-import { addBotRequest } from '@/lib/concierge/bot-requests-store';
-import { claimBotRoom } from '@/lib/concierge/bot-room-claim-store';
 import { callBotRunnerStart, createBotIdentity } from '@/lib/concierge/bot-runner';
 import { pushConciergeEvent } from '@/lib/concierge/events-store';
 import { getRoomServiceClient } from '@/lib/concierge/livekit-admin';
@@ -80,8 +78,7 @@ export async function POST(request: Request) {
     const roomService = getRoomServiceClient();
     await roomService.createRoom({ name: roomName });
 
-    // Fresh unique room → no contention; skip the concierge start-lock/409 dance but
-    // register the claim/request/event so the console and webhook cleanup see it.
+    // Fresh unique room: no contention. The runner's session row is the console's record.
     const botIdentity = createBotIdentity(roomName);
     const runnerCall = await callBotRunnerStart(roomName, botIdentity, undefined, {
       requested_by: 'start-link',
@@ -91,13 +88,6 @@ export async function POST(request: Request) {
       throw new Error(runnerCall.errorText ?? `Bot runner returned ${runnerCall.status}`);
     }
 
-    claimBotRoom(roomName, runnerCall.payload?.bot_identity ?? botIdentity);
-    addBotRequest({
-      roomName,
-      status: 'started',
-      botIdentity: runnerCall.payload?.bot_identity ?? botIdentity,
-      runnerSessionId: runnerCall.payload?.session_id,
-    });
     pushConciergeEvent({
       source: 'concierge',
       event: 'concierge.bot.started',

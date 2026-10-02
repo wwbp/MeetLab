@@ -1,5 +1,4 @@
 import { NextResponse } from 'next/server';
-import { releaseBotRoomClaim } from '@/lib/concierge/bot-room-claim-store';
 import { callBotRunnerStop } from '@/lib/concierge/bot-runner';
 import { clearBotTrackSubscriptionSignalsForRoom } from '@/lib/concierge/bot-track-subscription-store';
 import { pushConciergeEvent } from '@/lib/concierge/events-store';
@@ -38,7 +37,6 @@ export async function DELETE(
 
     const roomService = getRoomServiceClient();
     await roomService.deleteRoom(roomName);
-    releaseBotRoomClaim(roomName);
     clearBotTrackSubscriptionSignalsForRoom(roomName);
 
     pushConciergeEvent({

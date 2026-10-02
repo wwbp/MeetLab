@@ -1,6 +1,5 @@
 import { NextResponse } from 'next/server';
-import { getBotRoomClaim, releaseBotRoomClaim } from '@/lib/concierge/bot-room-claim-store';
-import { callBotRunnerStop } from '@/lib/concierge/bot-runner';
+import { callBotRunnerStop, getRoomSession } from '@/lib/concierge/bot-runner';
 import { clearBotTrackSubscriptionSignalsForRoom } from '@/lib/concierge/bot-track-subscription-store';
 import { pushConciergeEvent } from '@/lib/concierge/events-store';
 import { noStoreHeaders } from '@/lib/concierge/http-utils';
@@ -29,12 +28,12 @@ export async function DELETE(
       );
     }
 
-    const claim = getBotRoomClaim(roomName);
-    if (claim && claim.botIdentity !== identity) {
+    const session = await getRoomSession(roomName);
+    if (session && session.bot_identity !== identity) {
       return NextResponse.json(
         {
-          error: `Bot identity mismatch: assigned bot is "${claim.botIdentity}"`,
-          assignedBotIdentity: claim.botIdentity,
+          error: `Bot identity mismatch: assigned bot is "${session.bot_identity}"`,
+          assignedBotIdentity: session.bot_identity,
         },
         { status: 409, headers: noStoreHeaders() }
       );
@@ -56,7 +55,6 @@ export async function DELETE(
     } catch (error) {
       if (!isNotFound(error)) throw error; // not joined yet: the runner already stopped it
     }
-    releaseBotRoomClaim(roomName);
     clearBotTrackSubscriptionSignalsForRoom(roomName);
 
     pushConciergeEvent({

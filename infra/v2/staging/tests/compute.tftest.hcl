@@ -111,3 +111,25 @@ run "staging_has_its_own_name_and_logs_expire" {
     error_message = "logs expire, and live under the prefix CI may manage"
   }
 }
+
+run "per_task_metrics_are_off_unless_a_test_needs_them" {
+  command = apply
+
+  assert {
+    condition     = one([for s in aws_ecs_cluster.this.setting : s.value if s.name == "containerInsights"]) == "disabled"
+    error_message = "Container Insights is billed per task; off by default"
+  }
+}
+
+run "a_load_test_can_turn_per_task_metrics_on" {
+  command = apply
+
+  variables {
+    container_insights = true
+  }
+
+  assert {
+    condition     = one([for s in aws_ecs_cluster.this.setting : s.value if s.name == "containerInsights"]) == "enabled"
+    error_message = "sessions per machine needs each bot's CPU and memory"
+  }
+}

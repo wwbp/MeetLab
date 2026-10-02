@@ -24,8 +24,13 @@ resource "aws_ecs_task_definition" "bot" {
     cpu               = 512
     memoryReservation = 1024
     stopTimeout       = 120 # the ECS maximum: SIGTERM, then this long to flush and write ended
-    environment       = local.bot_environment
-    secrets           = local.bot_secrets
+    # A bot needs few connections (heartbeat, turn writes); a bounded pool keeps
+    # 100 bots inside db.t4g.small's ~180 (db/url.py pool_options).
+    environment = concat(local.bot_environment, [
+      { name = "DB_POOL_SIZE", value = "2" },
+      { name = "DB_MAX_OVERFLOW", value = "0" },
+    ])
+    secrets = local.bot_secrets
     logConfiguration = {
       logDriver = "awslogs"
       options = {
@@ -63,7 +68,7 @@ resource "aws_launch_template" "bots" {
 resource "aws_autoscaling_group" "bots" {
   name                  = "meetlab-v2-staging-bots"
   min_size              = var.bot_pool_min
-  max_size              = 2
+  max_size              = var.bot_pool_max
   vpc_zone_identifier   = [for s in aws_subnet.private : s.id]
   protect_from_scale_in = true
   launch_template {

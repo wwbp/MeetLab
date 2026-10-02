@@ -1,5 +1,4 @@
-"""The LiveKit token a bot joins with. Shared by the runner (in-process bots) and
-bot_task (one process per meeting), so both grant exactly the same thing."""
+"""The LiveKit token a bot joins with, minted by bot_task (one process per meeting)."""
 from datetime import timedelta
 from typing import Optional
 

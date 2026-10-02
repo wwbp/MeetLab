@@ -34,10 +34,7 @@ from audio_tracks import (
     BotAudioRecorder,
     PerSpeakerAudioRecorder,
     build_track_flush,
-    get_sink,
     pcm_to_wav,
-    register_sink,
-    unregister_sink,
 )
 
 
@@ -286,29 +283,6 @@ class TestAudioTrackSinkOverflowGuard(unittest.IsolatedAsyncioTestCase):
         sink.enable()
         sink.offer("sid-A", b"\x00" * 320, 16000, 1)
         self.assertEqual(sched.coros, [])
-
-
-class TestSinkRegistry(unittest.TestCase):
-    """In-process control path: /recordings/start reaches the running bot's sink."""
-
-    def tearDown(self):
-        unregister_sink("room-reg-test")
-
-    def test_register_then_get(self):
-        sink = AudioTrackSink(_FlushCapture())
-        register_sink("room-reg-test", sink)
-        self.assertIs(get_sink("room-reg-test"), sink)
-
-    def test_get_unknown_room_returns_none(self):
-        self.assertIsNone(get_sink("no-such-room-xyz"))
-
-    def test_unregister_removes_sink(self):
-        register_sink("room-reg-test", AudioTrackSink(_FlushCapture()))
-        unregister_sink("room-reg-test")
-        self.assertIsNone(get_sink("room-reg-test"))
-
-    def test_unregister_unknown_is_noop(self):
-        unregister_sink("never-registered-room")  # must not raise
 
 
 class TestBuildTrackFlush(unittest.IsolatedAsyncioTestCase):

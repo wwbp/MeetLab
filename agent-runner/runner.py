@@ -7,7 +7,7 @@ import traceback
 import uuid
 import zipfile
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -27,7 +27,6 @@ from sqlalchemy import func, select, text, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import selectinload
 
-import audio_tracks
 import metrics
 import storage
 import transcript as transcript_mod
@@ -36,8 +35,6 @@ from db.config_loader import load_bot_config
 from event_log import EVENT_SEVERITIES, install_error_event_sink, record_event
 from db.engine import AsyncSessionLocal, engine
 from db.models import BotConfig, Conversation, Event, MediaFile, Speaker, Utterance
-from runner_types import LiveKitRunnerArguments
-from bot_token import bot_token
 from dispatch import (
     DispatchError,
     DockerApi,
@@ -105,10 +102,6 @@ LIVEKIT_API_KEY = require(config.livekit_api_key, "LIVEKIT_API_KEY")
 BOT_RUNNER_SECRET = os.environ.get("BOT_RUNNER_SECRET")
 LIVEKIT_API_SECRET = require(config.livekit_api_secret, "LIVEKIT_API_SECRET")
 LIVEKIT_URL = require(config.livekit_url, "LIVEKIT_URL")
-# Bot JWT lifetime. Default 15 min matches LiveKit's historical behavior; raise it
-# (e.g. soak/longevity runs export BOT_TOKEN_TTL_MINUTES=30) so sessions longer than
-# 15 min don't silently drop on token expiry.
-BOT_TOKEN_TTL_MINUTES = int(os.environ.get("BOT_TOKEN_TTL_MINUTES", "15"))
 
 
 def verify_api_key(request: Request):
@@ -321,16 +314,6 @@ def _room_slug(room_name: str) -> str:
     return slug[:24] or "room"
 
 
-async def _create_bot_token(
-    room_name: str,
-    participant_identity: str,
-    participant_name: str = "bot",
-    agent_name: Optional[str] = None,
-) -> str:
-    return bot_token(room_name, participant_identity, LIVEKIT_API_KEY, LIVEKIT_API_SECRET,
-                     BOT_TOKEN_TTL_MINUTES, name=participant_name, agent_name=agent_name)
-
-
 def _ecs_client():
     import boto3
 
@@ -359,7 +342,7 @@ def _docker_api() -> DockerApi:
 
 
 @app.post("/start")
-async def start_bot(request: Request, background_tasks: BackgroundTasks, _=Depends(verify_api_key)):
+async def start_bot(request: Request, _=Depends(verify_api_key)):
     try:
         try:
             body = await request.json()
@@ -404,12 +387,13 @@ async def start_bot(request: Request, background_tasks: BackgroundTasks, _=Depen
         else:
             bot_identity = f"bot_{_room_slug(room_name)}_{uuid.uuid4().hex[:10]}"
 
-        bot_token = await _create_bot_token(
-            room_name=room_name,
-            participant_identity=bot_identity,
-            participant_name="Assistant",
-            agent_name=agent_name,
-        )
+        # One task (ECS) or container (local Docker) per meeting (4c); there is no
+        # in-process bot (iteration 9). Refuse before a session row exists, so a
+        # misconfigured runner never leaves a 'running' session no bot will join.
+        dispatcher = os.environ.get("BOT_DISPATCHER")
+        if dispatcher not in ("ecs", "docker"):
+            logger.error(f"BOT_DISPATCHER is {dispatcher!r}; cannot start a bot for {room_name}")
+            return JSONResponse({"error": "BOT_DISPATCHER must be 'ecs' or 'docker'"}, status_code=500)
 
         session_id = str(uuid.uuid4())
 
@@ -452,40 +436,24 @@ async def start_bot(request: Request, background_tasks: BackgroundTasks, _=Depen
                 "already_running": True,
             }
 
-        dispatcher = os.environ.get("BOT_DISPATCHER")
-        if dispatcher in ("ecs", "docker"):
-            # One task (ECS) or container (local Docker) per meeting (step 4c): it reads
-            # this row and mints its own token; the session ID makes a retry the same bot
-            # (ECS clientToken, Docker container name).
-            try:
-                if dispatcher == "ecs":
-                    task_arn = await asyncio.to_thread(
-                        run_bot_task, _ecs_client(), session_id, EcsBotTarget.from_env(os.environ))
-                else:
-                    task_arn = await asyncio.to_thread(
-                        run_bot_container, _docker_api(), session_id, socket.gethostname())
-            except DispatchError as e:
-                async with AsyncSessionLocal() as session:
-                    async with session.begin():
-                        await session.execute(
-                            update(Conversation).where(Conversation.id == session_id)
-                            .values(status="error", ended_at=func.now()))
-                logger.error(f"bot dispatch failed for {room_name}: {e}")
-                return JSONResponse({"error": str(e), "session_id": session_id}, status_code=503)
-            logger.info(f"Started bot task {task_arn} for session {session_id}")
-        else:
-            runner_args = LiveKitRunnerArguments(
-                url=LIVEKIT_URL,
-                token=bot_token,
-                room_name=room_name,
-                session_id=session_id,
-                bot_identity=bot_identity,
-                body=body,
-            )
-
-            from bot import bot
-            background_tasks.add_task(bot, runner_args)
-
+        # The bot reads this row and mints its own token; the session ID makes a retry
+        # the same bot (ECS clientToken, Docker container name).
+        try:
+            if dispatcher == "ecs":
+                task_arn = await asyncio.to_thread(
+                    run_bot_task, _ecs_client(), session_id, EcsBotTarget.from_env(os.environ))
+            else:
+                task_arn = await asyncio.to_thread(
+                    run_bot_container, _docker_api(), session_id, socket.gethostname())
+        except DispatchError as e:
+            async with AsyncSessionLocal() as session:
+                async with session.begin():
+                    await session.execute(
+                        update(Conversation).where(Conversation.id == session_id)
+                        .values(status="error", ended_at=func.now()))
+            logger.error(f"bot dispatch failed for {room_name}: {e}")
+            return JSONResponse({"error": str(e), "session_id": session_id}, status_code=503)
+        logger.info(f"Started bot {task_arn} for session {session_id}")
         logger.info(f"Starting bot session {session_id} in room {room_name}")
 
         return {
@@ -519,8 +487,6 @@ async def stop_bot(request: Request, _=Depends(verify_api_key)):
         )).scalar_one_or_none()
     if running is None:
         return {"stopped": None}
-    # ponytail: in-process bots (local dev) are only stopped by meet's LiveKit removal;
-    # the local Docker dispatcher (plan iteration 7) gives them a task to stop too.
     await asyncio.to_thread(_stop_bot, running.id)
     async with AsyncSessionLocal() as session:
         async with session.begin():
@@ -1011,13 +977,9 @@ async def start_recording_for_room(room_name: str) -> tuple[int, dict]:
         )
         already_recording = result.scalar_one_or_none() is not None
 
-    # Turn on per-speaker WAV capture for the running bot. A bot in its own task or
-    # container (4c) reads the flag on its next heartbeat; an in-process bot's sink is
-    # in this process's registry. Both idempotent, so a duplicate request is harmless.
+    # Turn on per-speaker WAV capture: the bot (its own task or container) reads the
+    # flag on its next heartbeat. Idempotent, so a duplicate request is harmless.
     await request_recording(AsyncSessionLocal, conv.id)
-    sink = audio_tracks.get_sink(room_name)
-    if sink is not None:
-        sink.enable()
 
     if already_recording:
         return 409, {"error": "recording already active for this session"}

@@ -1,7 +1,6 @@
 import importlib
 import os
 import sys
-import types
 import unittest
 import uuid
 from unittest import mock
@@ -21,24 +20,10 @@ class RunnerStartApiTests(unittest.TestCase):
         os.environ.setdefault("LIVEKIT_API_KEY", "devkey")
         os.environ.setdefault("LIVEKIT_API_SECRET", "secret")
         os.environ.setdefault("LIVEKIT_URL", "ws://transport-server:7880")
-        # Bots in-process (stubbed) unless a test patches a dispatcher in: the local
-        # stack sets BOT_DISPATCHER=docker, and these tests must never start real bots.
-        cls._dispatcher = os.environ.pop("BOT_DISPATCHER", None)
-
-        # Stub out bot so /start does not spawn a real pipeline. This replaces a
-        # GLOBAL — sys.modules is process-wide — so the real module is stashed and
-        # restored in tearDownClass. Without that, every alphabetically-later test
-        # module that imports bot silently gets this stub and sees a module with
-        # nothing on it but `bot`.
-        cls._real_bot_module = sys.modules.get("bot")
-
-        fake_bot_module = types.ModuleType("bot")
-
-        async def fake_bot(_runner_args):
-            return None
-
-        fake_bot_module.bot = fake_bot
-        sys.modules["bot"] = fake_bot_module
+        # Every bot is its own container or task (4c). The Docker dispatcher is
+        # patched for the whole class, so these tests never start a real bot.
+        cls._env = mock.patch.dict(os.environ, {"BOT_DISPATCHER": "docker", "DOCKER_HOST": "tcp://docker-socket-proxy:2375"})
+        cls._env.start()
 
         if "runner" in sys.modules:
             cls.runner_module = importlib.reload(sys.modules["runner"])
@@ -51,19 +36,19 @@ class RunnerStartApiTests(unittest.TestCase):
         # anyio BlockingPortal (one event loop). Without this, each post() call
         # creates a new event loop and asyncpg raises "Future attached to a
         # different loop" when the pool tries to reuse connections.
+        cls._run = mock.patch.object(cls.runner_module, "run_bot_container", return_value="meetlab-bot-test")
+        cls.run_bot = cls._run.start()
+        cls._stop = mock.patch.object(cls.runner_module, "stop_bot_container")
+        cls._stop.start()
         cls._client_ctx = TestClient(cls.runner_module.app)
         cls.client = cls._client_ctx.__enter__()
 
     @classmethod
     def tearDownClass(cls):
         cls._client_ctx.__exit__(None, None, None)
-        if cls._dispatcher is not None:
-            os.environ["BOT_DISPATCHER"] = cls._dispatcher
-        # Undo the sys.modules["bot"] stub so later test modules import the real one.
-        if cls._real_bot_module is not None:
-            sys.modules["bot"] = cls._real_bot_module
-        else:
-            sys.modules.pop("bot", None)
+        cls._stop.stop()
+        cls._run.stop()
+        cls._env.stop()
 
     # ------------------------------------------------------------------
     # Input validation — room_name
@@ -213,14 +198,13 @@ class RunnerStartApiTests(unittest.TestCase):
         return self.client.portal.call(go)
 
     def test_a_second_start_for_a_room_returns_its_running_session(self):
-        room, started = _room("double-start"), []
-        with mock.patch.object(sys.modules["bot"], "bot", side_effect=lambda a: started.append(a)):
-            first = self.client.post("/start", json={"room_name": room})
-            second = self.client.post("/start", json={"room_name": room})
+        room, before = _room("double-start"), self.run_bot.call_count
+        first = self.client.post("/start", json={"room_name": room})
+        second = self.client.post("/start", json={"room_name": room})
         self.assertEqual((first.status_code, second.status_code), (200, 200), second.text)
         self.assertEqual(second.json()["session_id"], first.json()["session_id"])
         self.assertEqual(second.json()["bot_identity"], first.json()["bot_identity"])
-        self.assertEqual(len(started), 1, "a second start must not start a second bot")
+        self.assertEqual(self.run_bot.call_count - before, 1, "a second start must not start a second bot")
 
     def test_a_second_start_launches_no_second_ecs_task(self):
         ecs = mock.Mock()
@@ -289,8 +273,8 @@ class RunnerStartApiTests(unittest.TestCase):
         self.assertNotEqual(second, first)
 
     def test_record_reaches_a_bot_in_another_process(self):
-        # Since 4c the bot is its own task; the runner's in-process sink registry is
-        # empty, so console Record started egress but never per-speaker capture.
+        # Since 4c the bot is its own task; before this fix, console Record started
+        # egress but never per-speaker capture.
         # The request is a flag on the session row, set whatever egress does next
         # (here the room is not in LiveKit, so egress fails).
         room = _room("record")
@@ -312,29 +296,23 @@ class RunnerStartApiTests(unittest.TestCase):
 
     ECS_ENV = {"BOT_DISPATCHER": "ecs", "ECS_CLUSTER": "c", "BOT_TASK_DEFINITION": "td", "BOT_CAPACITY_PROVIDER": "cp"}
 
-    def test_ecs_dispatch_runs_a_task_keyed_by_the_session_not_an_in_process_bot(self):
+    def test_ecs_dispatch_runs_a_task_keyed_by_the_session(self):
         ecs = mock.Mock()
         ecs.run_task.return_value = {"tasks": [{"taskArn": "arn:task/1"}], "failures": []}
-        started = []
         with mock.patch.dict(os.environ, self.ECS_ENV), \
-             mock.patch.object(self.runner_module, "_ecs_client", return_value=ecs), \
-             mock.patch.object(sys.modules["bot"], "bot", side_effect=lambda a: started.append(a)):
+             mock.patch.object(self.runner_module, "_ecs_client", return_value=ecs):
             response = self.client.post("/start", json={"room_name": _room("ecs-room")})
         self.assertEqual(response.status_code, 200, response.text)
         self.assertEqual(ecs.run_task.call_args.kwargs["clientToken"], response.json()["session_id"])
-        self.assertEqual(started, [], "the API process must not also run the bot")
 
     DOCKER_ENV = {"BOT_DISPATCHER": "docker", "DOCKER_HOST": "tcp://docker-socket-proxy:2375"}
 
-    def test_docker_dispatch_starts_a_container_not_an_in_process_bot(self):
-        started = []
+    def test_docker_dispatch_starts_a_container_keyed_by_the_session(self):
         with mock.patch.dict(os.environ, self.DOCKER_ENV), \
-             mock.patch.object(self.runner_module, "run_bot_container", return_value="meetlab-bot-x") as run, \
-             mock.patch.object(sys.modules["bot"], "bot", side_effect=lambda a: started.append(a)):
+             mock.patch.object(self.runner_module, "run_bot_container", return_value="meetlab-bot-x") as run:
             response = self.client.post("/start", json={"room_name": _room("docker-room")})
         self.assertEqual(response.status_code, 200, response.text)
         self.assertEqual(run.call_args.args[1], response.json()["session_id"])
-        self.assertEqual(started, [], "the API process must not also run the bot")
 
     def test_docker_refusal_is_reported_not_swallowed(self):
         with mock.patch.dict(os.environ, self.DOCKER_ENV), \
@@ -369,6 +347,18 @@ class RunnerStartApiTests(unittest.TestCase):
             took = _time.monotonic() - t0
         self.assertEqual(response.status_code, 200, response.text)
         self.assertLess(took, 1.0, f"/stop waited {took:.1f}s for the container to exit")
+
+    def test_without_a_dispatcher_start_refuses_and_leaves_no_running_session(self):
+        # The in-process path is gone (iteration 9): a runner with no dispatcher must
+        # say so, not leave a 'running' session that no bot will ever join.
+        room = _room("no-dispatcher")
+        env = {k: v for k, v in os.environ.items() if k != "BOT_DISPATCHER"}
+        with mock.patch.dict(os.environ, env, clear=True):
+            refused = self.client.post("/start", json={"room_name": room})
+        self.assertEqual(refused.status_code, 500, refused.text)
+        self.assertIn("BOT_DISPATCHER", refused.json()["error"])
+        again = self.client.post("/start", json={"room_name": room})
+        self.assertNotIn("already_running", again.json(), "the refused start left a running session")
 
     def test_ecs_refusal_is_reported_not_swallowed(self):
         ecs = mock.Mock()

@@ -587,14 +587,12 @@ async def _bot(runner_args: LiveKitRunnerArguments):
 
     # Per-speaker audio capture. The sink buffers each participant's PCM and writes
     # one WAV per speaker on flush; it stays disabled until recording is requested
-    # (POST /recordings/start or auto_record). Registered by room name so the
-    # in-process recording endpoint can enable it. The recorder tap is inserted
-    # before multi_stt (which consumes UserAudioRawFrame) and forwards frames on.
+    # (auto_record, or the recording_requested flag read on the heartbeat). The
+    # recorder tap is inserted before multi_stt (which consumes UserAudioRawFrame) and forwards frames on.
     audio_sink = build_audio_track_sink(
         runner_args.room_name, runner_args.session_id, _sid_to_identity,
         bot_identity=runner_args.bot_identity,
     )
-    audio_tracks.register_sink(runner_args.room_name, audio_sink)
     audio_recorder = audio_tracks.PerSpeakerAudioRecorder(audio_sink)
     bot_audio_recorder = audio_tracks.BotAudioRecorder(audio_sink, runner_args.bot_identity)
     # Mock TTS (BOT_MOCK_TTS) swaps in zero-cost synthetic silence for load/soak
@@ -1217,13 +1215,11 @@ async def _bot(runner_args: LiveKitRunnerArguments):
         heartbeat_task.cancel()
         # Flush any audio still buffered (speakers who never fired a disconnect, or
         # the final drain). Shielded so end-of-call cancellation can't abort a write
-        # mid-flight; then deregister the sink from the in-process registry.
+        # mid-flight.
         try:
             await asyncio.shield(asyncio.ensure_future(audio_sink.flush_all()))
         except Exception as e:
             logger.warning(f"audio_track flush_all on shutdown failed: {e}")
-        finally:
-            audio_tracks.unregister_sink(runner_args.room_name)
         await _finalize_conversation(runner_args.session_id, status)
         _isum = interruptions.summary()
         logger.info(

@@ -74,7 +74,7 @@ Key per-service variables:
 
 **Voice agent UI (`meet/app/agent`):**
 1. Browser → `POST /api/agent-connection` → creates room + participant token, calls `agent-runner /start` via `BOT_RUNNER_URL`
-2. `agent-runner /start` → mints bot JWT, spawns `bot()` as a FastAPI `BackgroundTask`
+2. `agent-runner /start` → records a `running` session, then starts one bot per meeting: an ECS task on staging (`BOT_DISPATCHER=ecs`) or a Docker container locally (`BOT_DISPATCHER=docker`); there is no in-process mode
 3. `bot()` (Pipecat pipeline) joins the LiveKit room; STT → LLM → TTS runs until room ends
 4. Browser connects to LiveKit directly using the returned token
 
@@ -91,7 +91,7 @@ Key per-service variables:
 
 ## agent-runner internals
 
-- `runner.py` — FastAPI app; `POST /start` validates input, creates a LiveKit JWT for the bot, calls `background_tasks.add_task(bot, runner_args)`
+- `runner.py` — FastAPI app; `POST /start` validates input, records the session, and dispatches the bot (`dispatch.py`); `bot_task.py` is the bot's own process: it reads the session row, mints its JWT, runs `bot()`, and heartbeats
 - `bot.py` — Pipecat pipeline: `LiveKitTransport` → `OpenAISTTService` → `LLMContextAggregatorPair` → `OpenAILLMService` → `OpenAITTSService` → `LiveKitTransport`
 - `config.py` uses `python-dotenv` to load `.env.runner` then `.env.runner.local` (override)
 - Package manager: `uv`; run scripts with `uv run python ...`

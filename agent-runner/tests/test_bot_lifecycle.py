@@ -67,7 +67,7 @@ class SigtermTest(unittest.TestCase):
         row = SimpleNamespace(id="s1", room_name="r1", bot_identity="bot_r1", meta={})
         self.assertTrue(runner_args_for(row, url="wss://lk", token="t").handle_sigterm)
 
-    def test_an_in_process_bot_leaves_the_api_process_signals_alone(self):
+    def test_a_bot_called_directly_leaves_process_signals_alone(self):  # e.g. in tests
         self.assertFalse(ARGS.handle_sigterm)
 
 

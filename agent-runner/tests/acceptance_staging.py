@@ -289,7 +289,7 @@ async def scenario_video_recording():
 
 
 STT_NIM_SERVICE = "meetlab-v2-staging-stt-nim"
-SPEECH = os.path.join(os.path.dirname(__file__), "fixtures", "conversations", "897d84fb07080a12.wav")
+SPEECH = os.path.join(os.path.dirname(__file__), "fixtures", "benchmark_prompt.wav")  # tracked; conversations/ is gitignored
 
 
 def _stt_nim_on():

@@ -122,8 +122,10 @@ def iam_simulate(iam):
 
 if __name__ == "__main__":
     import boto3
+    from botocore.config import Config
 
-    found = violations(ALLOW, DENY, iam_simulate(boto3.client("iam")))
+    iam = boto3.client("iam", config=Config(retries={"mode": "adaptive", "max_attempts": 10}))  # IAM throttles bursts
+    found = violations(ALLOW, DENY, iam_simulate(iam))
     for c, why in found:
         print(f"FAIL {c.role} {c.action} {c.resource}: {why}")
     print(f"permission contract: {len(ALLOW)} needed, {len(DENY)} forbidden, {len(found)} violation(s)")

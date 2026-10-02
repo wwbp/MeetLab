@@ -12,7 +12,7 @@ import unittest
 
 from sqlalchemy.engine import make_url
 
-from db.url import database_url
+from db.url import database_url, pool_options
 
 PARTS = {
     "DB_HOST": "meetlab-v2-staging.abc.us-east-1.rds.amazonaws.com",
@@ -48,6 +48,17 @@ class DatabaseUrlTest(unittest.TestCase):
             database_url({"DB_HOST": "h"})
         self.assertIn("DB_PASSWORD", str(ctx.exception))
         self.assertIn("DATABASE_URL", str(ctx.exception))
+
+
+class PoolOptionsTest(unittest.TestCase):
+    """How many connections one process may hold. 100 bots on SQLAlchemy's default
+    (5 pooled + 10 overflow) would exhaust db.t4g.small's ~180 connections."""
+
+    def test_defaults_are_sqlalchemys(self):
+        self.assertEqual(pool_options({}), {"pool_size": 5, "max_overflow": 10})
+
+    def test_a_bot_sets_a_small_fixed_pool(self):
+        self.assertEqual(pool_options({"DB_POOL_SIZE": "2", "DB_MAX_OVERFLOW": "0"}), {"pool_size": 2, "max_overflow": 0})
 
 
 if __name__ == "__main__":

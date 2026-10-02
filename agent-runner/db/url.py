@@ -26,3 +26,9 @@ def database_url(env: Mapping[str, str]) -> str:
         database=env["DB_NAME"],
         query={"ssl": "require"},  # RDS Postgres 17 forces TLS
     ).render_as_string(hide_password=False)
+
+
+def pool_options(env: Mapping[str, str]) -> dict:
+    """Connections one process may hold: SQLAlchemy's default unless set. A bot needs
+    few (heartbeat, turn writes), and 100 bots on the default would exhaust the database."""
+    return {"pool_size": int(env.get("DB_POOL_SIZE", "5")), "max_overflow": int(env.get("DB_MAX_OVERFLOW", "10"))}

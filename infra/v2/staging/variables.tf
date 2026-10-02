@@ -14,3 +14,15 @@ variable "bot_pool_min" {
   type        = number
   default     = 0
 }
+
+variable "bot_pool_max" {
+  description = "Most bot machines at once (c6i.large, about 3 sessions each); a load test raises it"
+  type        = number
+  default     = 2
+}
+
+variable "container_insights" {
+  description = "Per-task CPU and memory metrics (billed per task); on for load tests"
+  type        = bool
+  default     = false
+}

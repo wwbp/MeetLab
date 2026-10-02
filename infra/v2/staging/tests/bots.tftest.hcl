@@ -174,3 +174,33 @@ run "the_runner_can_prewarm_the_bot_pool_and_no_other" {
     error_message = "the runner knows which group to warm"
   }
 }
+
+# Load-test readiness (L1): a bounded pool per bot, and a ceiling the ramp can raise.
+run "each_bot_holds_at_most_two_database_connections" {
+  command = apply
+
+  assert {
+    condition = (
+      contains([for e in jsondecode(aws_ecs_task_definition.bot.container_definitions)[0].environment : "${e.name}=${e.value}"], "DB_POOL_SIZE=2") &&
+      contains([for e in jsondecode(aws_ecs_task_definition.bot.container_definitions)[0].environment : "${e.name}=${e.value}"], "DB_MAX_OVERFLOW=0")
+    )
+    error_message = "100 bots on SQLAlchemy's default pool (up to 15 each) would exhaust db.t4g.small's ~180 connections"
+  }
+  assert {
+    condition     = length([for e in jsondecode(aws_ecs_task_definition.runner_app.container_definitions)[0].environment : e if e.name == "DB_POOL_SIZE"]) == 0
+    error_message = "the runner keeps the default pool: it serves every console request"
+  }
+}
+
+run "the_bot_pool_ceiling_is_a_setting" {
+  command = apply
+
+  variables {
+    bot_pool_max = 34
+  }
+
+  assert {
+    condition     = aws_autoscaling_group.bots.max_size == 34
+    error_message = "a load test raises the ceiling with bot_pool_max (default 2 keeps staging's cost capped)"
+  }
+}

@@ -114,6 +114,7 @@ next person knows what exists that no PR created. Never record secret values.
 
 | When (UTC) | Who | What | Why it was manual | Undo / rotate |
 |---|---|---|---|---|
+| 2026-10-02 | AbhaySingh (run by the assistant on approval) | `terraform apply` of `infra/v2/bootstrap`: DNS name `livekit-staging.wwbp.org` for the apply role; the two self-hosted LiveKit parameters for the acceptance role (#134) | Bootstrap holds CI's own permissions | Re-apply bootstrap from `v2` |
 | 2026-10-02 22:53 | AbhaySingh | Minted the self-hosted LiveKit API key and secret into SSM `/meetlab-v2/staging/SELFHOSTED_LIVEKIT_API_KEY` and `_SECRET` (random, never displayed) | The server's keys must not be in Terraform state; CI can't write secrets | Rotate: put new values, then force a new deployment of livekit, meet, the runner (bots read them at start) |
 | 2026-10-02 13:45 | AbhaySingh (run by the assistant on approval) | `complete-lifecycle-action CONTINUE` for bot machine `i-0d41e79bfb55e5e4a`, stuck in `Terminating:Wait` since 2026-10-01 04:56 | It had been stopped by hand (CloudTrail: `StopInstances` by AbhaySingh, 2026-10-01 04:55; not from the assistant's session), so ECS could never finish draining it, and the stuck termination blocked every scale-in | None needed: Auto Scaling terminated the already-stopped machine |
 | 2026-10-01 04:55 | AbhaySingh (console or another session; unknown) | `StopInstances` on bot machine `i-0d41e79bfb55e5e4a`, 2 min after ECS launched it | Unknown | See the row above: caused the stuck pool |

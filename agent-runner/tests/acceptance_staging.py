@@ -16,7 +16,7 @@ room-gone cleanup can never be what closes a session and hide a failure.
   transcript       a participant's speech becomes a stored turn; with staging's NIM on,
                    transcribed by the NIM (waits for a cold NIM first)
   prewarm          Prepare for study (console) brings up a warm bot machine; Stop
-                   preparing resets the pool
+                   preparing resets the pool; no bot machine is stuck unhealthy
 
 A scenario that cannot reach its situation (e.g. the participant drops before the
 kill) is a FAIL, not a skip: an acceptance test that didn't test anything passed nothing.
@@ -361,6 +361,9 @@ async def scenario_prewarm():
 
     _post("/api/console/login", {"password": os.environ["CONSOLE_PASSWORD"]})
     until = (datetime.now(timezone.utc) + timedelta(minutes=30)).isoformat()
+    before = _capacity()
+    if before.get("unhealthy_instances"):  # the 2026-10-02 stuck pool, made visible
+        raise Fail(f"{before['unhealthy_instances']} bot machine(s) stuck unhealthy in the group: the pool cannot scale in")
     try:
         warm = _capacity("POST", {"sessions": 1, "until": until})
         if (warm["min_instances"], warm["warm_until"] is None) != (1, False):

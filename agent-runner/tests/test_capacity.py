@@ -13,11 +13,22 @@ GROUP = "meetlab-v2-staging-bots"
 NOW = datetime(2026, 10, 2, 12, 0, tzinfo=timezone.utc)
 
 
-def _asg(min_size=0, max_size=2, desired=0, in_service=0, scheduled=None):
+CLUSTER = "meetlab-v2-staging"
+
+
+def _ecs(registered=()):
+    ecs = mock.Mock()
+    ecs.list_container_instances.return_value = {"containerInstanceArns": [f"arn:{i}" for i in registered]}
+    return ecs
+
+
+def _asg(min_size=0, max_size=2, desired=0, in_service=0, scheduled=None, stuck=0):
     asg = mock.Mock()
     asg.describe_auto_scaling_groups.return_value = {"AutoScalingGroups": [{
         "MinSize": min_size, "MaxSize": max_size, "DesiredCapacity": desired,
-        "Instances": [{"LifecycleState": "InService"}] * in_service,
+        "Instances": [{"InstanceId": f"i-{n}", "LifecycleState": "InService", "HealthStatus": "Healthy"}
+                      for n in range(in_service)]
+        + [{"InstanceId": "i-stuck", "LifecycleState": "Terminating:Wait", "HealthStatus": "Unhealthy"}] * stuck,
     }]}
     asg.describe_scheduled_actions.return_value = {"ScheduledUpdateGroupActions": (
         [{"ScheduledActionName": capacity.SCHEDULE, "StartTime": scheduled}] if scheduled else [])}
@@ -71,9 +82,31 @@ class CancelTests(unittest.TestCase):
 
 class StatusTests(unittest.TestCase):
     def test_reports_warm_instances_and_when_warming_ends(self):
-        out = capacity.status(_asg(min_size=2, desired=2, in_service=1, scheduled=NOW), GROUP, per_instance=3)
+        out = capacity.status(_asg(min_size=2, desired=2, in_service=1, scheduled=NOW), _ecs(["i-0"]), CLUSTER, GROUP, per_instance=3)
         self.assertEqual(out, {"min_instances": 2, "max_instances": 2, "desired_instances": 2,
-                               "ready_instances": 1, "sessions_per_instance": 3, "warm_until": NOW.isoformat()})
+                               "ready_instances": 1, "sessions_per_instance": 3, "warm_until": NOW.isoformat(),
+                               "unhealthy_instances": 0})
+
+    def test_counts_machines_stuck_unhealthy_in_the_group(self):
+        # 2026-10-02: a bot machine stopped by hand sat in Terminating:Wait for 27 h; the
+        # ECS draining hook can't finish on a stopped machine, and the pool never scaled in.
+        out = capacity.status(_asg(in_service=1, stuck=1), _ecs(), CLUSTER, GROUP, per_instance=3)
+        self.assertEqual(out["unhealthy_instances"], 1)
+
+
+    def test_a_machine_is_ready_only_once_ecs_can_place_a_bot_on_it(self):
+        # Auto Scaling says InService as soon as EC2 starts the machine; ECS registers it
+        # about a minute later (2026-10-02: "ready 16 s after Prepare", from cold).
+        ecs = _ecs()
+        out = capacity.status(_asg(min_size=1, desired=1, in_service=1, scheduled=NOW), ecs, CLUSTER, GROUP, per_instance=3)
+        self.assertEqual(out["ready_instances"], 0)
+        ecs.list_container_instances.assert_called_once_with(
+            cluster=CLUSTER, status="ACTIVE", filter='ec2InstanceId in ["i-0"]')
+
+    def test_an_empty_pool_asks_ecs_nothing(self):
+        ecs = _ecs()
+        self.assertEqual(capacity.status(_asg(), ecs, CLUSTER, GROUP, per_instance=3)["ready_instances"], 0)
+        ecs.list_container_instances.assert_not_called()
 
 
 if __name__ == "__main__":

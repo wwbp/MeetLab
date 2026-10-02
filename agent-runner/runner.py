@@ -389,7 +389,7 @@ async def start_bot(request: Request, _=Depends(verify_api_key)):
             bot_identity = f"bot_{_room_slug(room_name)}_{uuid.uuid4().hex[:10]}"
 
         # One task (ECS) or container (local Docker) per meeting (4c); there is no
-        # in-process bot (iteration 9). Refuse before a session row exists, so a
+        # in-process bot (removed in #113). Refuse before a session row exists, so a
         # misconfigured runner never leaves a 'running' session no bot will join.
         dispatcher = os.environ.get("BOT_DISPATCHER")
         if dispatcher not in ("ecs", "docker"):
@@ -508,11 +508,12 @@ def _asg_client():
 
 
 def _prewarm_target():
-    """(client, group, sessions per instance), or None when bots aren't ECS tasks."""
+    """(autoscaling, ecs, cluster, group, sessions per instance), or None when bots aren't ECS tasks."""
     if os.environ.get("BOT_DISPATCHER") != "ecs":
         return None
     # ponytail: 3 bots per c6i.large (1 GB each in 4 GB); measure at load testing.
-    return _asg_client(), os.environ["BOT_ASG_NAME"], int(os.environ.get("BOTS_PER_INSTANCE", "3"))
+    return (_asg_client(), _ecs_client(), os.environ["ECS_CLUSTER"], os.environ["BOT_ASG_NAME"],
+            int(os.environ.get("BOTS_PER_INSTANCE", "3")))
 
 
 _LOCAL_BOTS = "bots run as local containers here; there is no pool to warm"
@@ -523,8 +524,8 @@ async def get_capacity(_=Depends(verify_api_key)):
     target = _prewarm_target()
     if target is None:
         return {"available": False, "reason": _LOCAL_BOTS}
-    asg, group, per = target
-    return {"available": True, **await asyncio.to_thread(capacity.status, asg, group, per)}
+    asg, ecs, cluster, group, per = target
+    return {"available": True, **await asyncio.to_thread(capacity.status, asg, ecs, cluster, group, per)}
 
 
 @app.post("/capacity/prewarm")
@@ -539,13 +540,13 @@ async def prewarm_capacity(request: Request, _=Depends(verify_api_key)):
         until = datetime.fromisoformat(body["until"])
         if not isinstance(sessions, int) or isinstance(sessions, bool) or until.tzinfo is None:
             raise ValueError("sessions must be a whole number and until must carry a time zone")
-        asg, group, per = target
+        asg, ecs, cluster, group, per = target
         result = await asyncio.to_thread(capacity.prewarm, asg, group, sessions, until, per,
                                          datetime.now(timezone.utc))
     except (KeyError, TypeError, ValueError) as e:
         return JSONResponse({"error": f"bad request: {e}"}, status_code=400)
     logger.info(f"bot pool pre-warmed: {sessions} sessions, {result['instances']} instance(s) until {until.isoformat()}")
-    return {**result, "available": True, **await asyncio.to_thread(capacity.status, asg, group, per)}
+    return {**result, "available": True, **await asyncio.to_thread(capacity.status, asg, ecs, cluster, group, per)}
 
 
 @app.delete("/capacity/prewarm")
@@ -553,10 +554,10 @@ async def cancel_prewarm(_=Depends(verify_api_key)):
     target = _prewarm_target()
     if target is None:
         return JSONResponse({"error": _LOCAL_BOTS}, status_code=409)
-    asg, group, per = target
+    asg, ecs, cluster, group, per = target
     await asyncio.to_thread(capacity.cancel, asg, group)
     logger.info("bot pool pre-warm cancelled")
-    return {"available": True, **await asyncio.to_thread(capacity.status, asg, group, per)}
+    return {"available": True, **await asyncio.to_thread(capacity.status, asg, ecs, cluster, group, per)}
 
 
 # Reads are for a human scrolling a console, not for bulk export.

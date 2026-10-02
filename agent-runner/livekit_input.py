@@ -7,7 +7,7 @@ each output frame is built partly from the other person's samples: 60-64% of eac
 speaker's audio carried the other's voice (tests/probe_transport_attribution.py),
 0% when alone. Speech recognition then attributed one person's words to another.
 
-Remove when Pipecat resamples per participant upstream.
+Remove when Pipecat resamples per participant upstream (pipecat-ai/pipecat#6033).
 """
 from pipecat.audio.utils import create_stream_resampler
 from pipecat.frames.frames import UserAudioRawFrame
@@ -25,9 +25,11 @@ class _PerParticipantInput(LiveKitInputTransport):
             if not audio_data:
                 continue
             event, participant_id = audio_data
-            resampler = self._resamplers.setdefault(participant_id, create_stream_resampler())
+            if participant_id not in self._resamplers:
+                self._resamplers[participant_id] = create_stream_resampler()
             frame = event.frame
-            audio = await resampler.resample(frame.data.tobytes(), frame.sample_rate, self.sample_rate)
+            audio = await self._resamplers[participant_id].resample(
+                frame.data.tobytes(), frame.sample_rate, self.sample_rate)
             if audio:
                 await self.push_audio_frame(UserAudioRawFrame(
                     user_id=participant_id, audio=audio,

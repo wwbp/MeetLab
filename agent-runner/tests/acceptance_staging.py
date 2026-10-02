@@ -17,6 +17,8 @@ room-gone cleanup can never be what closes a session and hide a failure.
                    transcribed by the NIM (waits for a cold NIM first)
   prewarm          Prepare for study (console) brings up a warm bot machine; Stop
                    preparing resets the pool; no bot machine is stuck unhealthy
+  two_humans       two humans in before the bot, one leaves: the bot stays     (F1)
+  refresh          the only human refreshes: the bot is still there after the grace
 
 A scenario that cannot reach its situation (e.g. the participant drops before the
 kill) is a FAIL, not a skip: an acceptance test that didn't test anything passed nothing.
@@ -104,13 +106,16 @@ async def _until(check, timeout, what):
 class Meeting:
     """A room with a stand-in participant and a bot started through meet."""
 
-    def __init__(self, wait_for_bot=True):
-        self.wait_for_bot = wait_for_bot
+    def __init__(self, wait_for_bot=True, second_human=False):
+        self.wait_for_bot, self.second_human = wait_for_bot, second_human
 
     async def __aenter__(self):
         self.room = f"accept-{uuid.uuid4().hex[:6]}"
         self.human = rtc.Room()
         await self.human.connect(os.environ["LIVEKIT_URL"], _token(self.room, "human_standin"))
+        self.second = rtc.Room()
+        if self.second_human:  # in the room before the bot, as in diagnosis F1
+            await self.second.connect(os.environ["LIVEKIT_URL"], _token(self.room, "human_second"))
         _post("/api/console/login", {"password": os.environ["CONSOLE_PASSWORD"]})
         _post("/api/concierge/rooms", {"name": self.room})
         started = _post(f"/api/concierge/rooms/{self.room}/bots", {})["request"]
@@ -135,6 +140,7 @@ class Meeting:
 
     async def __aexit__(self, *exc):
         await self.human.disconnect()
+        await self.second.disconnect()
 
 
 async def scenario_start():
@@ -376,10 +382,41 @@ async def scenario_prewarm():
     return f"a bot machine ready {waited:.0f} s after Prepare; Stop preparing reset the pool"
 
 
+REJOIN_GRACE = 60  # BOT_REJOIN_GRACE_SECONDS default (presence.py)
+
+
+async def _bot_stays(m, seconds):
+    t0 = time.time()
+    while time.time() - t0 < seconds:
+        if not m.bot_present():
+            raise Fail(f"the bot left {time.time() - t0:.0f} s later, with a human still in the room")
+        await asyncio.sleep(2)
+
+
+async def scenario_two_humans():
+    """Diagnosis F1: two humans in the room before the bot; one leaves, the bot stays."""
+    async with Meeting(second_human=True) as m:
+        await m.second.disconnect()
+        await _bot_stays(m, REJOIN_GRACE + 15)
+        return f"the bot stayed {REJOIN_GRACE + 15} s after the other human left"
+
+
+async def scenario_refresh():
+    """The only human refreshes the page (leaves, back in 10 s): the session goes on."""
+    async with Meeting() as m:
+        await m.human.disconnect()
+        await asyncio.sleep(10)
+        m.human = rtc.Room()
+        await m.human.connect(os.environ["LIVEKIT_URL"], _token(m.room, "human_standin"))
+        await _bot_stays(m, REJOIN_GRACE + 5)
+        return "the bot was still there after the refresh, past the rejoin grace"
+
+
 SCENARIOS = {"start": scenario_start, "stoptask": scenario_stoptask, "removed": scenario_removed,
              "kill9": scenario_kill9, "stop_early": scenario_stop_early,
              "audio_recording": scenario_audio_recording, "video_recording": scenario_video_recording,
-             "transcript": scenario_transcript, "prewarm": scenario_prewarm}
+             "transcript": scenario_transcript, "prewarm": scenario_prewarm,
+             "two_humans": scenario_two_humans, "refresh": scenario_refresh}
 
 
 SCENARIO_TIMEOUT = 600

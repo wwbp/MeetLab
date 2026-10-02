@@ -51,6 +51,7 @@ import audio_tracks
 from config import load_config, require
 from db.config_loader import load_bot_config
 from heartbeat import beat_forever
+from presence import wait_until_empty
 from db.engine import AsyncSessionLocal
 from db.models import Conversation, MediaFile, Speaker, Utterance
 from interruption import InterruptionTracker
@@ -442,8 +443,8 @@ async def _finalize_conversation(session_id: str, status: str) -> None:
     """Write a conversation's terminal status + ended_at, resilient to cancellation.
 
     Conversation.status would otherwise stay stuck on 'running' if the bot task is
-    cancelled mid-write — all participants leaving fires on_participant_disconnected
-    → task.cancel(), and a plain `await` inside the shutdown path can be interrupted
+    cancelled mid-write — an empty room fires leave_when_empty → task.cancel(), and a
+    plain `await` inside the shutdown path can be interrupted
     before the UPDATE commits. The write runs inside asyncio.shield so a cancellation
     of the surrounding bot() coroutine cannot abort the commit; if our await is the
     one cancelled, we still wait for the shielded write to finish before re-raising.
@@ -1120,9 +1121,6 @@ async def _bot(runner_args: LiveKitRunnerArguments):
             _current_speaker_sid[0] = None
         await multi_stt.remove_participant(participant_id)
         logger.info(f"Participant disconnected: {identity}")
-        if not _sid_to_identity:
-            logger.info("No participants remain — cancelling pipeline")
-            await task.cancel()
 
     @transport.event_handler("on_disconnected")
     async def on_disconnected(transport):
@@ -1203,19 +1201,30 @@ async def _bot(runner_args: LiveKitRunnerArguments):
     # Proof of life for the reconciler (heartbeat.py): a bot that dies hard stops beating.
     heartbeat_task = asyncio.create_task(beat_forever(
         AsyncSessionLocal, runner_args.session_id, on_recording=audio_sink.enable))
+
+    # Leave when the live roster has been empty past its grace (presence.py, F1).
+    async def leave_when_empty():
+        await wait_until_empty(lambda: transport._client.room.remote_participants.keys(),
+                               arrival=float(os.environ.get("BOT_ARRIVAL_GRACE_SECONDS", "900")),
+                               rejoin=float(os.environ.get("BOT_REJOIN_GRACE_SECONDS", "60")))
+        logger.info("Room empty past its grace — ending the session")
+        await task.cancel()
+
+    presence_task = asyncio.create_task(leave_when_empty())
     try:
         await runner.run(task)
         status = "completed"
     except asyncio.CancelledError:
-        # Graceful end: all participants left (on_participant_disconnected →
-        # task.cancel()) or the runner's background task was cancelled. Record a
-        # clean completion, then re-raise so the cancellation isn't swallowed.
+        # Graceful end: the room stayed empty (leave_when_empty → task.cancel()) or
+        # the runner's background task was cancelled. Record a clean completion,
+        # then re-raise so the cancellation isn't swallowed.
         status = "completed"
         raise
     except Exception as e:
         logger.error(f"Bot pipeline error in room {runner_args.room_name}: {e}")
     finally:
         heartbeat_task.cancel()
+        presence_task.cancel()
         # Flush any audio still buffered (speakers who never fired a disconnect, or
         # the final drain). Shielded so end-of-call cancellation can't abort a write
         # mid-flight.

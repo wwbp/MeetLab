@@ -1,11 +1,9 @@
 """Idle-room longevity benchmark: start a bot in a room, let NOBODY join, and measure
 how long the room + bot stay up.
 
-Why this is interesting: the bot only cancels its pipeline when a *joined* participant
-disconnects and none remain (bot.py::on_participant_disconnected). In a room where no
-one ever joins, that path never fires and no greeting is spoken — so the room should
-live until the bot's JWT expires (BOT_TOKEN_TTL_MINUTES, default 15 min), at which point
-LiveKit disconnects the bot. This benchmark measures that lifetime empirically AND checks
+Why this is interesting: a bot whose humans never come leaves after the arrival grace
+(presence.py, BOT_ARRIVAL_GRACE_SECONDS, default 15 min); before that rule it lived until
+its JWT expired. This benchmark measures that lifetime empirically AND checks
 whether the session finalizes cleanly at teardown or hangs on 'running' (the DB-consistency
 risk) — noting whether it's the graceful path (completed) or the reconciler net (ended).
 

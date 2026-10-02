@@ -10,7 +10,7 @@ variable "stt_nim_enabled" {
 }
 
 variable "bot_pool_min" {
-  description = "Bot machines kept warm at all times, so a bot joins in seconds, not 2-3 min ($62/month each)"
+  description = "Bot machines kept warm at all times (each $62/month); 0 on staging: tests and studies use Prepare for study"
   type        = number
-  default     = 1
+  default     = 0
 }

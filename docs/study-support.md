@@ -8,10 +8,10 @@ participant stuck on a form is a participant who emails you instead.
 
 ## 0. Prepare for study (before the first participant)
 
-A bot needs a machine to run on. One machine is always warm, enough for about 3
-sessions at once; beyond that, a new machine takes about **2–3 minutes** to start,
-and the participant sits in a room without a bot. So before a study that runs more
-sessions at once, open the console's home page and use **Prepare for study**:
+A bot needs a machine to run on. To save money, staging keeps none running when it
+is idle, so the first bot of a study waits about **2–3 minutes** for a machine to
+start, and the participant sits in a room without a bot. So before every study, open
+the console's home page and use **Prepare for study**:
 
 1. **Sessions at once**: how many rooms will run at the same time at the busiest point.
 2. **Until**: when the study ends (at most 24 hours ahead).

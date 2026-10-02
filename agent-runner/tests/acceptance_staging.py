@@ -237,7 +237,7 @@ async def _speak(room: rtc.Room, seconds: float):
         track, rtc.TrackPublishOptions(source=rtc.TrackSource.SOURCE_MICROPHONE))
     for i in range(int(seconds * 100)):
         frame = rtc.AudioFrame.create(rate, 1, per)
-        samples = memoryview(frame.data).cast("h")
+        samples = frame.data  # already int16 samples (livekit.rtc AudioFrame)
         for j in range(per):
             samples[j] = int(8000 * math.sin(2 * math.pi * 440 * (i * per + j) / rate))
         await source.capture_frame(frame)

@@ -289,6 +289,29 @@ run "ci_manages_only_staging_users_and_never_their_keys" {
   }
 }
 
+# Staging's STT NIM (staging/stt_nim.tf): an internal network load balancer, and a
+# spot GPU group whose launches ask for a spot request.
+run "ci_can_run_the_stt_nim_on_spot_behind_its_own_nlb" {
+  command = plan
+
+  assert {
+    condition = anytrue([for s in flatten([for p in aws_iam_role_policy.apply : jsondecode(p.policy).Statement]) :
+      s.Effect == "Allow" && contains(flatten([s.Action]), "elasticloadbalancing:*") &&
+      contains(flatten([s.Resource]), "arn:aws:elasticloadbalancing:us-east-1:123456789012:loadbalancer/net/meetlab-v2-*/*") &&
+      contains(flatten([s.Resource]), "arn:aws:elasticloadbalancing:us-east-1:123456789012:listener/net/meetlab-v2-*/*")
+    ])
+    error_message = "the apply role manages meetlab-v2 network load balancers and their listeners, and no one else's"
+  }
+  assert {
+    condition = anytrue([for s in flatten([for p in aws_iam_role_policy.apply : jsondecode(p.policy).Statement]) :
+      s.Effect == "Allow" && contains(flatten([s.Action]), "ec2:RunInstances") &&
+      contains(flatten([s.Resource]), "arn:aws:ec2:us-east-1:123456789012:spot-instances-request/*") &&
+      can(s.Condition.ArnLike["ec2:LaunchTemplate"])
+    ])
+    error_message = "spot launches, still only from our launch templates"
+  }
+}
+
 run "ci_can_manage_our_service_connect_namespace" {
   command = plan
 
@@ -339,9 +362,14 @@ run "acceptance_role_is_staging_only_and_least_privilege" {
     condition = alltrue([for s in jsondecode(aws_iam_role_policy.acceptance.policy).Statement :
       alltrue([for a in flatten([s.Action]) : contains([
         "ssm:GetParameter", "kms:Decrypt", "ecs:ListTasks", "ecs:DescribeTasks", "ecs:StopTask", "ecs:ExecuteCommand", "logs:FilterLogEvents",
-        "iam:SimulatePrincipalPolicy", "s3:ListBucket",
+        "iam:SimulatePrincipalPolicy", "s3:ListBucket", "ecs:DescribeServices",
     ], a)])])
     error_message = "only the actions the acceptance test performs"
+  }
+  assert {
+    condition = anytrue([for s in jsondecode(aws_iam_role_policy.acceptance.policy).Statement :
+    flatten([s.Action]) == ["ecs:DescribeServices"] && flatten([s.Resource]) == ["arn:aws:ecs:us-east-1:123456789012:service/meetlab-v2-staging/*"]])
+    error_message = "acceptance transcript: is the STT NIM on, and healthy? Staging services only"
   }
   assert {
     condition = alltrue([for s in jsondecode(aws_iam_role_policy.acceptance.policy).Statement :

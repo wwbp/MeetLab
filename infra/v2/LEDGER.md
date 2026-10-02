@@ -23,6 +23,7 @@ $7.1k in September, all lab projects). So this is priced from what runs:
 
 | Added | PR | Resource | $/month | Notes |
 |---|---|---|---|---|
+| 2026-10-02 | STT NIM PR | Staging Parakeet NIM: `g6.xlarge` spot, 0 to 1, + internal NLB and 100 GB disk while on | 0 off | ~$0.30–0.45/hour spot + $0.03/hour NLB while on |
 | 2026-09-30 | 4c PR 1 | Bot pool: c6i.large, 0 to 2 instances | 0 idle | $0.085/hour each while bots run |
 | 2026-09-30 | #89 | agent-runner service + Service Connect namespace | ~0 | Shares the t3.medium; a rolling deploy may briefly add a second |
 | 2026-09-30 | #88 | ECS instance `t3.medium` + 30 GB disk | 33 | Services only; bots get their own group |
@@ -94,6 +95,8 @@ next person knows what exists that no PR created. Never record secret values.
 
 | When (UTC) | Who | What | Why it was manual | Undo / rotate |
 |---|---|---|---|---|
+| 2026-10-02 | AbhaySingh (run by the assistant on approval) | `terraform apply` of `infra/v2/bootstrap`: spot launches and meetlab-v2 network load balancers for the apply role; `ecs:DescribeServices` on staging for acceptance (STT NIM PR) | Bootstrap holds CI's own permissions | Re-apply bootstrap from `v2` |
+| 2026-10-02 | AbhaySingh (run by the assistant on approval) | `terraform apply` of `infra/v2/bootstrap`: the boundary allows `s3:AbortMultipartUpload` (#112) | Same | Same |
 | 2026-10-02 02:51 | AbhaySingh | Minted the access key for `meetlab-v2-staging-egress-writer` straight into SSM `/meetlab-v2/staging/EGRESS_S3_KEY_ID` and `_SECRET` (both version 2; never displayed) | LiveKit Cloud needs a real key to upload video. CI is explicitly denied `iam:CreateAccessKey` so a PR can never mint credentials, and Terraform would keep the secret in its state. The AI assistant's session is also blocked from writing secrets | Rotate: [docs/v2-deployment.md](../../docs/v2-deployment.md) step 3. Deleting the user requires deleting this key first |
 | 2026-10-01 | AbhaySingh (run by the assistant on approval) | Placeholder values in the two `EGRESS_S3_KEY_*` parameters before #111 merged | ECS can't start agent-runner if a referenced parameter is missing | Replaced by the real key above |
 | 2026-10-01 | AbhaySingh (run by the assistant on approval) | `terraform apply` of `infra/v2/bootstrap` (egress user permissions) | Bootstrap holds CI's own permissions; CI must not be able to widen them | Re-apply bootstrap from `v2` |
@@ -103,6 +106,10 @@ next person knows what exists that no PR created. Never record secret values.
 
 | Date | Decision | Why | Revisit when |
 |---|---|---|---|
+| 2026-10-02 | Staging's Parakeet NIM is an ECS service on a spot `g6.xlarge` group (0 to 1), off unless `stt_nim_enabled`; then bots use it, else Deepgram | Same server and GPU as v1, so measurements carry over; ~$0 idle | Load tests: size it; before a study, on-demand or a warm instance |
+| 2026-10-02 | Bots reach the NIM through an internal network load balancer, created only while it runs | Bot tasks are one-off RunTask tasks and can't use Service Connect; an NLB is a stable address with health checks, and already within CI's load-balancer permissions | — |
+| 2026-10-02 | The NGC key is a Secrets Manager secret `meetlab-v2/staging/ngc` (`{"username":"$oauthtoken","password":...}`), stored by a person | ECS private-registry pulls need that shape; never in Terraform state | — |
+| 2026-10-02 | The model cache lives on the instance disk; each cold start rebuilds it (~20 min) | Simplest; staging runs it only for tests | Before a study: EFS cache or a warm instance |
 | 2026-10-02 | No in-process bots (iteration 9, completes 4c): `/start` refuses with 500 unless `BOT_DISPATCHER` is `ecs` or `docker`, before any session row exists. The runner no longer mints bot tokens or holds per-speaker sinks | One way to run a bot everywhere (ECS on staging, a container locally), so tests exercise the path production uses; a misconfigured runner can't leave a 'running' session no bot will join | — |
 | 2026-10-01 | Video egress uploads with a Terraform-made IAM user `meetlab-v2-staging-egress-writer` (PutObject + AbortMultipartUpload on `recordings/*` only, under the boundary); its access key is minted by a person into SSM and pasted nowhere else | LiveKit Cloud uploads from its own servers, so it needs a key; `assume_role_arn` is Enterprise-only and still needs a base key. Terraform never creates the key, so it is never in state, and CI can't mint one | LiveKit plan with assume-role; then drop the key |
 | 2026-10-01 | Only the runner gets the egress key (`EGRESS_S3_KEY_*`); bots and the runner otherwise use their task roles | The runner is what calls LiveKit egress; a bot never needs it | — |

@@ -931,6 +931,9 @@ async def _bot(runner_args: LiveKitRunnerArguments):
                 )
                 await _set_root_utterance_if_needed(db, runner_args.session_id, utt_id)
         _last_user_utt_id[0] = utt_id
+        # IDs only, never the words: participants' speech stays out of logs. Live
+        # acceptance (transcript) waits for this line.
+        logger.info(f"user utterance {utt_id} stored for session {runner_args.session_id}")
 
     @context_aggregator.assistant().event_handler("on_assistant_turn_stopped")
     async def on_assistant_turn_stopped(aggregator, message):

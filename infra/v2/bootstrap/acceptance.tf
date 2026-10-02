@@ -42,6 +42,12 @@ resource "aws_iam_role_policy" "acceptance" {
         Resource = ["arn:aws:ecs:us-east-1:${local.account}:task/meetlab-v2-staging/*", local.cluster_arn]
       },
       {
+        # acceptance transcript: is the STT NIM on, and healthy?
+        Effect   = "Allow"
+        Action   = "ecs:DescribeServices"
+        Resource = "arn:aws:ecs:us-east-1:${local.account}:service/meetlab-v2-staging/*"
+      },
+      {
         # acceptance audio_recording: did a file land? Names only, never contents.
         Effect    = "Allow"
         Action    = "s3:ListBucket"

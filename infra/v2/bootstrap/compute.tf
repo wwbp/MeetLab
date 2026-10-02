@@ -79,6 +79,7 @@ locals {
         Resource = [for r in [
           "loadbalancer/app/meetlab-v2-*/*", "targetgroup/meetlab-v2-*/*",
           "listener/app/meetlab-v2-*/*", "listener-rule/app/meetlab-v2-*/*",
+          "loadbalancer/net/meetlab-v2-*/*", "listener/net/meetlab-v2-*/*", # the STT NIM's
         ] : format(local.arn, "elasticloadbalancing", r)]
       },
       {
@@ -89,11 +90,11 @@ locals {
       },
       {
         # ASGs and capacity checks call RunInstances as us. Every resource but these
-        # four must match OwnResources (our tag), including the launch template.
+        # five must match OwnResources (our tag), including the launch template.
         Sid       = "RunFromOurLaunchTemplates"
         Effect    = "Allow"
         Action    = "ec2:RunInstances"
-        Resource  = ["arn:aws:ec2:us-east-1::image/*", format(local.arn, "ec2", "instance/*"), format(local.arn, "ec2", "volume/*"), format(local.arn, "ec2", "network-interface/*")]
+        Resource  = ["arn:aws:ec2:us-east-1::image/*", format(local.arn, "ec2", "instance/*"), format(local.arn, "ec2", "volume/*"), format(local.arn, "ec2", "network-interface/*"), format(local.arn, "ec2", "spot-instances-request/*")]
         Condition = { ArnLike = { "ec2:LaunchTemplate" = format(local.arn, "ec2", "launch-template/*") } }
       },
       {

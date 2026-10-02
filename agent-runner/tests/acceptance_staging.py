@@ -13,6 +13,8 @@ room-gone cleanup can never be what closes a session and hide a failure.
   stop_early       Stop before the bot joins: it never joins, and its task stops
   audio_recording  per-speaker audio reaches the media bucket through the bot's role  (8a)
   video_recording  LiveKit egress uploads the room's mp4 with the egress key          (8b)
+  transcript       a participant's speech becomes a stored turn; with staging's NIM on,
+                   transcribed by the NIM (waits for a cold NIM first)
 
 A scenario that cannot reach its situation (e.g. the participant drops before the
 kill) is a FAIL, not a skip: an acceptance test that didn't test anything passed nothing.
@@ -286,12 +288,69 @@ async def scenario_video_recording():
         return f"{video_in_bucket()[0]} in s3://{MEDIA_BUCKET}"
 
 
+STT_NIM_SERVICE = "meetlab-v2-staging-stt-nim"
+SPEECH = os.path.join(os.path.dirname(__file__), "fixtures", "conversations", "897d84fb07080a12.wav")
+
+
+def _stt_nim_on():
+    """Staging's NIM runs only while stt_nim_enabled (infra/v2/staging/stt_nim.tf)."""
+    svc = ecs.describe_services(cluster=CLUSTER, services=[STT_NIM_SERVICE])["services"]
+    return bool(svc) and svc[0]["status"] == "ACTIVE" and svc[0]["desiredCount"] > 0
+
+
+def _stt_nim_ready():
+    deployments = ecs.describe_services(cluster=CLUSTER, services=[STT_NIM_SERVICE])["services"][0]["deployments"]
+    return [d.get("rolloutState") for d in deployments] == ["COMPLETED"]  # targets healthy behind the NLB
+
+
+async def _play_wav(room: rtc.Room, path: str, seconds: float):
+    """The stand-in says a recorded sentence into its microphone (16-bit mono)."""
+    import wave
+
+    with wave.open(path) as w:
+        rate = w.getframerate()
+        pcm = w.readframes(int(rate * seconds))
+    source = rtc.AudioSource(rate, 1)
+    track = rtc.LocalAudioTrack.create_audio_track("standin-voice", source)
+    await room.local_participant.publish_track(
+        track, rtc.TrackPublishOptions(source=rtc.TrackSource.SOURCE_MICROPHONE))
+    per = rate // 100  # 10 ms frames
+    for i in range(0, len(pcm) // 2 - per, per):
+        frame = rtc.AudioFrame(pcm[i * 2:(i + per) * 2], rate, 1, per)
+        await source.capture_frame(frame)
+
+
+async def scenario_transcript():
+    """Someone speaks; the bot stores their turn. With the NIM on, the transcript comes
+    from staging's own Parakeet NIM, not Deepgram, and the NIM returns no errors."""
+    nim = _stt_nim_on()
+    if nim:  # a cold NIM builds its model first (~20 min, v1 docs)
+        waited = await _until(_stt_nim_ready, 2700, "the STT NIM healthy behind its load balancer")
+    async with Meeting() as m:
+        await asyncio.sleep(5)  # the greeting
+        await _play_wav(m.human, SPEECH, 8)
+        await _until(lambda: any("user utterance" in l for l in _log_lines("/meetlab-v2/staging/bot", m.session, m.started)),
+                     120, "the participant's turn transcribed and stored")
+        if not nim:
+            return "a user turn stored (Deepgram; the NIM is off)"
+        stream = f"bot/bot/{m.task.rsplit('/', 1)[-1]}"
+        lines = [e["message"] for e in logs.filter_log_events(
+            logGroupName="/meetlab-v2/staging/bot", logStreamNames=[stream], startTime=int(m.started * 1000))["events"]]
+        if not any("→ parakeet-tdt-0.6b-v2" in l for l in lines):
+            raise Fail("the bot did not use the NIM's model")
+        if any("NemotronHTTPSTTService error" in l for l in lines):
+            raise Fail("the NIM returned errors")
+        return f"a user turn stored, transcribed by staging's NIM (ready after {waited:.0f} s)"
+
+
 SCENARIOS = {"start": scenario_start, "stoptask": scenario_stoptask, "removed": scenario_removed,
              "kill9": scenario_kill9, "stop_early": scenario_stop_early,
-             "audio_recording": scenario_audio_recording, "video_recording": scenario_video_recording}
+             "audio_recording": scenario_audio_recording, "video_recording": scenario_video_recording,
+             "transcript": scenario_transcript}
 
 
 SCENARIO_TIMEOUT = 600
+TIMEOUTS = {"transcript": 3300}  # may wait for a cold NIM first
 
 
 async def main(names):
@@ -301,9 +360,9 @@ async def main(names):
         try:
             # A hang (a LiveKit connect, a meet call) fails its own scenario instead of
             # freezing the run until CI's 30-minute cap (2026-10-02). Covers a cold start.
-            detail, ok = await asyncio.wait_for(SCENARIOS[name](), SCENARIO_TIMEOUT), True
+            detail, ok = await asyncio.wait_for(SCENARIOS[name](), TIMEOUTS.get(name, SCENARIO_TIMEOUT)), True
         except asyncio.TimeoutError:
-            detail, ok = f"hung: no result within {SCENARIO_TIMEOUT} s", False
+            detail, ok = f"hung: no result within {TIMEOUTS.get(name, SCENARIO_TIMEOUT)} s", False
         except Fail as e:
             detail, ok = str(e), False
         except Exception as e:  # an error in the harness is a failure too, with its cause

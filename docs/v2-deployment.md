@@ -105,6 +105,39 @@ dashboard.
 with the command above, redeploy agent-runner, then delete the old key with
 `aws iam delete-access-key`.
 
+### 4. The NVIDIA key for staging's speech-to-text server (once)
+
+Staging can run its own Parakeet speech-to-text server (the "NIM", on a GPU), as v1
+does. NVIDIA's registry needs a key both to download the server and its model. It
+lives in Secrets Manager, in the shape ECS expects for a private registry:
+
+```bash
+# copies v1's key; nothing is printed
+aws secretsmanager create-secret --region us-east-1 --name meetlab-v2/staging/ngc \
+  --secret-string "$(aws ssm get-parameter --region us-east-1 --name /meetlab/stt-nim/ngc_api_key \
+      --with-decryption --query Parameter.Value --output text \
+    | python3 -c 'import json,sys; print(json.dumps({"username": "$oauthtoken", "password": sys.stdin.read().strip()}))')"
+```
+
+Only needed before the NIM is first switched on. Staging/test use is covered by
+NVIDIA's free developer program; production needs a licence (ledger).
+
+## Switching staging's speech-to-text server on and off
+
+Off by default: bots use Deepgram and the GPU costs nothing. To turn it on, open a PR
+that sets `default = true` on `stt_nim_enabled` in `infra/v2/staging/variables.tf`,
+and merge it (merge = deploy). What happens:
+
+- A spot `g6.xlarge` starts, downloads the server and **builds the model: about
+  20–30 minutes** before it answers. Bots started meanwhile still point at it and
+  their speech is not transcribed, so wait.
+- The `transcript` live test waits for it, then checks a bot's transcript came from it.
+- Turn it off again with a PR setting `default = false`. It costs about $0.30–0.45
+  per hour while on (spot price varies) plus a small load balancer.
+
+AWS can reclaim a spot GPU at any time; ECS then starts another (and the model
+build starts over).
+
 ## Running the live tests yourself
 
 The same tests CI runs, from your laptop:

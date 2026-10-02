@@ -70,6 +70,14 @@ class ContractTest(unittest.TestCase):
         self.assertIn(("meetlab-v2-staging-bot-task", "s3:DeleteObject"), forbidden)
         self.assertIn(("meetlab-v2-staging-runner-task", "s3:DeleteObject"), forbidden)
 
+    def test_the_execution_role_reads_the_ngc_secret_and_no_other(self):
+        # ECS pulls the STT NIM image and passes its NGC key with the execution role.
+        ex = "meetlab-v2-staging-task-execution"
+        allowed = [c.resource for c in ALLOW if (c.role, c.action) == (ex, "secretsmanager:GetSecretValue")]
+        denied = [c.resource for c in DENY if (c.role, c.action) == (ex, "secretsmanager:GetSecretValue")]
+        self.assertTrue(allowed and all(":secret:meetlab-v2/staging/ngc-" in r for r in allowed))
+        self.assertTrue(denied and not any(":secret:meetlab-v2/staging/ngc-" in r for r in denied))
+
     def test_every_role_has_something_it_must_never_do(self):
         self.assertTrue({c.role for c in ALLOW} <= {c.role for c in DENY})
 

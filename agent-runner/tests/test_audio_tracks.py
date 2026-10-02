@@ -44,7 +44,7 @@ def _make_setup() -> FrameProcessorSetup:
     setup = MagicMock(spec=FrameProcessorSetup)
     tm = MagicMock()
     tm.get_event_loop.side_effect = asyncio.get_event_loop
-    tm.create_task.side_effect = lambda coro, name=None: asyncio.get_event_loop().create_task(coro)
+    tm.create_task.side_effect = lambda coro, name=None, context=None: asyncio.get_event_loop().create_task(coro, name=name, context=context)
     tm.cancel_task = AsyncMock()
     setup.task_manager = tm
     setup.clock = MagicMock()

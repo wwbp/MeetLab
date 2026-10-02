@@ -247,7 +247,7 @@ class RC3InterruptionEnforcementTests(unittest.TestCase):
         Those fields are gone in 1.4.0. If they come back, revisit whether the
         built-in path is now the better mechanism.
         """
-        from pipecat.pipeline.task import PipelineParams
+        from pipecat.pipeline.worker import PipelineParams
 
         fields = set(PipelineParams.model_fields)
         self.assertNotIn("allow_interruptions", fields)

@@ -9,8 +9,12 @@ variables {
   image_tag = "0123abc"
 }
 
-run "off_by_default_everything_stays_on_livekit_cloud" {
+run "switched_off_everything_uses_livekit_cloud" {
   command = apply
+
+  variables {
+    livekit_self_hosted = false # the default is the switch (variables.tf)
+  }
 
   assert {
     condition     = length(aws_ecs_service.livekit) == 0 && length(aws_lb_listener_rule.livekit) == 0 && length(aws_route53_record.livekit) == 0

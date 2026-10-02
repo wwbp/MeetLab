@@ -30,5 +30,5 @@ variable "container_insights" {
 variable "livekit_self_hosted" {
   description = "Run our own LiveKit (livekit.tf) and point meet, the runner and bots at it; off = LiveKit Cloud"
   type        = bool
-  default     = false
+  default     = true # on for load-test readiness (2026-10-02); LiveKit Cloud when off
 }

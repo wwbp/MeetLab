@@ -592,6 +592,8 @@ async def _bot(runner_args: LiveKitRunnerArguments):
         runner_args.room_name, runner_args.session_id, _sid_to_identity,
         bot_identity=runner_args.bot_identity,
     )
+    if bot_config.auto_record:  # the runner starts the room recording with the session
+        audio_sink.enable()
     audio_recorder = audio_tracks.PerSpeakerAudioRecorder(audio_sink)
     bot_audio_recorder = audio_tracks.BotAudioRecorder(audio_sink, runner_args.bot_identity)
     # Mock TTS (BOT_MOCK_TTS) swaps in zero-cost synthetic silence for load/soak
@@ -1048,7 +1050,7 @@ async def _bot(runner_args: LiveKitRunnerArguments):
                 break
             await asyncio.sleep(1)
         logger.info("Session limit reached — speaking the closing message")
-        await task.queue_frame(TTSSpeakFrame(bot_config.closing_message))
+        await say(bot_config.closing_message)
 
     @transport.event_handler("on_participant_connected")
     async def on_participant_connected(transport, participant_id: str):
@@ -1132,26 +1134,27 @@ async def _bot(runner_args: LiveKitRunnerArguments):
         logger.info("Bot disconnected from the room — ending the session")
         await task.cancel()
 
+    async def say(text: str) -> None:
+        """Speak a fixed line and store it as the bot's turn. Its words reach Pipecat only
+        with the audio, after Pipecat has closed the turn, so it would be missing from the
+        transcript (1.12 stores nothing; 1.4 kept only the first word)."""
+        await task.queue_frame(TTSSpeakFrame(text))
+        utt_id = _new_id()
+        try:
+            async with AsyncSessionLocal() as db, db.begin():
+                db.add(Utterance(id=utt_id, speaker_id=runner_args.bot_identity, conv_id=runner_args.session_id,
+                                 reply_to=_last_user_utt_id[0], ts=time.time(), text=text))
+                await _set_root_utterance_if_needed(db, runner_args.session_id, utt_id)
+            _last_bot_utt_id[0] = utt_id
+            logger.info(f"bot line {utt_id} stored for session {runner_args.session_id}")
+        except Exception as e:
+            logger.warning(f"could not store a spoken line for session {runner_args.session_id}: {e}")
+
     @transport.event_handler("on_first_participant_joined")
     async def on_first_participant_joined(transport, participant_id):
         logger.info(f"First participant joined: {participant_id}")
-        # Auto-start recording when configured — in the BACKGROUND. start_recording_for_room
-        # does a LiveKit egress round-trip (composite recording spin-up) that can take a few
-        # seconds; awaiting it here would delay the greeting and make the bot look slow to join.
-        # Fire-and-forget so the greeting fires on the normal timeline; recording catches up.
-        if bot_config.auto_record:
-            async def _auto_record():
-                try:
-                    from runner import start_recording_for_room
-                    status, payload = await start_recording_for_room(runner_args.room_name)
-                    logger.info(f"auto_record: start_recording_for_room → {status} {payload}")
-                except Exception as e:
-                    logger.warning(f"auto_record failed for {runner_args.room_name}: {e}")
-            rec_task = asyncio.create_task(_auto_record())
-            _bg_tasks.add(rec_task)
-            rec_task.add_done_callback(_bg_tasks.discard)
         await asyncio.sleep(1)
-        await task.queue_frame(TTSSpeakFrame(bot_config.greeting))
+        await say(bot_config.greeting)
         if bot_config.session_limit_minutes > 0:
             close_task = asyncio.create_task(_announce_close(time.monotonic()))
             _bg_tasks.add(close_task)

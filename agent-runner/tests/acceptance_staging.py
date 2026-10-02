@@ -20,6 +20,7 @@ room-gone cleanup can never be what closes a session and hide a failure.
   two_humans       two humans in before the bot, one leaves: the bot stays     (F1)
   refresh          the only human refreshes: the bot is still there after the grace
   chat             a malformed packet is ignored; a chat message becomes a turn   (F13)
+  auto_record      with no Record press: the room's video, the bot's own audio and its greeting line
 
 A scenario that cannot reach its situation (e.g. the participant drops before the
 kill) is a FAIL, not a skip: an acceptance test that didn't test anything passed nothing.
@@ -57,9 +58,9 @@ class Fail(Exception):
     pass
 
 
-def _post(path, body):
+def _post(path, body, method="POST"):
     req = urllib.request.Request(MEET + path, json.dumps(body).encode(),
-                                 {"Content-Type": "application/json"}, method="POST")
+                                 {"Content-Type": "application/json"}, method=method)
     return json.loads(_web.open(req, timeout=30).read())
 
 
@@ -107,11 +108,11 @@ async def _until(check, timeout, what):
 class Meeting:
     """A room with a stand-in participant and a bot started through meet."""
 
-    def __init__(self, wait_for_bot=True, second_human=False):
+    def __init__(self, wait_for_bot=True, second_human=False, room=None):
         self.wait_for_bot, self.second_human = wait_for_bot, second_human
+        self.room = room or f"accept-{uuid.uuid4().hex[:6]}"
 
     async def __aenter__(self):
-        self.room = f"accept-{uuid.uuid4().hex[:6]}"
         self.human = rtc.Room()
         await self.human.connect(os.environ["LIVEKIT_URL"], _token(self.room, "human_standin"))
         self.second = rtc.Room()
@@ -425,11 +426,34 @@ async def scenario_chat():
         return "a malformed packet ignored; the chat message stored as a user turn"
 
 
+async def scenario_auto_record():
+    """Auto-record: with nobody pressing Record, the room's video, the bot's own audio and
+    its greeting line are all recorded (the greeting plays 1 s after someone joins)."""
+    s3 = boto3.client("s3", region_name=REGION)
+    room = f"accept-{uuid.uuid4().hex[:6]}"
+    _post("/api/console/login", {"password": os.environ["CONSOLE_PASSWORD"]})
+    _post("/api/console/config", {"scope": room, "auto_record": True}, method="PUT")
+    async with Meeting(room=room) as m:
+        await _until(lambda: any("bot line" in l for l in _log_lines("/meetlab-v2/staging/bot", m.session, m.started)),
+                     60, "the greeting stored as the bot's line")
+        await asyncio.sleep(10)
+        _web.open(urllib.request.Request(f"{MEET}/api/record/stop?roomName={room}"), timeout=30)
+        ecs.stop_task(cluster=CLUSTER, task=m.task, reason="acceptance: auto_record")  # flushes the audio
+        await _until(lambda: _describe(m.task)["lastStatus"] == "STOPPED", 150, "task stopped")
+
+        def recorded():
+            keys = [o["Key"] for o in s3.list_objects_v2(Bucket=MEDIA_BUCKET, Prefix="recordings/").get("Contents", [])
+                    if room in o["Key"]]
+            return any(k.endswith("-recording.mp4") for k in keys) and any(f"-audio-{m.bot_identity}" in k for k in keys)
+        await _until(recorded, 180, "the room's video and the bot's own audio in the media bucket")
+        return "video, the bot's own audio and its greeting line, with no Record press"
+
+
 SCENARIOS = {"start": scenario_start, "stoptask": scenario_stoptask, "removed": scenario_removed,
              "kill9": scenario_kill9, "stop_early": scenario_stop_early,
              "audio_recording": scenario_audio_recording, "video_recording": scenario_video_recording,
              "transcript": scenario_transcript, "two_humans": scenario_two_humans, "refresh": scenario_refresh,
-             "chat": scenario_chat,
+             "chat": scenario_chat, "auto_record": scenario_auto_record,
              "prewarm": scenario_prewarm}  # last: its Stop preparing cools the pool the run prepared
 
 

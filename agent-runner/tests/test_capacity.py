@@ -101,7 +101,7 @@ class StatusTests(unittest.TestCase):
         out = capacity.status(_asg(min_size=1, desired=1, in_service=1, scheduled=NOW), ecs, CLUSTER, GROUP, per_instance=3)
         self.assertEqual(out["ready_instances"], 0)
         ecs.list_container_instances.assert_called_once_with(
-            cluster=CLUSTER, status="ACTIVE", filter='ec2InstanceId in ["i-0"]')
+            cluster=CLUSTER, status="ACTIVE", filter="ec2InstanceId in ['i-0']")  # ECS's syntax, checked live
 
     def test_an_empty_pool_asks_ecs_nothing(self):
         ecs = _ecs()

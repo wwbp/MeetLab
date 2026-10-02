@@ -29,6 +29,7 @@ from sqlalchemy.orm import selectinload
 
 import capacity
 import metrics
+import sessions
 import storage
 import transcript as transcript_mod
 from config import load_config, require
@@ -447,11 +448,8 @@ async def start_bot(request: Request, _=Depends(verify_api_key)):
                 task_arn = await asyncio.to_thread(
                     run_bot_container, _docker_api(), session_id, socket.gethostname())
         except DispatchError as e:
-            async with AsyncSessionLocal() as session:
-                async with session.begin():
-                    await session.execute(
-                        update(Conversation).where(Conversation.id == session_id)
-                        .values(status="error", ended_at=func.now()))
+            async with AsyncSessionLocal() as session, session.begin():
+                await sessions.end(session, [session_id], "dispatch_failed")
             logger.error(f"bot dispatch failed for {room_name}: {e}")
             return JSONResponse({"error": str(e), "session_id": session_id}, status_code=503)
         logger.info(f"Started bot {task_arn} for session {session_id}")
@@ -489,12 +487,8 @@ async def stop_bot(request: Request, _=Depends(verify_api_key)):
     if running is None:
         return {"stopped": None}
     await asyncio.to_thread(_stop_bot, running.id)
-    async with AsyncSessionLocal() as session:
-        async with session.begin():
-            await session.execute(
-                update(Conversation)
-                .where(Conversation.id == running.id, Conversation.status == "running")
-                .values(status="completed", ended_at=func.now()))
+    async with AsyncSessionLocal() as session, session.begin():
+        await sessions.end(session, [running.id], "stopped")
     logger.info(f"Stopped bot session {running.id} in room {room_name}")
     return {"stopped": running.id}
 
@@ -1194,18 +1188,11 @@ async def reconcile_stale_conversations(min_age_seconds: int = 60) -> int:
     if not stale:
         return 0
 
-    async with AsyncSessionLocal() as db:
-        async with db.begin():
-            await db.execute(
-                update(Conversation)
-                .where(Conversation.id.in_([c.id for c in stale]))
-                .values(ended_at=datetime.now(timezone.utc), status="ended")
-            )
-    logger.info(
-        f"reconcile: closed {len(stale)} stale conversation(s): "
-        f"{', '.join(c.room_name for c in stale)}"
-    )
-    return len(stale)
+    async with AsyncSessionLocal() as db, db.begin():
+        closed = await sessions.end(db, [c.id for c in stale], "room_gone")
+    if closed:
+        logger.info(f"reconcile: closed {len(closed)} stale conversation(s): {', '.join(closed)}")
+    return len(closed)
 
 
 @app.on_event("startup")

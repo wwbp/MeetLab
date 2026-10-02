@@ -58,7 +58,7 @@ class StoppedBeforeItStartedTest(unittest.IsolatedAsyncioTestCase):
 
     async def asyncSetUp(self):
         from db.engine import engine
-        await engine.dispose()
+        await engine.dispose(close=False)  # abandon, never close, another loop's connections
 
     async def asyncTearDown(self):
         from db.engine import engine

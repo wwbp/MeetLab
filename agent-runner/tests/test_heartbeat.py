@@ -58,7 +58,7 @@ class FailSilentSessionsTest(unittest.IsolatedAsyncioTestCase):
     # Each test has its own event loop, and pooled connections can't cross loops:
     # start and finish with an empty pool, whatever ran before.
     async def asyncSetUp(self):
-        await engine.dispose()
+        await engine.dispose(close=False)  # abandon, never close, another loop's connections
 
     async def asyncTearDown(self):
         await engine.dispose()

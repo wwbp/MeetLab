@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { getBotRoomClaim } from '@/lib/concierge/bot-room-claim-store';
+import { getRoomSession } from '@/lib/concierge/bot-runner';
 import { getLatestBotTrackSubscriptionSignal } from '@/lib/concierge/bot-track-subscription-store';
 import { noStoreHeaders } from '@/lib/concierge/http-utils';
 import { getRoomServiceClient, isBotParticipant, mapParticipant, mapRoom } from '@/lib/concierge/livekit-admin';
@@ -34,12 +34,12 @@ export async function GET(_request: Request, context: { params: Promise<{ roomNa
     }
 
     const roomService = getRoomServiceClient();
-    const claim = getBotRoomClaim(roomName);
+    const session = await getRoomSession(roomName);
     const rooms = await roomService.listRooms([roomName]);
     const room = rooms.find((candidate) => candidate.name === roomName);
     if (!room) {
       const roomStatus: ConciergeRoomHealthStatus = 'missing';
-      const botStatus: ConciergeBotHealthStatus = claim ? 'starting' : 'missing';
+      const botStatus: ConciergeBotHealthStatus = session ? 'starting' : 'missing';
       return NextResponse.json(
         {
           roomName,
@@ -52,7 +52,7 @@ export async function GET(_request: Request, context: { params: Promise<{ roomNa
           },
           bot: {
             status: botStatus,
-            assignedIdentity: claim?.botIdentity,
+            assignedIdentity: session?.bot_identity,
             trackCount: 0,
             subscriptionSignal: {
               status: 'unknown',
@@ -75,10 +75,10 @@ export async function GET(_request: Request, context: { params: Promise<{ roomNa
       ? trackCount > 0
         ? 'connected'
         : 'connected_no_tracks'
-      : claim
+      : session
         ? 'starting'
         : 'missing';
-    const trackedBotIdentity = botParticipant?.identity ?? claim?.botIdentity;
+    const trackedBotIdentity = botParticipant?.identity ?? session?.bot_identity;
     const latestSubscriptionSignal = getLatestBotTrackSubscriptionSignal(
       roomName,
       trackedBotIdentity
@@ -102,7 +102,7 @@ export async function GET(_request: Request, context: { params: Promise<{ roomNa
         },
         bot: {
           status: botStatus,
-          assignedIdentity: claim?.botIdentity,
+          assignedIdentity: session?.bot_identity,
           identity: botParticipant?.identity,
           state: botParticipant?.state,
           trackCount,

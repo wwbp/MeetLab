@@ -81,8 +81,8 @@ Key per-service variables:
 **Desk admin UI (`meet/app/desk`):**
 - `ConciergeConsole` component talks to the `/api/concierge/**` routes
 - Room lifecycle (create, delete, metadata) via `RoomServiceClient` (LiveKit server SDK)
-- Bot lifecycle guarded by three in-memory stores: `bot-start-lock-store` (mutex), `bot-room-claim-store` (one bot per room), `bot-requests-store` (request history)
-- LiveKit webhooks (`POST /api/concierge/webhooks/livekit`) reconcile the in-memory claim store when bots leave
+- Which bot a room has is agent-runner's running session (`GET /rooms/{room}/session`, `getRoomSession` in `lib/concierge/bot-runner.ts`); Postgres allows one running session per room, and a repeated start returns 409. Meet keeps no claim, lock or request history
+- LiveKit webhooks (`POST /api/concierge/webhooks/livekit`) are logged and forwarded; they never decide a room's bot
 
 **Meet conference UI (`meet/app/rooms/[roomName]`):**
 - Standard LiveKit Meet flow: landing → pre-join → `VideoConference` component
@@ -99,7 +99,7 @@ Key per-service variables:
 ## meet internals
 
 - Next.js 16.2.4 App Router; all routes under `meet/app/`
-- `lib/concierge/` — all in-memory state (no database); stores are plain `globalThis`-keyed Maps, reset on process restart
+- `lib/concierge/` — the remaining in-memory state (track-subscription signals, room presence, the local event ring) is plain `globalThis`-keyed Maps, reset on process restart; nothing that decides a bot's lifecycle
 - `lib/concierge/livekit-admin.ts` — wraps `RoomServiceClient`; handles Docker hostname translation (`localhost` ↔ `transport-server`) and `ws://`↔`http://` URL conversion
 - `lib/config/server.ts` — server-side env; `lib/config/client.ts` — client-side env (only `NEXT_PUBLIC_*` vars)
 - Webhook verification uses LiveKit's `WebhookReceiver` with SHA-256 body hash in the `Authorization` header
@@ -151,7 +151,7 @@ The app requires WebRTC, `navigator.mediaDevices.getUserMedia`, and WebSockets. 
 
 ## Known constraints
 
-- All concierge state is in-memory: a restart of `meet` resets all room claims, locks, and event history. Sessions in flight are stranded.
+- Meet still holds some display state in memory (track-subscription signals, room presence); a restart resets those views, not sessions.
 - `livekit-server:latest` is unpinned — pin to a specific version before any production use.
 - The LiveKit server runs with `--dev` which uses `devkey`/`secret` and disables security checks.
 - Bot identity detection (`isBotParticipant` in `bots/route.ts`) uses `identity.startsWith('bot_')` — any participant with that prefix is treated as a bot.

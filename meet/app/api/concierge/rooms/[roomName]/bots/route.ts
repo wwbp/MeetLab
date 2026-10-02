@@ -1,18 +1,18 @@
 import { NextResponse } from 'next/server';
-import { addBotRequest, listBotRequestsForRoom } from '@/lib/concierge/bot-requests-store';
-import {
-  claimBotRoom,
-  getBotRoomClaim,
-  releaseBotRoomClaim,
-} from '@/lib/concierge/bot-room-claim-store';
-import { acquireBotStartLock, releaseBotStartLock } from '@/lib/concierge/bot-start-lock-store';
-import { callBotRunnerStart, createBotIdentity } from '@/lib/concierge/bot-runner';
+import { callBotRunnerStart, createBotIdentity, getRoomSession } from '@/lib/concierge/bot-runner';
 import { pushConciergeEvent } from '@/lib/concierge/events-store';
-import { noStoreHeaders } from '@/lib/concierge/http-utils';
+import { noStoreHeaders, randomId } from '@/lib/concierge/http-utils';
+import type { ConciergeBotRequest } from '@/lib/concierge/types';
 import { getRoomServiceClient, isBotParticipant, mapParticipant } from '@/lib/concierge/livekit-admin';
 import { noteRouteError } from '@/lib/concierge/event-log';
 
 export const dynamic = 'force-dynamic';
+
+// Iteration 9: meet keeps no claim, lock or request history. The runner's session row
+// says which bot a room has, and Postgres allows one running session per room.
+function botRequest(fields: Omit<ConciergeBotRequest, 'id' | 'requestedAt'>): ConciergeBotRequest {
+  return { id: randomId(), requestedAt: new Date().toISOString(), ...fields };
+}
 
 function shouldForceRunnerFailure(request: Request): boolean {
   if (process.env.NODE_ENV === 'production') {
@@ -55,15 +55,10 @@ export async function GET(_request: Request, context: { params: Promise<{ roomNa
       );
     }
 
-    const bots = await listActiveBots(roomName);
+    const [bots, session] = await Promise.all([listActiveBots(roomName), getRoomSession(roomName)]);
 
     return NextResponse.json(
-      {
-        roomName,
-        bots,
-        requests: listBotRequestsForRoom(roomName),
-        assignedBotIdentity: getBotRoomClaim(roomName)?.botIdentity,
-      },
+      { roomName, bots, assignedBotIdentity: session?.bot_identity },
       { headers: noStoreHeaders() }
     );
   } catch (error) {
@@ -92,128 +87,61 @@ export async function POST(request: Request, context: { params: Promise<{ roomNa
 
     const existingBots = await listActiveBots(roomName);
     if (existingBots.length > 0) {
-      const failedRequest = addBotRequest({
-        roomName,
-        status: 'failed',
-        agentName,
-        error: 'Room already has an active bot participant',
-      });
+      const failed = botRequest({ roomName, status: 'failed', agentName, error: 'Room already has an active bot participant' });
       return NextResponse.json(
-        {
-          error: failedRequest.error,
-          request: failedRequest,
-          activeBot: existingBots[0],
-        },
-        { status: 409, headers: noStoreHeaders() }
-      );
-    }
-
-    const existingClaim = getBotRoomClaim(roomName);
-    if (existingClaim) {
-      const failedRequest = addBotRequest({
-        roomName,
-        status: 'failed',
-        agentName,
-        botIdentity: existingClaim.botIdentity,
-        error: 'A bot is already assigned to this room',
-      });
-      return NextResponse.json(
-        {
-          error: failedRequest.error,
-          request: failedRequest,
-        },
-        { status: 409, headers: noStoreHeaders() }
-      );
-    }
-
-    if (!acquireBotStartLock(roomName)) {
-      const failedRequest = addBotRequest({
-        roomName,
-        status: 'failed',
-        agentName,
-        error: 'A bot start request is already in progress for this room',
-      });
-      return NextResponse.json(
-        { error: failedRequest.error, request: failedRequest },
+        { error: failed.error, request: failed, activeBot: existingBots[0] },
         { status: 409, headers: noStoreHeaders() }
       );
     }
 
     const requestedBotIdentity = createBotIdentity(roomName);
-    try {
-      if (!claimBotRoom(roomName, requestedBotIdentity)) {
-        const failedRequest = addBotRequest({
-          roomName,
-          status: 'failed',
-          agentName,
-          botIdentity: requestedBotIdentity,
-          error: 'A bot is already assigned to this room',
-        });
-        return NextResponse.json(
-          { error: failedRequest.error, request: failedRequest },
-          { status: 409, headers: noStoreHeaders() }
-        );
-      }
-
-      const runnerCall = shouldForceRunnerFailure(request)
-        ? {
-            ok: false,
-            status: 503,
-            errorText: 'Forced bot runner failure for concierge reliability test',
-          }
-        : await callBotRunnerStart(roomName, requestedBotIdentity, agentName);
-      if (!runnerCall.ok) {
-        const failedRequest = addBotRequest({
-          roomName,
-          status: 'failed',
-          agentName,
-          botIdentity: requestedBotIdentity,
-          error: runnerCall.errorText ?? `Bot runner returned ${runnerCall.status}`,
-        });
-        releaseBotRoomClaim(roomName);
-
-        pushConciergeEvent({
-          source: 'concierge',
-          event: 'concierge.bot.start_failed',
-          roomName,
-          payload: {
-            requestId: failedRequest.id,
-            status: runnerCall.status,
-            error: failedRequest.error,
-            botIdentity: requestedBotIdentity,
-          },
-        });
-
-        return NextResponse.json(
-          { error: failedRequest.error, request: failedRequest },
-          { status: 502, headers: noStoreHeaders() }
-        );
-      }
-
-      const startedRequest = addBotRequest({
+    const runnerCall = shouldForceRunnerFailure(request)
+      ? { ok: false, status: 503, errorText: 'Forced bot runner failure for concierge reliability test' }
+      : await callBotRunnerStart(roomName, requestedBotIdentity, agentName);
+    if (!runnerCall.ok) {
+      const failed = botRequest({
         roomName,
-        status: 'started',
+        status: 'failed',
         agentName,
-        botIdentity: runnerCall.payload?.bot_identity ?? requestedBotIdentity,
-        runnerSessionId: runnerCall.payload?.session_id,
+        botIdentity: requestedBotIdentity,
+        error: runnerCall.errorText ?? `Bot runner returned ${runnerCall.status}`,
       });
-
       pushConciergeEvent({
         source: 'concierge',
-        event: 'concierge.bot.started',
+        event: 'concierge.bot.start_failed',
         roomName,
-        payload: {
-          requestId: startedRequest.id,
-          runnerSessionId: startedRequest.runnerSessionId,
-          agentName,
-          botIdentity: startedRequest.botIdentity,
-        },
+        payload: { requestId: failed.id, status: runnerCall.status, error: failed.error, botIdentity: requestedBotIdentity },
       });
-
-      return NextResponse.json({ request: startedRequest }, { headers: noStoreHeaders() });
-    } finally {
-      releaseBotStartLock(roomName);
+      return NextResponse.json({ error: failed.error, request: failed }, { status: 502, headers: noStoreHeaders() });
     }
+
+    const payload = 'payload' in runnerCall ? runnerCall.payload : undefined;
+    if (payload?.already_running) {
+      const failed = botRequest({
+        roomName,
+        status: 'failed',
+        agentName,
+        botIdentity: payload.bot_identity,
+        runnerSessionId: payload.session_id,
+        error: 'A bot is already assigned to this room',
+      });
+      return NextResponse.json({ error: failed.error, request: failed }, { status: 409, headers: noStoreHeaders() });
+    }
+
+    const started = botRequest({
+      roomName,
+      status: 'started',
+      agentName,
+      botIdentity: payload?.bot_identity ?? requestedBotIdentity,
+      runnerSessionId: payload?.session_id,
+    });
+    pushConciergeEvent({
+      source: 'concierge',
+      event: 'concierge.bot.started',
+      roomName,
+      payload: { requestId: started.id, runnerSessionId: started.runnerSessionId, agentName, botIdentity: started.botIdentity },
+    });
+    return NextResponse.json({ request: started }, { headers: noStoreHeaders() });
   } catch (error) {
     noteRouteError('POST /api/concierge/rooms/[roomName]/bots', error);
     const message = error instanceof Error ? error.message : 'Failed to start bot';

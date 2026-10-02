@@ -92,7 +92,6 @@ export type InviteResponse = {
 export type BotsResponse = {
   roomName: string;
   bots: ConciergeBot[];
-  requests: ConciergeBotRequest[];
   assignedBotIdentity?: string;
 };
 

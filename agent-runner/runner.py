@@ -493,6 +493,16 @@ async def stop_bot(request: Request, _=Depends(verify_api_key)):
     return {"stopped": running.id}
 
 
+@app.get("/rooms/{room_name}/session")
+async def room_session(room_name: str, _=Depends(verify_api_key)):
+    """The room's running session, or null: meet's view of which bot a room has (iteration 9)."""
+    async with AsyncSessionLocal() as db:
+        running = (await db.execute(select(Conversation).where(
+            Conversation.room_name == room_name, Conversation.status == sessions.RUNNING))).scalar_one_or_none()
+    return {"session": {"session_id": running.id, "bot_identity": running.bot_identity,
+                        "started_at": running.started_at.isoformat()} if running else None}
+
+
 # --- Prepare for study: pre-warm the bot pool (capacity.py) -----------------------
 
 def _asg_client():

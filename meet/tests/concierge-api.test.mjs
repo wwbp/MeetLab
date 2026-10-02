@@ -431,13 +431,13 @@ test('room delete clears bot claim and supports clean recreate/start cycle', asy
   );
 });
 
-test('verified bot-leave webhook reconciles assigned bot claim for room', async () => {
-  const roomName = createRoomName('concierge-webhook-reconcile');
+test("a room's bot is its running session: a webhook alone changes nothing, Stop clears it", async () => {
+  // Iteration 9: meet keeps no claim; the runner's session row decides.
+  const roomName = createRoomName('concierge-session-truth');
   await createRoom(roomName);
+  const botsPath = `/api/concierge/rooms/${encodeURIComponent(roomName)}/bots`;
 
-  const start = await jsonRequest(`/api/concierge/rooms/${encodeURIComponent(roomName)}/bots`, {
-    method: 'POST',
-  });
+  const start = await jsonRequest(botsPath, { method: 'POST' });
   assert.equal(start.response.status, 200, `bot start failed: ${start.text}`);
   const botIdentity = start.json?.request?.botIdentity;
   assert.ok(botIdentity, `missing bot identity from start response: ${start.text}`);
@@ -447,20 +447,11 @@ test('verified bot-leave webhook reconciles assigned bot claim for room', async 
     room: { name: roomName },
     participant: { identity: botIdentity },
   });
+  const afterWebhook = await jsonRequest(botsPath);
+  assert.equal(afterWebhook.json?.assignedBotIdentity, botIdentity, `a webhook cleared the room's bot: ${afterWebhook.text}`);
 
-  const botsAfterWebhook = await waitFor(
-    async () => {
-      const result = await jsonRequest(`/api/concierge/rooms/${encodeURIComponent(roomName)}/bots`);
-      if (result.response.status !== 200) {
-        return null;
-      }
-      if (result.json?.assignedBotIdentity !== undefined) {
-        return null;
-      }
-      return result;
-    },
-    { description: 'assigned bot claim cleared after verified bot-leave webhook' }
-  );
-  assert.equal(botsAfterWebhook.response.status, 200);
-  assert.equal(botsAfterWebhook.json?.assignedBotIdentity, undefined);
+  const stop = await jsonRequest(`${botsPath}/${encodeURIComponent(botIdentity)}`, { method: 'DELETE' });
+  assert.equal(stop.response.status, 204, `stop failed: ${stop.text}`);
+  const afterStop = await jsonRequest(botsPath);
+  assert.equal(afterStop.json?.assignedBotIdentity, undefined, `Stop left the room's bot: ${afterStop.text}`);
 });

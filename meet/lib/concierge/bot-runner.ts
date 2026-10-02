@@ -11,6 +11,7 @@ export type BotRunnerResponse = {
   bot_identity?: string;
   message?: string;
   error?: string;
+  already_running?: boolean; // the room already had a running session; this is it
 };
 
 function toBotRunnerStartUrl(botRunnerUrl: string): string {
@@ -165,4 +166,22 @@ export async function callBotRunnerStop(
   } finally {
     clearTimeout(timeout);
   }
+}
+
+export type RoomSession = { session_id: string; bot_identity: string; started_at: string };
+
+/**
+ * The room's running session (iteration 9): which bot a room has comes from the
+ * runner's session row, not from meet's memory. Throws when the runner can't
+ * answer, so callers never report "no bot" for a room they couldn't check.
+ */
+export async function getRoomSession(roomName: string): Promise<RoomSession | null> {
+  const config = getServerConfig();
+  const botRunnerUrl = requireEnv(config.botRunnerUrl, 'BOT_RUNNER_URL');
+  const base = botRunnerUrl.endsWith('/') ? botRunnerUrl : `${botRunnerUrl}/`;
+  const headers: Record<string, string> = {};
+  if (config.botRunnerSecret) headers['Authorization'] = `Bearer ${config.botRunnerSecret}`;
+  const response = await fetch(`${base}rooms/${encodeURIComponent(roomName)}/session`, { headers, cache: 'no-store' });
+  if (!response.ok) throw new Error(`bot runner returned ${response.status} for the room's session`);
+  return ((await response.json()) as { session: RoomSession | null }).session;
 }

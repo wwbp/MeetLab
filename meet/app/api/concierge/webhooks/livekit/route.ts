@@ -1,5 +1,4 @@
 import { NextResponse } from 'next/server';
-import { getBotRoomClaim, releaseBotRoomClaim } from '@/lib/concierge/bot-room-claim-store';
 import {
   clearBotTrackSubscriptionSignalsForRoom,
   recordBotTrackSubscriptionSignal,
@@ -55,39 +54,15 @@ function maybeRecordTrackSubscriptionSignal(event: ConciergeEvent): void {
   });
 }
 
-function maybeReconcileBotClaim(event: ConciergeEvent): void {
-  if (!event.roomName) {
-    return;
-  }
-
-  const eventName = event.event.toLowerCase();
-  if (eventName.includes('room_finished')) {
-    releaseBotRoomClaim(event.roomName);
-    clearBotTrackSubscriptionSignalsForRoom(event.roomName);
-    return;
-  }
-
-  if (
-    !eventName.includes('participant_left') &&
-    !eventName.includes('participant_connection_aborted')
-  ) {
-    return;
-  }
-
-  const claim = getBotRoomClaim(event.roomName);
-  if (!claim) {
-    return;
-  }
-
-  const participantIdentity = event.participantIdentity?.trim();
-  if (!participantIdentity) {
-    return;
-  }
-
-  if (participantIdentity === claim.botIdentity || participantIdentity.startsWith('bot_')) {
-    releaseBotRoomClaim(event.roomName);
-    clearBotTrackSubscriptionSignalsForRoom(event.roomName);
-  }
+// Which bot a room has is the runner's session row (iteration 9); a webhook only
+// clears this process's track-subscription signals when the room's bot goes.
+function maybeClearTrackSignals(event: ConciergeEvent): void {
+  if (!event.roomName) return;
+  const name = event.event.toLowerCase();
+  const botLeft =
+    (name.includes('participant_left') || name.includes('participant_connection_aborted')) &&
+    (event.participantIdentity?.trim() ?? '').startsWith('bot_');
+  if (name.includes('room_finished') || botLeft) clearBotTrackSubscriptionSignalsForRoom(event.roomName);
 }
 
 export async function POST(request: Request) {
@@ -106,7 +81,7 @@ export async function POST(request: Request) {
 
     const storedEvent = pushConciergeEvent(mapWebhookEvent(event), webhookSeverity(event));
     maybeRecordTrackSubscriptionSignal(storedEvent);
-    maybeReconcileBotClaim(storedEvent);
+    maybeClearTrackSignals(storedEvent);
 
     const { botRunnerUrl, botRunnerSecret } = getServerConfig();
     if (botRunnerUrl) {

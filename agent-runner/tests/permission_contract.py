@@ -23,6 +23,8 @@ OTHER_CLUSTER = f"{ARN}:cluster/bcfg-twilio-bot-dev-Cluster-c7MF3TrrR6WL"  # ano
 ROLE = f"arn:aws:iam::{ACCOUNT}:role"
 RUNNER, BOT = "meetlab-v2-staging-runner-task", "meetlab-v2-staging-bot-task"
 EGRESS = "user/meetlab-v2-staging-egress-writer"  # LiveKit uploads video with its key
+EXECUTION = "meetlab-v2-staging-task-execution"  # ECS: image pulls and task secrets
+SECRET = f"arn:aws:secretsmanager:us-east-1:{ACCOUNT}:secret"
 IN_CLUSTER = {"ecs:cluster": CLUSTER}
 MEDIA = f"arn:aws:s3:::meetlab-v2-staging-media-{ACCOUNT}"
 TO_ECS = {"iam:PassedToService": "ecs-tasks.amazonaws.com"}
@@ -50,6 +52,8 @@ ALLOW = [
     # LiveKit Cloud egress, with the key the runner sends in each recording request
     Call(EGRESS, "s3:PutObject", f"{MEDIA}/recordings/room-recording.mp4"),
     Call(EGRESS, "s3:AbortMultipartUpload", f"{MEDIA}/recordings/room-recording.mp4"),
+    # The STT NIM's image pull and NGC_API_KEY (staging stt_nim.tf)
+    Call(EXECUTION, "secretsmanager:GetSecretValue", f"{SECRET}:meetlab-v2/staging/ngc-AbCdEf"),
     # ECS Exec into a bot (the kill9 acceptance scenario; debugging)
     *[Call(BOT, f"ssmmessages:{a}", "*") for a in
       ("CreateControlChannel", "CreateDataChannel", "OpenControlChannel", "OpenDataChannel")],
@@ -71,6 +75,7 @@ DENY = [
     Call(EGRESS, "s3:PutObject", f"{MEDIA}/elsewhere/room-recording.mp4"),
     Call(EGRESS, "s3:PutAccountPublicAccessBlock", "*"),  # v1's egress key could
     Call(RUNNER, "s3:DeleteObject", f"{MEDIA}/recordings/speaker.wav"),
+    Call(EXECUTION, "secretsmanager:GetSecretValue", f"{SECRET}:meetlab-v2/staging/other-AbCdEf"),
     Call(BOT, "ssm:GetParameter", f"arn:aws:ssm:us-east-1:{ACCOUNT}:parameter/copilot/bcfg-twilio-bot/dev/secrets/OPENAI_API_KEY"),
 ]
 

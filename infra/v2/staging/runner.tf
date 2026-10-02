@@ -4,7 +4,7 @@
 
 # Shared by the runner and the bot task: the bot code runs in both images' processes.
 locals {
-  bot_environment = [
+  bot_environment = concat([
     { name = "DB_HOST", value = aws_db_instance.this.address },
     { name = "DB_NAME", value = aws_db_instance.this.db_name },
     { name = "DB_USER", value = aws_db_instance.this.username },
@@ -14,10 +14,14 @@ locals {
     { name = "STORAGE_BACKEND", value = "s3" },
     { name = "S3_BUCKET", value = aws_s3_bucket.media.bucket },
     { name = "S3_REGION", value = "us-east-1" },
-    # ponytail: Deepgram until staging has its own NIM; then remove this and set
-    # NEMOTRON_STT_URL, so staging runs prod's STT.
+    ], var.stt_nim_enabled ? [
+    # Staging's own Parakeet NIM (stt_nim.tf), as v1 runs.
+    { name = "NEMOTRON_STT_URL", value = "http://${aws_lb.stt_nim[0].dns_name}:9000" },
+    { name = "STT_MODEL_OVERRIDE", value = "parakeet-tdt-0.6b-v2" },
+    ] : [
+    # NIM off: Deepgram, so a staging bot never needs a GPU running.
     { name = "STT_MODEL_OVERRIDE", value = "nova-3-general" },
-  ]
+  ])
   bot_secrets = concat(
     [for n in ["OPENAI_API_KEY", "ELEVENLABS_API_KEY", "DEEPGRAM_API_KEY", "LIVEKIT_URL", "LIVEKIT_API_KEY", "LIVEKIT_API_SECRET", "BOT_RUNNER_SECRET", "CONSOLE_PASSWORD"] :
     { name = n, valueFrom = "${local.parameters}/${n}" }],

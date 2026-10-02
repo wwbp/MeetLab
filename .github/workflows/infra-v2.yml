@@ -189,7 +189,7 @@ jobs:
     needs: apply
     runs-on: ubuntu-latest
     environment: staging
-    timeout-minutes: 30
+    timeout-minutes: 90 # a cold STT NIM (transcript scenario) takes up to ~45 min
     permissions:
       contents: read
       id-token: write

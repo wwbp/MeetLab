@@ -9,8 +9,12 @@ variables {
   image_tag = "0123abc"
 }
 
-run "the_stt_nim_is_off_by_default_and_bots_use_deepgram" {
+run "with_the_stt_nim_off_bots_use_deepgram" {
   command = apply
+
+  variables {
+    stt_nim_enabled = false # the default is the on/off switch (variables.tf)
+  }
 
   assert {
     condition     = length(aws_ecs_service.stt_nim) == 0 && length(aws_lb.stt_nim) == 0

@@ -108,6 +108,10 @@ run "task_definition_revisions_are_never_deregistered" {
 run "staging_bots_can_hear_without_a_nim" {
   command = apply
 
+  variables {
+    stt_nim_enabled = false # the default is the on/off switch (variables.tf)
+  }
+
   assert {
     condition = contains([for e in jsondecode(aws_ecs_task_definition.runner_app.container_definitions)[0].environment : e.value if e.name == "STT_MODEL_OVERRIDE"],
     "nova-3-general")

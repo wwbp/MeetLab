@@ -377,7 +377,8 @@ class RunnerStartApiTests(unittest.TestCase):
         asg, capacity = self._asg()
         until = (dt.datetime.now(dt.timezone.utc) + dt.timedelta(hours=2)).isoformat()
         with mock.patch.dict(os.environ, {**self.ECS_ENV, "BOT_ASG_NAME": "meetlab-v2-staging-bots"}), \
-             mock.patch.object(self.runner_module, "_asg_client", return_value=asg):
+             mock.patch.object(self.runner_module, "_asg_client", return_value=asg), \
+             mock.patch.object(self.runner_module, "_ecs_client", return_value=mock.Mock()):
             response = self.client.post("/capacity/prewarm", json={"sessions": 4, "until": until})
         self.assertEqual(response.status_code, 200, response.text)
         asg.update_auto_scaling_group.assert_called_once_with(AutoScalingGroupName="meetlab-v2-staging-bots", MinSize=2)
@@ -387,7 +388,8 @@ class RunnerStartApiTests(unittest.TestCase):
     def test_prewarm_rejects_a_bad_request(self):
         asg, _ = self._asg()
         with mock.patch.dict(os.environ, {**self.ECS_ENV, "BOT_ASG_NAME": "meetlab-v2-staging-bots"}), \
-             mock.patch.object(self.runner_module, "_asg_client", return_value=asg):
+             mock.patch.object(self.runner_module, "_asg_client", return_value=asg), \
+             mock.patch.object(self.runner_module, "_ecs_client", return_value=mock.Mock()):
             for body in ({"sessions": 4}, {"sessions": "four", "until": "2026-10-02T12:00:00+00:00"},
                          {"sessions": 4, "until": "2000-01-01T00:00:00+00:00"}, {"sessions": 4, "until": "2026-10-02T12:00:00"}):
                 response = self.client.post("/capacity/prewarm", json=body)
@@ -397,7 +399,8 @@ class RunnerStartApiTests(unittest.TestCase):
     def test_cancel_prewarm_drops_the_minimum(self):
         asg, _ = self._asg()
         with mock.patch.dict(os.environ, {**self.ECS_ENV, "BOT_ASG_NAME": "meetlab-v2-staging-bots"}), \
-             mock.patch.object(self.runner_module, "_asg_client", return_value=asg):
+             mock.patch.object(self.runner_module, "_asg_client", return_value=asg), \
+             mock.patch.object(self.runner_module, "_ecs_client", return_value=mock.Mock()):
             response = self.client.delete("/capacity/prewarm")
         self.assertEqual(response.status_code, 200, response.text)
         asg.update_auto_scaling_group.assert_called_once_with(AutoScalingGroupName="meetlab-v2-staging-bots", MinSize=0)

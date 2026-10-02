@@ -155,9 +155,15 @@ run "the_runner_can_prewarm_the_bot_pool_and_no_other" {
   assert {
     condition = alltrue([for s in jsondecode(aws_iam_role_policy.runner_prewarm.policy).Statement :
       flatten([s.Resource]) == ["arn:aws:autoscaling:us-east-1:123456789012:autoScalingGroup:*:autoScalingGroupName/meetlab-v2-staging-bots"] ||
-      (flatten([s.Resource]) == ["*"] && alltrue([for a in flatten([s.Action]) : startswith(a, "autoscaling:Describe")]))
+      (flatten([s.Resource]) == ["*"] && alltrue([for a in flatten([s.Action]) : startswith(a, "autoscaling:Describe")])) ||
+      (flatten([s.Action]) == ["ecs:ListContainerInstances"] && flatten([s.Resource]) == [aws_ecs_cluster.this.arn])
     ])
     error_message = "anything beyond the bot group is read-only"
+  }
+  assert {
+    condition = anytrue([for s in jsondecode(aws_iam_role_policy.runner_prewarm.policy).Statement :
+    flatten([s.Action]) == ["ecs:ListContainerInstances"] && flatten([s.Resource]) == [aws_ecs_cluster.this.arn]])
+    error_message = "a machine is ready once ECS lists it in this cluster (capacity.py)"
   }
   assert {
     condition     = contains([for e in jsondecode(aws_ecs_task_definition.runner_app.container_definitions)[0].environment : "${e.name}=${e.value}"], "BOT_ASG_NAME=${aws_autoscaling_group.bots.name}")

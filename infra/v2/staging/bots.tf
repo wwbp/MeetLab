@@ -158,6 +158,8 @@ resource "aws_iam_role_policy" "runner_prewarm" {
         Resource = "arn:aws:autoscaling:us-east-1:${data.aws_caller_identity.current.account_id}:autoScalingGroup:*:autoScalingGroupName/${aws_autoscaling_group.bots.name}"
       },
       { Effect = "Allow", Action = ["autoscaling:DescribeAutoScalingGroups", "autoscaling:DescribeScheduledActions"], Resource = "*" },
+      # A machine is ready once ECS lists it, not when Auto Scaling says InService.
+      { Effect = "Allow", Action = "ecs:ListContainerInstances", Resource = aws_ecs_cluster.this.arn },
     ]
   })
 }

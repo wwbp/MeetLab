@@ -48,14 +48,24 @@ def cancel(asg, group: str) -> None:
         asg.delete_scheduled_action(AutoScalingGroupName=group, ScheduledActionName=SCHEDULE)
 
 
-def status(asg, group: str, per_instance: int) -> dict:
+def _registered(ecs, cluster: str, instance_ids: list[str]) -> int:
+    """Machines ECS can place a bot on. Auto Scaling's InService comes about a minute sooner."""
+    if not instance_ids:
+        return 0
+    ids = ", ".join(f'"{i}"' for i in instance_ids)
+    return len(ecs.list_container_instances(
+        cluster=cluster, status="ACTIVE", filter=f"ec2InstanceId in [{ids}]")["containerInstanceArns"])
+
+
+def status(asg, ecs, cluster: str, group: str, per_instance: int) -> dict:
     g = _group(asg, group)
     end = _scheduled_end(asg, group)
+    in_service = [i["InstanceId"] for i in g["Instances"] if i["LifecycleState"] == "InService"]
     return {
         "min_instances": g["MinSize"],
         "max_instances": g["MaxSize"],
         "desired_instances": g["DesiredCapacity"],
-        "ready_instances": sum(1 for i in g["Instances"] if i["LifecycleState"] == "InService"),
+        "ready_instances": _registered(ecs, cluster, in_service),
         "sessions_per_instance": per_instance,
         "warm_until": end.isoformat() if end else None,
         # A machine stopped by hand can't finish ECS draining and blocks scale-in for

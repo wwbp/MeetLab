@@ -58,6 +58,7 @@ ALLOW = [
       ("UpdateAutoScalingGroup", "PutScheduledUpdateGroupAction", "DeleteScheduledAction")],
     Call(RUNNER, "autoscaling:DescribeAutoScalingGroups", "*"),
     Call(RUNNER, "autoscaling:DescribeScheduledActions", "*"),
+    Call(RUNNER, "ecs:ListContainerInstances", CLUSTER),
     # The STT NIM's image pull and NGC_API_KEY (staging stt_nim.tf)
     Call(EXECUTION, "secretsmanager:GetSecretValue", f"{SECRET}:meetlab-v2/staging/ngc-AbCdEf"),
     # ECS Exec into a bot (the kill9 acceptance scenario; debugging)
@@ -69,6 +70,7 @@ DENY = [
     Call(RUNNER, "ecs:RunTask", f"{ARN}:task-definition/meetlab-v2-staging-meet:1", IN_CLUSTER),
     Call(RUNNER, "ecs:StopTask", f"{OTHER_CLUSTER.replace(':cluster/', ':task/')}/0000"),
     Call(RUNNER, "ecs:ListTasks", "*", {"ecs:cluster": OTHER_CLUSTER}),
+    Call(RUNNER, "ecs:ListContainerInstances", OTHER_CLUSTER),
     Call(RUNNER, "iam:PassRole", f"{ROLE}/meetlab-v2-tf-apply", TO_ECS),
     Call(BOT, "ecs:RunTask", f"{ARN}:task-definition/meetlab-v2-staging-bot:1", IN_CLUSTER),
     Call(BOT, "s3:GetObject", f"{MEDIA}/recordings/speaker.wav"),

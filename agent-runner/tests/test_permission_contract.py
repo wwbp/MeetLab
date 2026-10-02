@@ -85,6 +85,12 @@ class ContractTest(unittest.TestCase):
         self.assertTrue(allowed and all(r.endswith("/meetlab-v2-staging-bots") for r in allowed))
         self.assertTrue({r.rsplit("/", 1)[-1] for r in denied} >= {"meetlab-v2-staging-ecs", "meetlab-v2-staging-stt-nim"})
 
+    def test_the_runner_can_see_which_machines_ecs_can_use_in_its_own_cluster_only(self):
+        runner = "meetlab-v2-staging-runner-task"
+        calls = lambda lst: {c.resource for c in lst if (c.role, c.action) == (runner, "ecs:ListContainerInstances")}
+        self.assertTrue(calls(ALLOW) and all(r.endswith("cluster/meetlab-v2-staging") for r in calls(ALLOW)))
+        self.assertTrue(calls(DENY) and not any(r.endswith("cluster/meetlab-v2-staging") for r in calls(DENY)))
+
     def test_every_role_has_something_it_must_never_do(self):
         self.assertTrue({c.role for c in ALLOW} <= {c.role for c in DENY})
 

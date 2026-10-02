@@ -26,3 +26,9 @@ variable "container_insights" {
   type        = bool
   default     = false
 }
+
+variable "livekit_self_hosted" {
+  description = "Run our own LiveKit (livekit.tf) and point meet, the runner and bots at it; off = LiveKit Cloud"
+  type        = bool
+  default     = false
+}

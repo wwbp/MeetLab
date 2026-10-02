@@ -32,12 +32,12 @@ resource "aws_ecs_task_definition" "meet_app" {
     cpu               = 256
     memoryReservation = 512
     portMappings      = [{ containerPort = 3000, hostPort = 0, protocol = "tcp" }]
-    environment = [
+    environment = concat(local.livekit_environment, [
       { name = "MEET_BASE_URL", value = "https://meet-staging.wwbp.org" },
       { name = "BOT_RUNNER_URL", value = "http://agent-runner:7860/" },
-    ]
-    secrets = [for n in ["LIVEKIT_URL", "LIVEKIT_API_KEY", "LIVEKIT_API_SECRET", "BOT_RUNNER_SECRET", "CONSOLE_PASSWORD"] :
-    { name = n, valueFrom = "${local.parameters}/${n}" }]
+    ])
+    secrets = concat(local.livekit_secrets, [for n in ["BOT_RUNNER_SECRET", "CONSOLE_PASSWORD"] :
+    { name = n, valueFrom = "${local.parameters}/${n}" }])
     logConfiguration = {
       logDriver = "awslogs"
       options = {

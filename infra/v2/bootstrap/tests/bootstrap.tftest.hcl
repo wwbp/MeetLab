@@ -331,6 +331,17 @@ run "ci_can_run_the_stt_nim_on_spot_behind_its_own_nlb" {
   }
 }
 
+run "ci_may_change_exactly_our_two_dns_names" {
+  command = plan
+
+  assert {
+    condition = toset(flatten([for s in flatten([for p in aws_iam_role_policy.apply : jsondecode(p.policy).Statement]) :
+      try(s.Condition["ForAllValues:StringEquals"]["route53:ChangeResourceRecordSetsNormalizedRecordNames"], [])
+    ])) == toset(["meet-staging.wwbp.org", "livekit-staging.wwbp.org"])
+    error_message = "the shared wwbp.org zone: meet-staging, and our self-hosted LiveKit's signalling name, nothing else"
+  }
+}
+
 run "ci_can_manage_our_service_connect_namespace" {
   command = plan
 
@@ -367,9 +378,10 @@ run "acceptance_role_is_staging_only_and_least_privilege" {
   }
   assert {
     condition = toset(flatten([for s in jsondecode(aws_iam_role_policy.acceptance.policy).Statement : s.Resource if contains(flatten([s.Action]), "ssm:GetParameter")])) == toset([
-      for n in ["CONSOLE_PASSWORD", "LIVEKIT_URL", "LIVEKIT_API_KEY", "LIVEKIT_API_SECRET"] : "arn:aws:ssm:us-east-1:123456789012:parameter/meetlab-v2/staging/${n}"
+      for n in ["CONSOLE_PASSWORD", "LIVEKIT_URL", "LIVEKIT_API_KEY", "LIVEKIT_API_SECRET", "SELFHOSTED_LIVEKIT_API_KEY", "SELFHOSTED_LIVEKIT_API_SECRET"] :
+      "arn:aws:ssm:us-east-1:123456789012:parameter/meetlab-v2/staging/${n}"
     ])
-    error_message = "reads exactly the four secrets the acceptance test uses"
+    error_message = "reads exactly the secrets the acceptance test uses (LiveKit Cloud's, or our self-hosted LiveKit's)"
   }
   assert {
     condition = alltrue([for s in jsondecode(aws_iam_role_policy.acceptance.policy).Statement :

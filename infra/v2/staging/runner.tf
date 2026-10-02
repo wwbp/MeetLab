@@ -4,7 +4,7 @@
 
 # Shared by the runner and the bot task: the bot code runs in both images' processes.
 locals {
-  bot_environment = concat([
+  bot_environment = concat(local.livekit_environment, [
     { name = "DB_HOST", value = aws_db_instance.this.address },
     { name = "DB_NAME", value = aws_db_instance.this.db_name },
     { name = "DB_USER", value = aws_db_instance.this.username },
@@ -23,8 +23,9 @@ locals {
     { name = "STT_MODEL_OVERRIDE", value = "nova-3-general" },
   ])
   bot_secrets = concat(
-    [for n in ["OPENAI_API_KEY", "ELEVENLABS_API_KEY", "DEEPGRAM_API_KEY", "LIVEKIT_URL", "LIVEKIT_API_KEY", "LIVEKIT_API_SECRET", "BOT_RUNNER_SECRET", "CONSOLE_PASSWORD"] :
+    [for n in ["OPENAI_API_KEY", "ELEVENLABS_API_KEY", "DEEPGRAM_API_KEY", "BOT_RUNNER_SECRET", "CONSOLE_PASSWORD"] :
     { name = n, valueFrom = "${local.parameters}/${n}" }],
+    local.livekit_secrets, # LiveKit Cloud, or ours (livekit.tf)
     [{ name = "DB_PASSWORD", valueFrom = "${local.db_secret}:password::" }],
   )
 }

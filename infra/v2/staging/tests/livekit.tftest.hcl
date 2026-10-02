@@ -1,0 +1,83 @@
+# Offline: mock provider, no AWS. Self-hosted LiveKit (load-test readiness L2): our own
+# livekit-server, switched on by livekit_self_hosted; LiveKit Cloud otherwise.
+
+mock_provider "aws" {
+  source = "./tests/mocks"
+}
+
+variables {
+  image_tag = "0123abc"
+}
+
+run "off_by_default_everything_stays_on_livekit_cloud" {
+  command = apply
+
+  assert {
+    condition     = length(aws_ecs_service.livekit) == 0 && length(aws_lb_listener_rule.livekit) == 0 && length(aws_route53_record.livekit) == 0
+    error_message = "no self-hosted LiveKit unless switched on"
+  }
+  assert {
+    condition = contains([for s in jsondecode(aws_ecs_task_definition.bot.container_definitions)[0].secrets : s.valueFrom],
+    "arn:aws:ssm:us-east-1:123456789012:parameter/meetlab-v2/staging/LIVEKIT_API_KEY")
+    error_message = "bots use LiveKit Cloud's key"
+  }
+  assert {
+    condition     = output.livekit.video
+    error_message = "LiveKit Cloud records video"
+  }
+}
+
+run "switched_on_it_runs_our_livekit_server" {
+  command = apply
+
+  variables {
+    livekit_self_hosted = true
+  }
+
+  assert {
+    condition = (
+      aws_launch_template.livekit.instance_type == "c6i.large" &&
+      one(aws_launch_template.livekit.network_interfaces).associate_public_ip_address == "true" &&
+      toset(aws_autoscaling_group.livekit.vpc_zone_identifier) == toset([for s in aws_subnet.public : s.id]) &&
+      aws_autoscaling_group.livekit.max_size == 1
+    )
+    error_message = "one small machine with a public IP: media goes straight to it (the standard LiveKit shape)"
+  }
+  assert {
+    condition = (
+      toset([for r in aws_security_group.livekit.ingress : "${r.protocol}/${r.from_port}" if contains(coalesce(r.cidr_blocks, []), "0.0.0.0/0")]) == toset(["tcp/7881", "udp/7882"]) &&
+      anytrue([for r in aws_security_group.livekit.ingress : r.from_port == 7880 && contains(coalesce(r.security_groups, []), aws_security_group.alb.id)])
+    )
+    error_message = "media ports open (every join needs a signed token); signalling only through the load balancer's TLS"
+  }
+  assert {
+    condition = (
+      aws_ecs_task_definition.livekit.network_mode == "host" &&
+      jsondecode(aws_ecs_task_definition.livekit.container_definitions)[0].image == "livekit/livekit-server:v1.12.0"
+    )
+    error_message = "host networking, the version local development runs"
+  }
+  assert {
+    condition = (
+      toset([for s in jsondecode(aws_ecs_task_definition.livekit.container_definitions)[0].secrets : s.valueFrom]) ==
+      toset(["arn:aws:ssm:us-east-1:123456789012:parameter/meetlab-v2/staging/SELFHOSTED_LIVEKIT_API_KEY",
+      "arn:aws:ssm:us-east-1:123456789012:parameter/meetlab-v2/staging/SELFHOSTED_LIVEKIT_API_SECRET"])
+    )
+    error_message = "the server's key comes from the parameters a person minted, never from Terraform"
+  }
+  assert {
+    condition     = one(one(aws_lb_listener_rule.livekit[0].condition).host_header).values == toset(["livekit-staging.wwbp.org"]) && aws_lb_target_group.livekit[0].port == 7880
+    error_message = "wss://livekit-staging.wwbp.org through the load balancer's certificate"
+  }
+  assert {
+    condition = alltrue([for td in [aws_ecs_task_definition.bot, aws_ecs_task_definition.runner_app, aws_ecs_task_definition.meet_app] :
+      contains([for s in jsondecode(td.container_definitions)[0].secrets : s.valueFrom], "arn:aws:ssm:us-east-1:123456789012:parameter/meetlab-v2/staging/SELFHOSTED_LIVEKIT_API_KEY") &&
+      contains([for e in jsondecode(td.container_definitions)[0].environment : "${e.name}=${e.value}"], "LIVEKIT_URL=wss://livekit-staging.wwbp.org")
+    ])
+    error_message = "bots, the runner and meet all switch to our LiveKit together"
+  }
+  assert {
+    condition     = output.livekit == { url = "wss://livekit-staging.wwbp.org", key_parameter = "SELFHOSTED_LIVEKIT_API_KEY", secret_parameter = "SELFHOSTED_LIVEKIT_API_SECRET", video = false }
+    error_message = "the live tests learn which LiveKit to use, and that there is no video recording yet"
+  }
+}

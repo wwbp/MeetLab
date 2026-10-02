@@ -43,3 +43,9 @@ mock_resource "aws_db_instance" {
 mock_resource "aws_service_discovery_http_namespace" {
   defaults = { arn = "arn:aws:servicediscovery:us-east-1:123456789012:namespace/ns-0000000000000000" }
 }
+
+mock_resource "aws_lb_listener" {
+  defaults = {
+    arn = "arn:aws:elasticloadbalancing:us-east-1:123456789012:listener/app/meetlab-v2-staging/0123456789abcdef/0123456789abcdef"
+  }
+}

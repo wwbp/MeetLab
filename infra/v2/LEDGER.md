@@ -96,6 +96,7 @@ next person knows what exists that no PR created. Never record secret values.
 
 | When (UTC) | Who | What | Why it was manual | Undo / rotate |
 |---|---|---|---|---|
+| 2026-10-02 | AbhaySingh (run by the assistant on approval) | `terraform apply` of `infra/v2/bootstrap`: the boundary lets CI-created roles warm `meetlab-v2-*-bots` groups (Prepare for study, #119) | Bootstrap holds CI's own permissions | Re-apply bootstrap from `v2` |
 | 2026-10-02 04:16 | AbhaySingh | Created Secrets Manager secret `meetlab-v2/staging/ngc` (`{"username":"$oauthtoken","password":<NGC key>}`), copied from v1's SSM `/meetlab/stt-nim/ngc_api_key` without displaying it | ECS needs it to pull NVIDIA's NIM image and download the model. CI can't read v1's key, Terraform would keep it in state, and the assistant's session can't write secrets | Rotate: update the secret's value in place (same shape), then force a new deployment of the STT NIM service. Same key as v1: rotating one does not rotate the other |
 | 2026-10-02 | AbhaySingh (run by the assistant on approval) | `terraform apply` of `infra/v2/bootstrap`: spot launches and meetlab-v2 network load balancers for the apply role; `ecs:DescribeServices` on staging for acceptance (STT NIM PR) | Bootstrap holds CI's own permissions | Re-apply bootstrap from `v2` |
 | 2026-10-02 | AbhaySingh (run by the assistant on approval) | `terraform apply` of `infra/v2/bootstrap`: the boundary allows `s3:AbortMultipartUpload` (#112) | Same | Same |

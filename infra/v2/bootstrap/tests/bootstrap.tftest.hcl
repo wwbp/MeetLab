@@ -214,6 +214,11 @@ run "boundary_caps_what_ci_created_roles_can_do" {
     ])
     error_message = "the boundary reaches parameters, secrets or buckets outside meetlab-v2"
   }
+  assert {
+    condition = anytrue([for s in jsondecode(aws_iam_policy.boundary.policy).Statement :
+    contains(flatten([s.Action]), "s3:AbortMultipartUpload") && contains(flatten([s.Resource]), "arn:aws:s3:::meetlab-v2-*/*")])
+    error_message = "LiveKit egress uploads mp4s in parts; the egress user must be able to abort a failed one (permission contract)"
+  }
 }
 
 run "ci_can_only_create_roles_that_carry_the_boundary" {

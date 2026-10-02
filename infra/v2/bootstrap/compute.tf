@@ -239,7 +239,7 @@ resource "aws_iam_policy" "boundary" {
       {
         Sid      = "OwnBuckets"
         Effect   = "Allow"
-        Action   = ["s3:GetObject", "s3:PutObject", "s3:ListBucket"]
+        Action   = ["s3:GetObject", "s3:PutObject", "s3:AbortMultipartUpload", "s3:ListBucket"]
         Resource = ["arn:aws:s3:::meetlab-v2-*", "arn:aws:s3:::meetlab-v2-*/*"]
       },
       {

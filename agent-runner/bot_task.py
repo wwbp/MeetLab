@@ -37,6 +37,11 @@ async def main(session_id: str) -> int:
     if row is None:
         logger.error(f"bot_task: no session {session_id}")
         return 2
+    if row.status != "running":
+        # Stopped before this process started: Stop can land before ECS lists the
+        # new task, so the runner had nothing to stop. The session row is the truth.
+        logger.info(f"bot_task: session {session_id} is already {row.status}; not joining")
+        return 0
     cfg = load_config()
     token = bot_token(
         row.room_name, row.bot_identity,

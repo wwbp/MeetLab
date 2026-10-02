@@ -50,6 +50,39 @@ class BotTaskTest(unittest.TestCase):
                          ("s1", "r1", "bot_r1_abc", "wss://lk", "t"))
 
 
+class StoppedBeforeItStartedTest(unittest.IsolatedAsyncioTestCase):
+    """Stop can land before the bot task has started: on staging (2026-10-02) the
+    runner's ListTasks did not yet show a task started 0.5 s earlier, so nothing was
+    stopped and the bot joined after Stop. The session row is the truth: a bot whose
+    session is no longer running must not join."""
+
+    async def asyncSetUp(self):
+        from db.engine import engine
+        await engine.dispose()
+
+    async def asyncTearDown(self):
+        from db.engine import engine
+        await engine.dispose()
+
+    async def test_a_bot_whose_session_already_ended_does_not_join(self):
+        import sys
+        import uuid
+        from unittest import mock
+
+        from bot_task import main
+        from db.engine import AsyncSessionLocal
+        from db.models import Conversation
+
+        sid = str(uuid.uuid4())
+        async with AsyncSessionLocal() as db, db.begin():
+            db.add(Conversation(id=sid, room_name=f"stopped-{sid[:6]}", bot_identity="bot_x", status="completed"))
+        fake_bot = mock.AsyncMock()
+        with mock.patch.dict(sys.modules, {"bot": mock.Mock(bot=fake_bot)}):
+            code = await main(sid)
+        self.assertEqual(code, 0)
+        fake_bot.assert_not_awaited()
+
+
 class FakeEcs:
     def __init__(self, response):
         self.response, self.calls = response, []

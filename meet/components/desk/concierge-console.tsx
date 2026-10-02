@@ -2,6 +2,7 @@
 
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { Button } from '@/components/ui/button';
+import { PrepareStudy } from '@/components/desk/prepare-study';
 import type {
   ConciergeRoom,
   InviteResponse,
@@ -298,6 +299,8 @@ export function ConciergeConsole({ tracesUrl }: { tracesUrl?: string }) {
         {notice && (
           <div className="border-foreground/20 text-foreground border p-3 text-sm">{notice}</div>
         )}
+
+        <PrepareStudy />
 
         <section className="border-foreground/20 space-y-3 border p-4">
           <h2 className="text-lg font-medium">Create Room</h2>

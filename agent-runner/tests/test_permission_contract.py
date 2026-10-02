@@ -78,6 +78,13 @@ class ContractTest(unittest.TestCase):
         self.assertTrue(allowed and all(":secret:meetlab-v2/staging/ngc-" in r for r in allowed))
         self.assertTrue(denied and not any(":secret:meetlab-v2/staging/ngc-" in r for r in denied))
 
+    def test_the_runner_can_prewarm_the_bot_pool_and_no_other_group(self):
+        runner = "meetlab-v2-staging-runner-task"
+        allowed = {c.resource for c in ALLOW if (c.role, c.action) == (runner, "autoscaling:UpdateAutoScalingGroup")}
+        denied = {c.resource for c in DENY if (c.role, c.action) == (runner, "autoscaling:UpdateAutoScalingGroup")}
+        self.assertTrue(allowed and all(r.endswith("/meetlab-v2-staging-bots") for r in allowed))
+        self.assertTrue({r.rsplit("/", 1)[-1] for r in denied} >= {"meetlab-v2-staging-ecs", "meetlab-v2-staging-stt-nim"})
+
     def test_every_role_has_something_it_must_never_do(self):
         self.assertTrue({c.role for c in ALLOW} <= {c.role for c in DENY})
 

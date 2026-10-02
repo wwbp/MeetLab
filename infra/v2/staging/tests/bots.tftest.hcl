@@ -139,3 +139,28 @@ run "recordings_go_to_s3_through_task_roles_not_keys" {
     error_message = "both tasks store to the media bucket, with no S3 keys"
   }
 }
+
+# Prepare for study (capacity.py): the runner raises the bot pool's minimum and
+# schedules its return to 0. Only the bot pool: never the services or the GPU.
+run "the_runner_can_prewarm_the_bot_pool_and_no_other" {
+  command = apply
+
+  assert {
+    condition = (
+      toset(flatten([for s in jsondecode(aws_iam_role_policy.runner_prewarm.policy).Statement : s.Action if flatten([s.Resource]) == ["arn:aws:autoscaling:us-east-1:123456789012:autoScalingGroup:*:autoScalingGroupName/meetlab-v2-staging-bots"]])) ==
+      toset(["autoscaling:UpdateAutoScalingGroup", "autoscaling:PutScheduledUpdateGroupAction", "autoscaling:DeleteScheduledAction"])
+    )
+    error_message = "update and schedule the bot group itself"
+  }
+  assert {
+    condition = alltrue([for s in jsondecode(aws_iam_role_policy.runner_prewarm.policy).Statement :
+      flatten([s.Resource]) == ["arn:aws:autoscaling:us-east-1:123456789012:autoScalingGroup:*:autoScalingGroupName/meetlab-v2-staging-bots"] ||
+      (flatten([s.Resource]) == ["*"] && alltrue([for a in flatten([s.Action]) : startswith(a, "autoscaling:Describe")]))
+    ])
+    error_message = "anything beyond the bot group is read-only"
+  }
+  assert {
+    condition     = contains([for e in jsondecode(aws_ecs_task_definition.runner_app.container_definitions)[0].environment : "${e.name}=${e.value}"], "BOT_ASG_NAME=${aws_autoscaling_group.bots.name}")
+    error_message = "the runner knows which group to warm"
+  }
+}

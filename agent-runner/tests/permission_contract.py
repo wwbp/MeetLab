@@ -25,6 +25,7 @@ RUNNER, BOT = "meetlab-v2-staging-runner-task", "meetlab-v2-staging-bot-task"
 EGRESS = "user/meetlab-v2-staging-egress-writer"  # LiveKit uploads video with its key
 EXECUTION = "meetlab-v2-staging-task-execution"  # ECS: image pulls and task secrets
 SECRET = f"arn:aws:secretsmanager:us-east-1:{ACCOUNT}:secret"
+GROUP = f"arn:aws:autoscaling:us-east-1:{ACCOUNT}:autoScalingGroup:00000000-0000-0000-0000-000000000000:autoScalingGroupName"
 IN_CLUSTER = {"ecs:cluster": CLUSTER}
 MEDIA = f"arn:aws:s3:::meetlab-v2-staging-media-{ACCOUNT}"
 TO_ECS = {"iam:PassedToService": "ecs-tasks.amazonaws.com"}
@@ -52,6 +53,11 @@ ALLOW = [
     # LiveKit Cloud egress, with the key the runner sends in each recording request
     Call(EGRESS, "s3:PutObject", f"{MEDIA}/recordings/room-recording.mp4"),
     Call(EGRESS, "s3:AbortMultipartUpload", f"{MEDIA}/recordings/room-recording.mp4"),
+    # capacity.py: Prepare for study warms the bot pool, and AWS cools it at the end time
+    *[Call(RUNNER, f"autoscaling:{a}", f"{GROUP}/meetlab-v2-staging-bots") for a in
+      ("UpdateAutoScalingGroup", "PutScheduledUpdateGroupAction", "DeleteScheduledAction")],
+    Call(RUNNER, "autoscaling:DescribeAutoScalingGroups", "*"),
+    Call(RUNNER, "autoscaling:DescribeScheduledActions", "*"),
     # The STT NIM's image pull and NGC_API_KEY (staging stt_nim.tf)
     Call(EXECUTION, "secretsmanager:GetSecretValue", f"{SECRET}:meetlab-v2/staging/ngc-AbCdEf"),
     # ECS Exec into a bot (the kill9 acceptance scenario; debugging)
@@ -76,6 +82,9 @@ DENY = [
     Call(EGRESS, "s3:PutAccountPublicAccessBlock", "*"),  # v1's egress key could
     Call(RUNNER, "s3:DeleteObject", f"{MEDIA}/recordings/speaker.wav"),
     Call(EXECUTION, "secretsmanager:GetSecretValue", f"{SECRET}:meetlab-v2/staging/other-AbCdEf"),
+    Call(RUNNER, "autoscaling:UpdateAutoScalingGroup", f"{GROUP}/meetlab-v2-staging-ecs"),  # services
+    Call(RUNNER, "autoscaling:UpdateAutoScalingGroup", f"{GROUP}/meetlab-v2-staging-stt-nim"),  # the GPU
+    Call(BOT, "autoscaling:UpdateAutoScalingGroup", f"{GROUP}/meetlab-v2-staging-bots"),
     Call(BOT, "ssm:GetParameter", f"arn:aws:ssm:us-east-1:{ACCOUNT}:parameter/copilot/bcfg-twilio-bot/dev/secrets/OPENAI_API_KEY"),
 ]
 

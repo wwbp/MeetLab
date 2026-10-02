@@ -244,6 +244,19 @@ resource "aws_iam_policy" "boundary" {
         Resource = ["arn:aws:s3:::meetlab-v2-*", "arn:aws:s3:::meetlab-v2-*/*"]
       },
       {
+        # Prepare for study (agent-runner capacity.py): warm a bot pool, no other group.
+        Sid      = "PrewarmBotPools"
+        Effect   = "Allow"
+        Action   = ["autoscaling:UpdateAutoScalingGroup", "autoscaling:PutScheduledUpdateGroupAction", "autoscaling:DeleteScheduledAction"]
+        Resource = format(local.arn, "autoscaling", "autoScalingGroup:*:autoScalingGroupName/meetlab-v2-*-bots")
+      },
+      {
+        Sid      = "ReadAutoScaling"
+        Effect   = "Allow"
+        Action   = ["autoscaling:DescribeAutoScalingGroups", "autoscaling:DescribeScheduledActions"]
+        Resource = "*"
+      },
+      {
         # ECS Exec into bot tasks: the Session Manager channels, nothing else of SSM.
         Sid      = "EcsExecChannels"
         Effect   = "Allow"

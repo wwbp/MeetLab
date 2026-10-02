@@ -15,6 +15,8 @@ room-gone cleanup can never be what closes a session and hide a failure.
   video_recording  LiveKit egress uploads the room's mp4 with the egress key          (8b)
   transcript       a participant's speech becomes a stored turn; with staging's NIM on,
                    transcribed by the NIM (waits for a cold NIM first)
+  prewarm          Prepare for study (console) brings up a warm bot machine; Stop
+                   preparing resets the pool
 
 A scenario that cannot reach its situation (e.g. the participant drops before the
 kill) is a FAIL, not a skip: an acceptance test that didn't test anything passed nothing.
@@ -345,10 +347,36 @@ async def scenario_transcript():
         return f"a user turn stored, transcribed by staging's NIM (ready after {waited:.0f} s)"
 
 
+def _capacity(method="GET", body=None):
+    req = urllib.request.Request(f"{MEET}/api/concierge/capacity", method=method,
+                                 data=json.dumps(body).encode() if body else None,
+                                 headers={"Content-Type": "application/json"})
+    return json.loads(_web.open(req, timeout=30).read())
+
+
+async def scenario_prewarm():
+    """Prepare for study from the console: a warm bot machine comes up and stays;
+    Stop preparing drops the pool back to 0 (AWS would also do it at the end time)."""
+    from datetime import datetime, timezone
+
+    _post("/api/console/login", {"password": os.environ["CONSOLE_PASSWORD"]})
+    until = (datetime.now(timezone.utc) + timedelta(minutes=30)).isoformat()
+    try:
+        warm = _capacity("POST", {"sessions": 1, "until": until})
+        if (warm["min_instances"], warm["warm_until"] is None) != (1, False):
+            raise Fail(f"not prepared: {warm}")
+        waited = await _until(lambda: _capacity()["ready_instances"] >= 1, 300, "a warm bot machine")
+    finally:
+        cold = _capacity("DELETE")  # never leave a test's pool warm
+    if (cold["min_instances"], cold["warm_until"]) != (0, None):
+        raise Fail(f"Stop preparing left the pool warm: {cold}")
+    return f"a bot machine ready {waited:.0f} s after Prepare; Stop preparing reset the pool"
+
+
 SCENARIOS = {"start": scenario_start, "stoptask": scenario_stoptask, "removed": scenario_removed,
              "kill9": scenario_kill9, "stop_early": scenario_stop_early,
              "audio_recording": scenario_audio_recording, "video_recording": scenario_video_recording,
-             "transcript": scenario_transcript}
+             "transcript": scenario_transcript, "prewarm": scenario_prewarm}
 
 
 SCENARIO_TIMEOUT = 600

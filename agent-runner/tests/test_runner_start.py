@@ -360,6 +360,55 @@ class RunnerStartApiTests(unittest.TestCase):
         again = self.client.post("/start", json={"room_name": room})
         self.assertNotIn("already_running", again.json(), "the refused start left a running session")
 
+    # ------------------------------------------------------------------
+    # Prepare for study: pre-warm the bot pool (capacity.py)
+    # ------------------------------------------------------------------
+
+    def _asg(self):
+        import capacity
+        asg = mock.Mock()
+        asg.describe_auto_scaling_groups.return_value = {"AutoScalingGroups": [
+            {"MinSize": 2, "MaxSize": 2, "DesiredCapacity": 2, "Instances": []}]}
+        asg.describe_scheduled_actions.return_value = {"ScheduledUpdateGroupActions": []}
+        return asg, capacity
+
+    def test_prewarm_raises_the_bot_pool_minimum_until_the_end_time(self):
+        import datetime as dt
+        asg, capacity = self._asg()
+        until = (dt.datetime.now(dt.timezone.utc) + dt.timedelta(hours=2)).isoformat()
+        with mock.patch.dict(os.environ, {**self.ECS_ENV, "BOT_ASG_NAME": "meetlab-v2-staging-bots"}), \
+             mock.patch.object(self.runner_module, "_asg_client", return_value=asg):
+            response = self.client.post("/capacity/prewarm", json={"sessions": 4, "until": until})
+        self.assertEqual(response.status_code, 200, response.text)
+        asg.update_auto_scaling_group.assert_called_once_with(AutoScalingGroupName="meetlab-v2-staging-bots", MinSize=2)
+        self.assertEqual(response.json()["instances"], 2)
+        self.assertIn("ready_instances", response.json())
+
+    def test_prewarm_rejects_a_bad_request(self):
+        asg, _ = self._asg()
+        with mock.patch.dict(os.environ, {**self.ECS_ENV, "BOT_ASG_NAME": "meetlab-v2-staging-bots"}), \
+             mock.patch.object(self.runner_module, "_asg_client", return_value=asg):
+            for body in ({"sessions": 4}, {"sessions": "four", "until": "2026-10-02T12:00:00+00:00"},
+                         {"sessions": 4, "until": "2000-01-01T00:00:00+00:00"}, {"sessions": 4, "until": "2026-10-02T12:00:00"}):
+                response = self.client.post("/capacity/prewarm", json=body)
+                self.assertEqual(response.status_code, 400, (body, response.text))
+        asg.update_auto_scaling_group.assert_not_called()
+
+    def test_cancel_prewarm_drops_the_minimum(self):
+        asg, _ = self._asg()
+        with mock.patch.dict(os.environ, {**self.ECS_ENV, "BOT_ASG_NAME": "meetlab-v2-staging-bots"}), \
+             mock.patch.object(self.runner_module, "_asg_client", return_value=asg):
+            response = self.client.delete("/capacity/prewarm")
+        self.assertEqual(response.status_code, 200, response.text)
+        asg.update_auto_scaling_group.assert_called_once_with(AutoScalingGroupName="meetlab-v2-staging-bots", MinSize=0)
+
+    def test_local_bots_have_nothing_to_prewarm(self):
+        # The class runs with the Docker dispatcher: each bot is a local container.
+        status = self.client.get("/capacity")
+        self.assertEqual(status.status_code, 200, status.text)
+        self.assertFalse(status.json()["available"])
+        self.assertEqual(self.client.post("/capacity/prewarm", json={"sessions": 1, "until": "x"}).status_code, 409)
+
     def test_ecs_refusal_is_reported_not_swallowed(self):
         ecs = mock.Mock()
         ecs.run_task.return_value = {"tasks": [], "failures": [{"reason": "RESOURCE:MEMORY"}]}

@@ -221,6 +221,25 @@ run "boundary_caps_what_ci_created_roles_can_do" {
   }
 }
 
+# Prepare for study: CI-created roles may warm a meetlab-v2 bot pool, and no other group.
+run "the_boundary_lets_the_runner_prewarm_bot_pools_only" {
+  command = plan
+
+  assert {
+    condition = anytrue([for s in jsondecode(aws_iam_policy.boundary.policy).Statement :
+      contains(flatten([s.Action]), "autoscaling:UpdateAutoScalingGroup") &&
+      flatten([s.Resource]) == ["arn:aws:autoscaling:us-east-1:123456789012:autoScalingGroup:*:autoScalingGroupName/meetlab-v2-*-bots"]
+    ])
+    error_message = "bot pools only"
+  }
+  assert {
+    condition = alltrue([for s in jsondecode(aws_iam_policy.boundary.policy).Statement :
+      alltrue([for a in flatten([s.Action]) : startswith(a, "autoscaling:Describe")]) if contains(flatten([s.Resource]), "*") && anytrue([for a in flatten([s.Action]) : startswith(a, "autoscaling:")])
+    ])
+    error_message = "autoscaling on * is read-only"
+  }
+}
+
 run "ci_can_only_create_roles_that_carry_the_boundary" {
   command = plan
 

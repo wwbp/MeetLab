@@ -1,12 +1,12 @@
 # Staging's own Parakeet NIM: the GPU speech-to-text v1 runs on a g6 (infra/stt-nim),
-# here as an ECS service on a spot GPU group. Off unless stt_nim_enabled: then bots
+# here as an ECS service on an on-demand GPU group. Off unless stt_nim_enabled: then bots
 # transcribe with it instead of Deepgram (runner.tf).
 #
 # Bots are one-off RunTask tasks, which can't use Service Connect, so they reach the
 # NIM through an internal network load balancer: a stable address, created only
 # while the NIM runs.
 #
-# ponytail: g6.xlarge spot, 0 to 1, model cache on the instance disk. Every cold start
+# ponytail: g6.xlarge on-demand, 0 to 1, model cache on the instance disk. Every cold start
 # rebuilds the model (~20 min, v1 docs). Fine for test runs; before a study, size it
 # from load tests and keep the cache (EFS or a warm instance).
 
@@ -59,6 +59,7 @@ resource "aws_security_group" "stt_nim" {
 resource "aws_launch_template" "stt_nim" {
   name                   = "meetlab-v2-staging-stt-nim"
   image_id               = data.aws_ssm_parameter.ecs_gpu_ami.value
+  instance_type          = "g6.xlarge" # smallest GPU that fits Parakeet (LEDGER)
   vpc_security_group_ids = [aws_security_group.stt_nim.id]
   iam_instance_profile {
     arn = aws_iam_instance_profile.instance.arn
@@ -92,21 +93,9 @@ resource "aws_autoscaling_group" "stt_nim" {
   max_size              = 1
   vpc_zone_identifier   = [for s in aws_subnet.private : s.id]
   protect_from_scale_in = true
-  mixed_instances_policy {
-    instances_distribution {
-      on_demand_base_capacity                  = 0
-      on_demand_percentage_above_base_capacity = 0
-      spot_allocation_strategy                 = "price-capacity-optimized"
-    }
-    launch_template {
-      launch_template_specification {
-        launch_template_id = aws_launch_template.stt_nim.id
-        version            = aws_launch_template.stt_nim.latest_version
-      }
-      override {
-        instance_type = "g6.xlarge"
-      }
-    }
+  launch_template {
+    id      = aws_launch_template.stt_nim.id
+    version = aws_launch_template.stt_nim.latest_version
   }
   tag {
     key                 = "AmazonECSManaged"

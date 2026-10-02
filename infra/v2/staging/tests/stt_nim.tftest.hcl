@@ -33,7 +33,7 @@ run "with_the_stt_nim_off_bots_use_deepgram" {
   }
 }
 
-run "switched_on_it_runs_on_one_spot_gpu_behind_a_private_load_balancer" {
+run "switched_on_it_runs_on_one_on_demand_gpu_behind_a_private_load_balancer" {
   command = apply
 
   variables {
@@ -41,11 +41,8 @@ run "switched_on_it_runs_on_one_spot_gpu_behind_a_private_load_balancer" {
   }
 
   assert {
-    condition = (
-      one(one(aws_autoscaling_group.stt_nim.mixed_instances_policy).instances_distribution).on_demand_percentage_above_base_capacity == 0 &&
-      [for o in one(one(aws_autoscaling_group.stt_nim.mixed_instances_policy).launch_template).override : o.instance_type] == ["g6.xlarge"]
-    )
-    error_message = "spot only, on a g6.xlarge (the L4 v1 runs on, so its measurements carry over)"
+    condition     = aws_launch_template.stt_nim.instance_type == "g6.xlarge" && length(aws_autoscaling_group.stt_nim.mixed_instances_policy) == 0
+    error_message = "on-demand g6.xlarge: the smallest GPU that fits Parakeet (13.75 GB; NVIDIA's support matrix), and spot was unobtainable (placement score 1/10, 2026-10-02)"
   }
   assert {
     condition     = strcontains(data.aws_ssm_parameter.ecs_gpu_ami.name, "/gpu/") && one(aws_launch_template.stt_nim.metadata_options).http_tokens == "required"

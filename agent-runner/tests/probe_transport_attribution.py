@@ -1,7 +1,7 @@
 """Does Pipecat's LiveKit input tag each participant's audio with the right id? (F11, layer 1)
 
 Two participants play different pure tones at the same time (440 Hz and 1000 Hz). A
-minimal pipeline built on the bot's own LiveKitTransport collects the audio frames;
+minimal pipeline built on the bot's own LiveKitTransport (STOCK=1: Pipecat's) collects the audio frames;
 each participant's frames must carry their own tone. No speech recognition involved.
 
     docker compose -f .devcontainer/docker-compose.yml exec -T agent-runner \\
@@ -41,10 +41,12 @@ async def main() -> int:
     from livekit import rtc
     from pipecat.frames.frames import Frame, UserAudioRawFrame
     from pipecat.pipeline.pipeline import Pipeline
-    from pipecat.pipeline.runner import PipelineRunner
-    from pipecat.pipeline.task import PipelineTask
     from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
-    from pipecat.transports.livekit.transport import LiveKitParams, LiveKitTransport
+    from pipecat.transports.livekit.transport import LiveKitParams
+    if os.environ.get("STOCK"):  # Pipecat's own transport, for comparison
+        from pipecat.transports.livekit.transport import LiveKitTransport
+    else:  # the bot's
+        from livekit_input import LiveKitTransport
 
     from _sim_common import LIVEKIT_URL, token
 
@@ -67,8 +69,22 @@ async def main() -> int:
                     heard[frame.user_id].append(dominant_hz(chunk, frame.sample_rate))
             await self.push_frame(frame, direction)
 
-    task = PipelineTask(Pipeline([transport.input(), Collect()]))
-    runner = asyncio.create_task(PipelineRunner(handle_sigint=False).run(task))
+    pipeline = Pipeline([transport.input(), Collect()])
+    try:  # Pipecat >= 1.3: PipelineWorker + WorkerRunner (PipelineTask is removed in 2.0)
+        from pipecat.pipeline.worker import PipelineWorker
+        from pipecat.workers.runner import WorkerRunner
+
+        workers = WorkerRunner(handle_sigint=False)
+        await workers.add_workers(PipelineWorker(pipeline))
+        runner = asyncio.create_task(workers.run())
+        stop = workers.cancel
+    except ImportError:  # the bot's current 1.4 path
+        from pipecat.pipeline.runner import PipelineRunner
+        from pipecat.pipeline.task import PipelineTask
+
+        task = PipelineTask(pipeline)
+        runner = asyncio.create_task(PipelineRunner(handle_sigint=False).run(task))
+        stop = task.cancel
     await asyncio.sleep(3)
 
     async def play(identity: str, hz: float) -> rtc.Room:
@@ -90,9 +106,10 @@ async def main() -> int:
 
     rooms = await asyncio.gather(*(play(who, hz) for who, hz in TONES.items()))
     await asyncio.sleep(1)
-    # Pipecat 1.4 tags audio with the LiveKit session id; name each id while everyone is still here.
+    # Pipecat 1.4 tags audio with the session id, 1.8+ with the identity; name both.
     name = {r.local_participant.sid: r.local_participant.identity for r in rooms}
-    await task.cancel()
+    name.update({who: who for who in TONES})
+    await stop()
     await runner
     for room in rooms:
         await room.disconnect()

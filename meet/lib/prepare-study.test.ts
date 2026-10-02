@@ -20,6 +20,14 @@ describe('describeCapacity', () => {
   });
 });
 
+describe('describeCapacity with a stuck machine', () => {
+  it('asks for an engineer when a machine is stuck', () => {
+    const text = describeCapacity({ available: true, min_instances: 0, ready_instances: 0, sessions_per_instance: 3, warm_until: null, unhealthy_instances: 1 });
+    expect(text).toContain('1 machine is stuck');
+    expect(text).toContain('engineer');
+  });
+});
+
 describe('untilFromLocal', () => {
   it('turns the form time into an instant the runner accepts (with a zone)', () => {
     expect(untilFromLocal('2026-10-02T15:00')).toBe(new Date('2026-10-02T15:00').toISOString());

@@ -13,11 +13,12 @@ GROUP = "meetlab-v2-staging-bots"
 NOW = datetime(2026, 10, 2, 12, 0, tzinfo=timezone.utc)
 
 
-def _asg(min_size=0, max_size=2, desired=0, in_service=0, scheduled=None):
+def _asg(min_size=0, max_size=2, desired=0, in_service=0, scheduled=None, stuck=0):
     asg = mock.Mock()
     asg.describe_auto_scaling_groups.return_value = {"AutoScalingGroups": [{
         "MinSize": min_size, "MaxSize": max_size, "DesiredCapacity": desired,
-        "Instances": [{"LifecycleState": "InService"}] * in_service,
+        "Instances": [{"LifecycleState": "InService", "HealthStatus": "Healthy"}] * in_service
+        + [{"LifecycleState": "Terminating:Wait", "HealthStatus": "Unhealthy"}] * stuck,
     }]}
     asg.describe_scheduled_actions.return_value = {"ScheduledUpdateGroupActions": (
         [{"ScheduledActionName": capacity.SCHEDULE, "StartTime": scheduled}] if scheduled else [])}
@@ -73,7 +74,14 @@ class StatusTests(unittest.TestCase):
     def test_reports_warm_instances_and_when_warming_ends(self):
         out = capacity.status(_asg(min_size=2, desired=2, in_service=1, scheduled=NOW), GROUP, per_instance=3)
         self.assertEqual(out, {"min_instances": 2, "max_instances": 2, "desired_instances": 2,
-                               "ready_instances": 1, "sessions_per_instance": 3, "warm_until": NOW.isoformat()})
+                               "ready_instances": 1, "sessions_per_instance": 3, "warm_until": NOW.isoformat(),
+                               "unhealthy_instances": 0})
+
+    def test_counts_machines_stuck_unhealthy_in_the_group(self):
+        # 2026-10-02: a bot machine stopped by hand sat in Terminating:Wait for 27 h; the
+        # ECS draining hook can't finish on a stopped machine, and the pool never scaled in.
+        out = capacity.status(_asg(in_service=1, stuck=1), GROUP, per_instance=3)
+        self.assertEqual(out["unhealthy_instances"], 1)
 
 
 if __name__ == "__main__":

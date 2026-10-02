@@ -58,4 +58,7 @@ def status(asg, group: str, per_instance: int) -> dict:
         "ready_instances": sum(1 for i in g["Instances"] if i["LifecycleState"] == "InService"),
         "sessions_per_instance": per_instance,
         "warm_until": end.isoformat() if end else None,
+        # A machine stopped by hand can't finish ECS draining and blocks scale-in for
+        # good (2026-10-02, 27 h). Normal drains stay Healthy.
+        "unhealthy_instances": sum(1 for i in g["Instances"] if i.get("HealthStatus") == "Unhealthy"),
     }

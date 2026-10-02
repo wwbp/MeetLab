@@ -30,8 +30,8 @@ from pipecat.observers.base_observer import BaseObserver, FramePushed
 from pipecat.observers.loggers.metrics_log_observer import MetricsLogObserver
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.pipeline.pipeline import Pipeline
-from pipecat.pipeline.runner import PipelineRunner
-from pipecat.pipeline.task import PipelineParams, PipelineTask
+from pipecat.pipeline.worker import PipelineParams, PipelineWorker
+from pipecat.workers.runner import WorkerRunner
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import (
     LLMContextAggregatorPair,
@@ -233,7 +233,7 @@ def make_speech_onset_handler(tracker, enqueue_frame):
     --------------------------------------------------
     The usual route is transport VAD -> UserStartedSpeakingFrame -> interruption.
     Not available here: the 0.0.x-era ``allow_interruptions`` and
-    ``interruption_strategies`` fields on PipelineParams do not exist in 1.4.0,
+    ``interruption_strategies`` fields on PipelineParams do not exist (1.4.0, 1.12.0),
     and most published examples still assume they do.
 
     A transport-level ``vad_analyzer`` would also be the worse option even if it
@@ -245,8 +245,8 @@ def make_speech_onset_handler(tracker, enqueue_frame):
     *upstream* rather than an InterruptionFrame downstream, because the task
     handles the two differently: queue_frame() puts a downstream frame on
     _push_queue, a plain FIFO that the interruption then waits in. An upstream
-    InterruptionTaskFrame reaches PipelineTask._source_push_frame, which injects
-    the InterruptionFrame straight into the pipeline — pipeline/task.py calls this
+    InterruptionTaskFrame reaches PipelineWorker._source_push_frame, which injects
+    the InterruptionFrame straight into the pipeline — pipeline/worker.py calls this
     out explicitly as "bypassing the push queue".
 
     From there every FrameProcessor treats InterruptionFrame as a SystemFrame and
@@ -256,7 +256,7 @@ def make_speech_onset_handler(tracker, enqueue_frame):
     LiveKit is dropped instead of played out.
 
     ``enqueue_frame`` is an async callable taking one frame, or None before the
-    PipelineTask exists. The handler never raises: it runs inside frame
+    PipelineWorker exists. The handler never raises: it runs inside frame
     processing, so losing an interruption is bad but killing the audio path for
     the rest of the session is worse.
     """
@@ -556,7 +556,7 @@ async def _bot(runner_args: LiveKitRunnerArguments):
     # onset from the per-participant VAD (via MultiSpeakerSTT's on_speech_onset).
     interruptions = InterruptionTracker(labels={"stt_model": bot_config.stt_model})
 
-    # The PipelineTask does not exist yet, so the handler reaches it through this
+    # The PipelineWorker does not exist yet, so the handler reaches it through this
     # holder, filled in once the task is built. Audio cannot flow before the
     # pipeline runs, so in practice it is always set by the time onset fires — the
     # handler tolerates None anyway rather than risk raising inside frame
@@ -599,7 +599,7 @@ async def _bot(runner_args: LiveKitRunnerArguments):
     # is pinned to the cheapest model by the soak harness rather than mocked.
     _mock_tts = os.getenv("BOT_MOCK_TTS", "").lower() in ("1", "true", "yes")
 
-    llm = OpenAILLMService(api_key=openai_api_key, model=bot_config.llm_model)
+    llm = _build_llm(openai_api_key, bot_config)
     _tts_mode = (
         TextAggregationMode.TOKEN
         if bot_config.tts_aggregation_mode == "token"
@@ -627,7 +627,7 @@ async def _bot(runner_args: LiveKitRunnerArguments):
         f" aggregation={bot_config.tts_aggregation_mode}"
     )
 
-    context = LLMContext([{"role": "system", "content": bot_config.system_prompt}])
+    context = LLMContext()  # the system prompt is an LLM setting (_build_llm)
     context_aggregator = LLMContextAggregatorPair(
         context,
         user_params=build_user_aggregator_params(bot_config),
@@ -789,7 +789,7 @@ async def _bot(runner_args: LiveKitRunnerArguments):
         ]
     )
 
-    task = PipelineTask(
+    task = PipelineWorker(
         pipeline,
         params=PipelineParams(
             enable_metrics=True,
@@ -946,6 +946,11 @@ async def _bot(runner_args: LiveKitRunnerArguments):
             _recent_bot_texts.append(message.content)
             if len(_recent_bot_texts) > _RECENT_BOT_TEXT_WINDOW:
                 del _recent_bot_texts[0]
+        if not message.content:
+            # Nothing reached the context. A spoken greeting's words arrive with its
+            # audio, after Pipecat has closed its turn (1.12; 1.4 kept only the first
+            # word). Don't store an empty bot turn or spend the reply's timing on it.
+            return
         ts = _iso_to_unix(message.timestamp)
         utt_id = _new_id()
         meta: dict = {}
@@ -1049,7 +1054,7 @@ async def _bot(runner_args: LiveKitRunnerArguments):
     async def on_participant_connected(transport, participant_id: str):
         room = transport._client.room
         # remote_participants is keyed by identity, not SID — find by SID
-        p = _find_participant_by_sid(room.remote_participants, participant_id)
+        p = _find_participant(room.remote_participants, participant_id)
         if not p:
             return
         identity = p.identity
@@ -1159,7 +1164,7 @@ async def _bot(runner_args: LiveKitRunnerArguments):
         # in our SID→identity map yet, look them up directly from the room now.
         if participant_id not in _sid_to_identity:
             room = transport._client.room
-            p = _find_participant_by_sid(room.remote_participants, participant_id)
+            p = _find_participant(room.remote_participants, participant_id)
             if p:
                 _sid_to_identity[participant_id] = p.identity
                 _sid_to_name[participant_id] = p.name or p.identity.split("__")[0]
@@ -1193,7 +1198,7 @@ async def _bot(runner_args: LiveKitRunnerArguments):
             ],
         )
 
-    runner = PipelineRunner(handle_sigterm=runner_args.handle_sigterm)
+    runner = WorkerRunner(handle_sigterm=runner_args.handle_sigterm)
     status = "error"
     # Proof of life for the reconciler (heartbeat.py): a bot that dies hard stops beating.
     heartbeat_task = asyncio.create_task(beat_forever(
@@ -1209,7 +1214,8 @@ async def _bot(runner_args: LiveKitRunnerArguments):
 
     presence_task = asyncio.create_task(leave_when_empty())
     try:
-        await runner.run(task)
+        await runner.add_workers(task)
+        await runner.run()
         status = "completed"
     except asyncio.CancelledError:
         # Graceful end: the room stayed empty (leave_when_empty → task.cancel()) or
@@ -1310,14 +1316,16 @@ def build_audio_track_sink(
     return audio_tracks.AudioTrackSink(on_flush)
 
 
-def _find_participant_by_sid(remote_participants: dict, sid: str):
-    """Find a participant by SID in a dict keyed by identity.
+def _build_llm(api_key: str, bot_config) -> OpenAILLMService:
+    """Model and system prompt as settings (Pipecat 1.9+; a "system" context message is removed in 2.0)."""
+    return OpenAILLMService(api_key=api_key, settings=OpenAILLMService.Settings(
+        model=bot_config.llm_model, system_instruction=bot_config.system_prompt))
 
-    The LiveKit SDK keys room.remote_participants by *identity*, not SID.
-    Pipecat callbacks pass the participant's SID, so a direct .get() always
-    returns None — we must search by value.
-    """
-    return next((p for p in remote_participants.values() if p.sid == sid), None)
+
+def _find_participant(remote_participants: dict, participant_id: str):
+    """The participant Pipecat names. Since Pipecat 1.8 that's the LiveKit identity,
+    which is also room.remote_participants' key (1.4 passed the session id)."""
+    return remote_participants.get(participant_id)
 
 
 def resolve_speaker_identity(sid, sid_to_identity: dict, remote_participants: dict):
@@ -1344,7 +1352,7 @@ def resolve_speaker_identity(sid, sid_to_identity: dict, remote_participants: di
         return sid_to_identity[sid], {}
 
     if sid:
-        p = _find_participant_by_sid(remote_participants, sid)
+        p = _find_participant(remote_participants, sid)
         if p:
             # Same display-name rule as on_participant_connected: prefer the token
             # name, else strip the __randomPostfix connection-details appends.

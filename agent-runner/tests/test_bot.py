@@ -17,7 +17,7 @@ from bot import (
     _apply_stt_model_override,
     _build_stt,
     _build_stt_for_multi_speaker,
-    _find_participant_by_sid,
+    _find_participant,
     _normalize_words,
     _text_similarity,
     _turn_detection_for_vad_mode,
@@ -44,35 +44,19 @@ def _fake_participant(identity: str, sid: str) -> MagicMock:
     return p
 
 
-class TestFindParticipantBySid(unittest.TestCase):
-    """_find_participant_by_sid searches remote_participants by SID value."""
+class TestFindParticipant(unittest.TestCase):
+    """Pipecat >= 1.8 passes the participant's identity, the roster's own key (Pipecat
+    1.4 passed the session id, which needed a scan and changed on every reconnect)."""
 
-    def test_finds_participant_when_sid_matches(self):
-        p = _fake_participant("alice", "PA_abc")
-        result = _find_participant_by_sid({"alice": p}, "PA_abc")
-        self.assertIs(result, p)
+    def test_finds_the_participant_by_the_id_pipecat_passes(self):
+        alice, bob = _fake_participant("alice", "PA_aaa"), _fake_participant("bob", "PA_bbb")
+        self.assertIs(_find_participant({"alice": alice, "bob": bob}, "bob"), bob)
 
-    def test_returns_none_when_sid_not_present(self):
-        p = _fake_participant("alice", "PA_abc")
-        result = _find_participant_by_sid({"alice": p}, "PA_unknown")
-        self.assertIsNone(result)
+    def test_a_session_id_is_not_an_identity(self):
+        self.assertIsNone(_find_participant({"alice": _fake_participant("alice", "PA_aaa")}, "PA_aaa"))
 
-    def test_returns_none_for_empty_dict(self):
-        self.assertIsNone(_find_participant_by_sid({}, "PA_abc"))
-
-    def test_old_get_by_sid_key_always_fails(self):
-        """Regression: dict.get(sid) on an identity-keyed dict returns None."""
-        p = _fake_participant("alice", "PA_abc")
-        participants = {"alice": p}
-        self.assertIsNone(participants.get("PA_abc"))        # old broken pattern
-        self.assertIsNotNone(_find_participant_by_sid(participants, "PA_abc"))  # fixed
-
-    def test_selects_correct_participant_among_multiple(self):
-        alice = _fake_participant("alice", "PA_aaa")
-        bob = _fake_participant("bob", "PA_bbb")
-        participants = {"alice": alice, "bob": bob}
-        self.assertIs(_find_participant_by_sid(participants, "PA_bbb"), bob)
-        self.assertIs(_find_participant_by_sid(participants, "PA_aaa"), alice)
+    def test_returns_none_for_an_unknown_participant(self):
+        self.assertIsNone(_find_participant({}, "alice"))
 
 
 class TestTurnDetectionForVadMode(unittest.TestCase):
@@ -421,3 +405,16 @@ class TestSelfEchoHeuristic(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestBuildLLM(unittest.TestCase):
+    """Pipecat 1.9+: the model and the system prompt are LLM settings, not an initial
+    "system" message in the context (deprecated, removed in 2.0)."""
+
+    def test_the_model_and_system_prompt_are_settings(self):
+        from types import SimpleNamespace
+
+        from bot import _build_llm
+
+        llm = _build_llm("sk-test", SimpleNamespace(llm_model="gpt-4o-mini", system_prompt="Facilitate."))
+        self.assertEqual((llm._settings.model, llm._settings.system_instruction), ("gpt-4o-mini", "Facilitate."))

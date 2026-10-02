@@ -34,6 +34,23 @@ def _cfg() -> dict:
     }
 
 
+def _require(cfg: dict, what: str) -> None:
+    missing = [k for k in ("bucket", "region") if not cfg[k]]
+    if missing:
+        raise RuntimeError(f"{what} requires: {', '.join(missing)}")
+
+
+def _s3(cfg: dict):
+    """An S3 client. Explicit keys when S3_KEY_ID/S3_KEY_SECRET are set (v1, LiveKit
+    egress); otherwise boto3's default chain, i.e. the ECS task's own role (v2)."""
+    import boto3
+
+    keys = ({"aws_access_key_id": cfg["key_id"], "aws_secret_access_key": cfg["key_secret"]}
+            if cfg["key_id"] and cfg["key_secret"] else {})
+    return boto3.client("s3", region_name=cfg["region"], **keys,
+                        **({"endpoint_url": cfg["endpoint"]} if cfg["endpoint"] else {}))
+
+
 def build_filename(room_name: str, file_type: str, ext: str) -> str:
     safe = "".join(c if c.isalnum() or c in "-_" else "_" for c in room_name)
     ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
@@ -76,34 +93,18 @@ async def read_bytes(path: str) -> bytes:
         return Path(path).read_bytes()
 
     def _sync_get() -> bytes:
-        import boto3
-        s3 = boto3.client(
-            "s3",
-            aws_access_key_id=cfg["key_id"],
-            aws_secret_access_key=cfg["key_secret"],
-            region_name=cfg["region"],
-            **({"endpoint_url": cfg["endpoint"]} if cfg["endpoint"] else {}),
-        )
+        s3 = _s3(cfg)
         return s3.get_object(Bucket=cfg["bucket"], Key=path)["Body"].read()
 
     return await asyncio.get_event_loop().run_in_executor(None, _sync_get)
 
 
 async def _upload_s3(filename: str, content: bytes, cfg: dict) -> str:
-    missing = [k for k in ("key_id", "key_secret", "bucket", "region") if not cfg[k]]
-    if missing:
-        raise RuntimeError(f"S3 storage requires: {', '.join(missing)}")
+    _require(cfg, "S3 storage")
     key = f"recordings/{filename}"
 
     def _sync_upload() -> str:
-        import boto3
-        s3 = boto3.client(
-            "s3",
-            aws_access_key_id=cfg["key_id"],
-            aws_secret_access_key=cfg["key_secret"],
-            region_name=cfg["region"],
-            **({"endpoint_url": cfg["endpoint"]} if cfg["endpoint"] else {}),
-        )
+        s3 = _s3(cfg)
         s3.put_object(Bucket=cfg["bucket"], Key=key, Body=content)
         logger.info(f"storage: uploaded {len(content)} bytes → s3://{cfg['bucket']}/{key}")
         return key
@@ -121,18 +122,8 @@ def get_download_url(path: str) -> str:
     if cfg["backend"] != "s3":
         return path
 
-    missing = [k for k in ("key_id", "key_secret", "bucket", "region") if not cfg[k]]
-    if missing:
-        raise RuntimeError(f"S3 presign requires: {', '.join(missing)}")
-
-    import boto3
-    s3 = boto3.client(
-        "s3",
-        aws_access_key_id=cfg["key_id"],
-        aws_secret_access_key=cfg["key_secret"],
-        region_name=cfg["region"],
-        **({"endpoint_url": cfg["endpoint"]} if cfg["endpoint"] else {}),
-    )
+    _require(cfg, "S3 presign")
+    s3 = _s3(cfg)
     url = s3.generate_presigned_url(
         "get_object",
         Params={"Bucket": cfg["bucket"], "Key": path},

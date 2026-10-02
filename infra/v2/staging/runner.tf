@@ -8,9 +8,12 @@ locals {
     { name = "DB_HOST", value = aws_db_instance.this.address },
     { name = "DB_NAME", value = aws_db_instance.this.db_name },
     { name = "DB_USER", value = aws_db_instance.this.username },
-    # ponytail: recordings stay on the container disk (lost on restart) until PR 6
-    # gives bot tasks a role for the media bucket.
-    { name = "STORAGE_BACKEND", value = "local" },
+    # Per-speaker audio goes to the media bucket through each task's own role (no S3
+    # keys: storage.py falls back to the default credential chain). Video egress
+    # needs a key LiveKit can use; that is 8b.
+    { name = "STORAGE_BACKEND", value = "s3" },
+    { name = "S3_BUCKET", value = aws_s3_bucket.media.bucket },
+    { name = "S3_REGION", value = "us-east-1" },
     # ponytail: Deepgram until staging has its own NIM; then remove this and set
     # NEMOTRON_STT_URL, so staging runs prod's STT.
     { name = "STT_MODEL_OVERRIDE", value = "nova-3-general" },

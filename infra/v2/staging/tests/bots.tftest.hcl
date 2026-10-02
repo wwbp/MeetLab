@@ -117,3 +117,25 @@ run "the_runner_can_find_a_sessions_task_in_this_cluster_only" {
     error_message = "ListTasks, limited to this cluster"
   }
 }
+
+# Per-speaker audio (iteration 8a-2): the bot writes with its own role, the runner
+# reads for downloads and transcripts. No S3 keys anywhere in either task.
+run "recordings_go_to_s3_through_task_roles_not_keys" {
+  command = apply
+
+  assert {
+    condition     = jsondecode(aws_iam_role_policy.bot_recordings.policy).Statement[0].Action == "s3:PutObject" && jsondecode(aws_iam_role_policy.bot_recordings.policy).Statement[0].Resource == "${aws_s3_bucket.media.arn}/recordings/*"
+    error_message = "the bot may only add files under recordings/"
+  }
+  assert {
+    condition     = jsondecode(aws_iam_role_policy.runner_recordings.policy).Statement[0].Action == "s3:GetObject" && jsondecode(aws_iam_role_policy.runner_recordings.policy).Statement[0].Resource == "${aws_s3_bucket.media.arn}/recordings/*"
+    error_message = "the runner may only read files under recordings/"
+  }
+  assert {
+    condition = alltrue([for td in [aws_ecs_task_definition.bot, aws_ecs_task_definition.runner_app] :
+      contains([for e in jsondecode(td.container_definitions)[0].environment : "${e.name}=${e.value}"], "STORAGE_BACKEND=s3") &&
+      contains([for e in jsondecode(td.container_definitions)[0].environment : "${e.name}=${e.value}"], "S3_BUCKET=${aws_s3_bucket.media.bucket}") &&
+    !anytrue([for e in concat(jsondecode(td.container_definitions)[0].environment, jsondecode(td.container_definitions)[0].secrets) : startswith(e.name, "S3_KEY")])])
+    error_message = "both tasks store to the media bucket, with no S3 keys"
+  }
+}

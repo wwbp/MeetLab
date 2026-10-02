@@ -97,8 +97,20 @@ class TestWriteFileS3(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(call_kwargs["Body"], b"video")
         self.assertTrue(path.startswith("recordings/"))
 
-    async def test_raises_on_missing_credentials(self):
-        with patch.dict(os.environ, {"STORAGE_BACKEND": "s3", "S3_KEY_ID": ""}):
+    async def test_uses_the_task_role_when_no_keys_are_set(self):
+        # v2 bot tasks write with their own IAM role: no S3 keys in the environment,
+        # so boto3 must use its default credential chain, not empty explicit keys.
+        mock_s3, mock_boto = MagicMock(), MagicMock()
+        mock_boto.client.return_value = mock_s3
+        env = {"STORAGE_BACKEND": "s3", "S3_KEY_ID": "", "S3_KEY_SECRET": "",
+               "S3_BUCKET": "mybucket", "S3_REGION": "us-east-1"}
+        with patch.dict(os.environ, env), patch.dict("sys.modules", {"boto3": mock_boto}):
+            await storage.write_file("speaker.wav", b"pcm")
+        mock_s3.put_object.assert_called_once()
+        self.assertNotIn("aws_access_key_id", mock_boto.client.call_args.kwargs)
+
+    async def test_still_needs_a_bucket_and_region(self):
+        with patch.dict(os.environ, {"STORAGE_BACKEND": "s3", "S3_BUCKET": "", "S3_REGION": ""}):
             with self.assertRaises(RuntimeError):
                 await storage.write_file("f.mp4", b"x")
 

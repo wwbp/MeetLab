@@ -223,8 +223,55 @@ async def scenario_stop_early():
         return "Stop before join: the bot never joined, and its task is stopped"
 
 
+MEDIA_BUCKET = os.getenv("MEDIA_BUCKET", "meetlab-v2-staging-media-848180123498")
+
+
+async def _speak(room: rtc.Room, seconds: float):
+    """The stand-in publishes a microphone track and plays a tone into it."""
+    import math
+
+    rate, per = 48000, 480  # 10 ms frames
+    source = rtc.AudioSource(rate, 1)
+    track = rtc.LocalAudioTrack.create_audio_track("standin-mic", source)
+    await room.local_participant.publish_track(
+        track, rtc.TrackPublishOptions(source=rtc.TrackSource.SOURCE_MICROPHONE))
+    for i in range(int(seconds * 100)):
+        frame = rtc.AudioFrame.create(rate, 1, per)
+        samples = memoryview(frame.data).cast("h")
+        for j in range(per):
+            samples[j] = int(8000 * math.sin(2 * math.pi * 440 * (i * per + j) / rate))
+        await source.capture_frame(frame)
+
+
+async def scenario_audio_recording():
+    """Record pressed in the console, someone speaks, the bot is stopped: that speaker's
+    audio must land in the media bucket, written by the bot task's own role."""
+    s3 = boto3.client("s3", region_name=REGION)
+    async with Meeting() as m:
+        # Video egress is a separate scenario; its status does not decide this one (the
+        # per-speaker request is recorded before egress is attempted).
+        try:
+            _web.open(urllib.request.Request(f"{MEET}/api/record/start?roomName={m.room}"), timeout=30)
+        except urllib.error.HTTPError:
+            pass
+        await asyncio.sleep(12)  # one heartbeat: the bot picks up the request
+        await _speak(m.human, 6)
+        ecs.stop_task(cluster=CLUSTER, task=m.task, reason="acceptance: audio_recording")
+        await _until(lambda: _describe(m.task)["lastStatus"] == "STOPPED", 150, "task stopped")
+
+        def audio_in_bucket():
+            listed = s3.list_objects_v2(Bucket=MEDIA_BUCKET, Prefix="recordings/").get("Contents", [])
+            return [o["Key"] for o in listed if m.room in o["Key"] and "-audio-" in o["Key"]]
+        await _until(audio_in_bucket, 60, "per-speaker audio in the media bucket")
+        return f"{len(audio_in_bucket())} audio file(s) in s3://{MEDIA_BUCKET}/recordings/"
+
+
 SCENARIOS = {"start": scenario_start, "stoptask": scenario_stoptask, "removed": scenario_removed,
-             "kill9": scenario_kill9, "stop_early": scenario_stop_early}
+             "kill9": scenario_kill9, "stop_early": scenario_stop_early,
+             "audio_recording": scenario_audio_recording}
+
+
+SCENARIO_TIMEOUT = 600
 
 
 async def main(names):
@@ -232,7 +279,11 @@ async def main(names):
     for name in names:
         t0 = time.time()
         try:
-            detail, ok = await SCENARIOS[name](), True
+            # A hang (a LiveKit connect, a meet call) fails its own scenario instead of
+            # freezing the run until CI's 30-minute cap (2026-10-02). Covers a cold start.
+            detail, ok = await asyncio.wait_for(SCENARIOS[name](), SCENARIO_TIMEOUT), True
+        except asyncio.TimeoutError:
+            detail, ok = f"hung: no result within {SCENARIO_TIMEOUT} s", False
         except Fail as e:
             detail, ok = str(e), False
         except Exception as e:  # an error in the harness is a failure too, with its cause

@@ -42,6 +42,13 @@ resource "aws_iam_role_policy" "acceptance" {
         Resource = ["arn:aws:ecs:us-east-1:${local.account}:task/meetlab-v2-staging/*", local.cluster_arn]
       },
       {
+        # acceptance audio_recording: did a file land? Names only, never contents.
+        Effect    = "Allow"
+        Action    = "s3:ListBucket"
+        Resource  = "arn:aws:s3:::meetlab-v2-staging-media-${local.account}"
+        Condition = { StringLike = { "s3:prefix" = "recordings/*" } }
+      },
+      {
         # agent-runner/tests/permission_contract.py
         Effect   = "Allow"
         Action   = "iam:SimulatePrincipalPolicy"

@@ -48,6 +48,13 @@ class ContractTest(unittest.TestCase):
         self.assertIn(("meetlab-v2-staging-runner-task", "ecs:RunTask"), needed)     # 4c PR 1
         self.assertIn(("meetlab-v2-staging-runner-task", "ecs:StopTask"), needed)    # heartbeat stop
         self.assertIn(("meetlab-v2-staging-bot-task", "ssmmessages:OpenDataChannel"), needed)  # ECS Exec
+        self.assertIn(("meetlab-v2-staging-bot-task", "s3:PutObject"), needed)      # per-speaker audio
+        self.assertIn(("meetlab-v2-staging-runner-task", "s3:GetObject"), needed)   # downloads
+
+    def test_recordings_cannot_be_read_or_deleted_by_the_bot(self):
+        forbidden = {(c.role, c.action) for c in DENY}
+        self.assertIn(("meetlab-v2-staging-bot-task", "s3:DeleteObject"), forbidden)
+        self.assertIn(("meetlab-v2-staging-runner-task", "s3:DeleteObject"), forbidden)
 
     def test_every_role_has_something_it_must_never_do(self):
         self.assertTrue({c.role for c in ALLOW} <= {c.role for c in DENY})

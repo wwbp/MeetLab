@@ -303,7 +303,7 @@ run "acceptance_role_is_staging_only_and_least_privilege" {
     condition = alltrue([for s in jsondecode(aws_iam_role_policy.acceptance.policy).Statement :
       alltrue([for a in flatten([s.Action]) : contains([
         "ssm:GetParameter", "kms:Decrypt", "ecs:ListTasks", "ecs:DescribeTasks", "ecs:StopTask", "ecs:ExecuteCommand", "logs:FilterLogEvents",
-        "iam:SimulatePrincipalPolicy",
+        "iam:SimulatePrincipalPolicy", "s3:ListBucket",
     ], a)])])
     error_message = "only the actions the acceptance test performs"
   }
@@ -322,5 +322,19 @@ run "acceptance_can_check_the_permission_contract_of_staging_roles_only" {
       contains(flatten([s.Action]), "iam:SimulatePrincipalPolicy") && flatten([s.Resource]) == ["arn:aws:iam::123456789012:role/meetlab-v2-staging-*"]
     ])
     error_message = "permission_contract.py simulates meetlab-v2-staging-* roles, and only those"
+  }
+}
+
+# audio_recording scenario: confirm a file landed. List names under recordings/ only;
+# the acceptance role never reads a recording.
+run "acceptance_can_list_recordings_but_not_read_them" {
+  command = plan
+
+  assert {
+    condition = anytrue([for s in jsondecode(aws_iam_role_policy.acceptance.policy).Statement :
+      contains(flatten([s.Action]), "s3:ListBucket") && flatten([s.Resource]) == ["arn:aws:s3:::meetlab-v2-staging-media-123456789012"] &&
+      try(s.Condition.StringLike["s3:prefix"], "") == "recordings/*"
+    ])
+    error_message = "list recordings/ in the staging media bucket, nothing else"
   }
 }

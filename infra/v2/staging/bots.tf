@@ -121,6 +121,26 @@ resource "aws_iam_role_policy" "bot_exec" {
   })
 }
 
+# Per-speaker audio: the bot only adds files under recordings/ (it cannot read, list
+# or delete them); the runner only reads them, for downloads and transcripts.
+resource "aws_iam_role_policy" "bot_recordings" {
+  name = "write-recordings"
+  role = aws_iam_role.bot_task.id
+  policy = jsonencode({
+    Version   = "2012-10-17"
+    Statement = [{ Effect = "Allow", Action = "s3:PutObject", Resource = "${aws_s3_bucket.media.arn}/recordings/*" }]
+  })
+}
+
+resource "aws_iam_role_policy" "runner_recordings" {
+  name = "read-recordings"
+  role = aws_iam_role.runner_task.id
+  policy = jsonencode({
+    Version   = "2012-10-17"
+    Statement = [{ Effect = "Allow", Action = "s3:GetObject", Resource = "${aws_s3_bucket.media.arn}/recordings/*" }]
+  })
+}
+
 # agent-runner may start bot tasks, and stop or inspect tasks in this cluster.
 resource "aws_iam_role" "runner_task" {
   name                 = "meetlab-v2-staging-runner-task"

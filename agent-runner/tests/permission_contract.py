@@ -23,6 +23,7 @@ OTHER_CLUSTER = f"{ARN}:cluster/bcfg-twilio-bot-dev-Cluster-c7MF3TrrR6WL"  # ano
 ROLE = f"arn:aws:iam::{ACCOUNT}:role"
 RUNNER, BOT = "meetlab-v2-staging-runner-task", "meetlab-v2-staging-bot-task"
 IN_CLUSTER = {"ecs:cluster": CLUSTER}
+MEDIA = f"arn:aws:s3:::meetlab-v2-staging-media-{ACCOUNT}"
 TO_ECS = {"iam:PassedToService": "ecs-tasks.amazonaws.com"}
 
 
@@ -42,6 +43,9 @@ ALLOW = [
     Call(RUNNER, "ecs:ListTasks", "*", IN_CLUSTER),
     Call(RUNNER, "ecs:StopTask", f"{ARN}:task/meetlab-v2-staging/0000"),
     Call(RUNNER, "ecs:DescribeTasks", f"{ARN}:task/meetlab-v2-staging/0000"),
+    # storage.py: per-speaker audio written by the bot, read back by the runner
+    Call(BOT, "s3:PutObject", f"{MEDIA}/recordings/speaker.wav"),
+    Call(RUNNER, "s3:GetObject", f"{MEDIA}/recordings/speaker.wav"),
     # ECS Exec into a bot (the kill9 acceptance scenario; debugging)
     *[Call(BOT, f"ssmmessages:{a}", "*") for a in
       ("CreateControlChannel", "CreateDataChannel", "OpenControlChannel", "OpenDataChannel")],
@@ -53,7 +57,11 @@ DENY = [
     Call(RUNNER, "ecs:ListTasks", "*", {"ecs:cluster": OTHER_CLUSTER}),
     Call(RUNNER, "iam:PassRole", f"{ROLE}/meetlab-v2-tf-apply", TO_ECS),
     Call(BOT, "ecs:RunTask", f"{ARN}:task-definition/meetlab-v2-staging-bot:1", IN_CLUSTER),
-    Call(BOT, "s3:GetObject", f"arn:aws:s3:::meetlab-v2-staging-media-{ACCOUNT}/any.wav"),
+    Call(BOT, "s3:GetObject", f"{MEDIA}/recordings/speaker.wav"),
+    Call(BOT, "s3:DeleteObject", f"{MEDIA}/recordings/speaker.wav"),
+    Call(BOT, "s3:PutObject", f"{MEDIA}/elsewhere/speaker.wav"),
+    Call(RUNNER, "s3:PutObject", f"{MEDIA}/recordings/speaker.wav"),
+    Call(RUNNER, "s3:DeleteObject", f"{MEDIA}/recordings/speaker.wav"),
     Call(BOT, "ssm:GetParameter", f"arn:aws:ssm:us-east-1:{ACCOUNT}:parameter/copilot/bcfg-twilio-bot/dev/secrets/OPENAI_API_KEY"),
 ]
 

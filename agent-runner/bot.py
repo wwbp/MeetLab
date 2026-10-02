@@ -42,7 +42,7 @@ from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.services.tts_service import TextAggregationMode
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.openai.stt import OpenAIRealtimeSTTService, OpenAIRealtimeSTTSettings
-from pipecat.transports.livekit.transport import LiveKitParams, LiveKitTransport
+from pipecat.transports.livekit.transport import LiveKitParams
 from sqlalchemy import select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
@@ -51,6 +51,7 @@ from config import load_config, require
 from db.config_loader import load_bot_config
 from chat import chat_message
 from heartbeat import beat_forever
+from livekit_input import LiveKitTransport  # one resampler per participant (F11)
 from presence import wait_until_empty
 from sessions import end
 from db.engine import AsyncSessionLocal

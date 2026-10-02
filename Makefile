@@ -170,6 +170,12 @@ benchmark-full:
 # Knobs: SNR_DB, NOISE=pink|white|hum|hf, DURATION, SPEAKERS, STT_MODEL, ENDPOINTING_MS.
 # See docs/meeting-simulations.md.
 SCENARIO ?= noise
+# Three people talking over each other: is each one's speech stored and labelled as
+# theirs (diagnosis F11)? Real speech recognition; SPEAKERS=a is the one-speaker control.
+sim-attribution:
+	$(COMPOSE) up -d --wait transport-server agent-runner
+	$(COMPOSE) exec -T -e SPEAKERS=$(or $(SPEAKERS),abc) agent-runner uv run python tests/sim_attribution.py
+
 simulate:
 	$(COMPOSE) up -d --wait transport-server agent-runner
 	$(COMPOSE) exec -T agent-runner uv run alembic upgrade head

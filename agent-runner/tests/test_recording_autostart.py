@@ -28,7 +28,6 @@ os.environ.setdefault("DEEPGRAM_API_KEY", "test-deepgram-key")
 import io
 import zipfile
 
-import audio_tracks
 import bot
 import runner
 from sqlalchemy import select
@@ -60,19 +59,19 @@ class StartRecordingForRoomTests(unittest.IsolatedAsyncioTestCase):
         await engine.dispose(close=False)
         self.addAsyncCleanup(engine.dispose, close=False)
 
-    async def test_enables_wav_sink_even_when_composite_egress_fails(self):
+    async def test_requests_per_speaker_audio_even_when_composite_egress_fails(self):
         room = f"autostart-wav-{uuid.uuid4().hex[:8]}"
-        await _make_running_conversation(room)
-        sink = audio_tracks.AudioTrackSink(_NullFlush())
-        audio_tracks.register_sink(room, sink)
-        self.addCleanup(audio_tracks.unregister_sink, room)
+        conv_id = await _make_running_conversation(room)
 
         status, payload = await runner.start_recording_for_room(room)
 
         # Room absent in LiveKit → composite egress fails (404/502)…
         self.assertIn(status, (404, 409, 502), payload)
-        # …but per-speaker WAV capture is turned on regardless.
-        self.assertTrue(sink.enabled)
+        # …but the bot's per-speaker capture is still requested (it reads the flag on
+        # its next heartbeat; the runner holds no sinks since iteration 9).
+        async with AsyncSessionLocal() as db:
+            conv = await db.get(Conversation, conv_id)
+        self.assertTrue(conv.recording_requested)
 
     async def test_no_running_session_returns_404_and_no_sink(self):
         room = f"autostart-ghost-{uuid.uuid4().hex[:8]}"

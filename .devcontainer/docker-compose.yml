@@ -111,8 +111,8 @@ services:
       # `make soak MOCK=1` turns it on. Never enable in production.
       - BOT_MOCK_TTS=${BOT_MOCK_TTS:-0}
       # Each meeting's bot runs as its own container, as each is its own ECS task in
-      # staging (dispatch.py). BOT_DISPATCHER= (empty) runs bots in-process instead.
-      - BOT_DISPATCHER=${BOT_DISPATCHER-docker}
+      # staging (dispatch.py). There is no in-process mode: /start refuses without one.
+      - BOT_DISPATCHER=${BOT_DISPATCHER:-docker}
       - DOCKER_HOST=tcp://docker-socket-proxy:2375
     volumes:
       - ../agent-runner:/app:cached

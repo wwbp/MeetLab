@@ -103,6 +103,7 @@ next person knows what exists that no PR created. Never record secret values.
 
 | Date | Decision | Why | Revisit when |
 |---|---|---|---|
+| 2026-10-02 | No in-process bots (iteration 9, completes 4c): `/start` refuses with 500 unless `BOT_DISPATCHER` is `ecs` or `docker`, before any session row exists. The runner no longer mints bot tokens or holds per-speaker sinks | One way to run a bot everywhere (ECS on staging, a container locally), so tests exercise the path production uses; a misconfigured runner can't leave a 'running' session no bot will join | — |
 | 2026-10-01 | Video egress uploads with a Terraform-made IAM user `meetlab-v2-staging-egress-writer` (PutObject + AbortMultipartUpload on `recordings/*` only, under the boundary); its access key is minted by a person into SSM and pasted nowhere else | LiveKit Cloud uploads from its own servers, so it needs a key; `assume_role_arn` is Enterprise-only and still needs a base key. Terraform never creates the key, so it is never in state, and CI can't mint one | LiveKit plan with assume-role; then drop the key |
 | 2026-10-01 | Only the runner gets the egress key (`EGRESS_S3_KEY_*`); bots and the runner otherwise use their task roles | The runner is what calls LiveKit egress; a bot never needs it | — |
 | 2026-10-01 | First-time deployment steps live in `docs/v2-deployment.md` | Steps a person does outside the pipeline (bootstrap, secrets, the egress key) were only in PR threads | — |

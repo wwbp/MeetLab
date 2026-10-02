@@ -194,27 +194,6 @@ class AudioTrackSink:
         await self._on_flush(sid, wav, meta)
 
 
-# ── in-process sink registry ────────────────────────────────────────────────
-# bot() and the FastAPI recording endpoints share one process (bot runs as a
-# BackgroundTask), so a plain module-level dict is the control path: the bot
-# registers its sink by room name at startup; /recordings/start looks it up and
-# calls sink.enable(). Reset on process restart, like the concierge stores.
-
-_registry: dict[str, AudioTrackSink] = {}
-
-
-def register_sink(room_name: str, sink: AudioTrackSink) -> None:
-    _registry[room_name] = sink
-
-
-def get_sink(room_name: str) -> AudioTrackSink | None:
-    return _registry.get(room_name)
-
-
-def unregister_sink(room_name: str) -> None:
-    _registry.pop(room_name, None)
-
-
 # ── persistence handler (the real on_flush) ─────────────────────────────────
 
 def _track_filename(room_name: str, speaker: str, part: int) -> str:

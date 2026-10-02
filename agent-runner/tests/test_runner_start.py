@@ -288,6 +288,19 @@ class RunnerStartApiTests(unittest.TestCase):
         second = self.client.post("/start", json={"room_name": room}).json()["session_id"]
         self.assertNotEqual(second, first)
 
+    def test_record_reaches_a_bot_in_another_process(self):
+        # Since 4c the bot is its own task; the runner's in-process sink registry is
+        # empty, so console Record started egress but never per-speaker capture.
+        # The request is a flag on the session row, set whatever egress does next
+        # (here the room is not in LiveKit, so egress fails).
+        room = _room("record")
+        sid = self.client.post("/start", json={"room_name": room}).json()["session_id"]
+        self.client.post("/recordings/start", json={"room_name": room})
+        Conversation = self.runner_module.Conversation
+        requested = self._db(lambda db: db.scalar(
+            self.runner_module.select(Conversation.recording_requested).where(Conversation.id == sid)))
+        self.assertTrue(requested)
+
     def test_stopping_a_room_with_no_bot_is_not_an_error(self):
         response = self.client.post("/stop", json={"room_name": _room("never-started")})
         self.assertEqual(response.status_code, 200, response.text)

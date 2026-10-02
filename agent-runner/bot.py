@@ -1200,7 +1200,8 @@ async def _bot(runner_args: LiveKitRunnerArguments):
     runner = PipelineRunner(handle_sigterm=runner_args.handle_sigterm)
     status = "error"
     # Proof of life for the reconciler (heartbeat.py): a bot that dies hard stops beating.
-    heartbeat_task = asyncio.create_task(beat_forever(AsyncSessionLocal, runner_args.session_id))
+    heartbeat_task = asyncio.create_task(beat_forever(
+        AsyncSessionLocal, runner_args.session_id, on_recording=audio_sink.enable))
     try:
         await runner.run(task)
         status = "completed"

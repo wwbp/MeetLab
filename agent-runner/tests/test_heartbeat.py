@@ -11,6 +11,7 @@ Pure rule + DB behaviour against the container's Postgres. Run with:
     docker compose -f .devcontainer/docker-compose.yml exec -T agent-runner \
         uv run python -m unittest tests.test_heartbeat -v
 """
+import asyncio
 import unittest
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -20,7 +21,7 @@ from sqlalchemy import select
 
 from db.engine import AsyncSessionLocal, engine
 from db.models import Conversation
-from heartbeat import START_GRACE, TTL, beat, fail_silent_sessions, silent_sessions
+from heartbeat import START_GRACE, TTL, beat, beat_forever, fail_silent_sessions, request_recording, silent_sessions
 
 NOW = datetime(2026, 10, 1, 12, 0, tzinfo=timezone.utc)
 
@@ -89,6 +90,23 @@ class FailSilentSessionsTest(unittest.IsolatedAsyncioTestCase):
         await beat(AsyncSessionLocal, cid)
         self.assertNotIn(cid, await fail_silent_sessions(AsyncSessionLocal, stop=lambda _: None))
         self.assertEqual(await self.status(cid), "running")
+
+    # Recording is requested by the runner (console Record) but captured by the bot,
+    # which since 4c runs in another process. The request is a flag on the session
+    # row; each beat reads it back.
+    async def test_a_beat_reports_whether_recording_was_requested(self):
+        cid = await self.insert(beat_ago=2)
+        self.assertFalse(await beat(AsyncSessionLocal, cid))
+        await request_recording(AsyncSessionLocal, cid)
+        self.assertTrue(await beat(AsyncSessionLocal, cid))
+
+    async def test_the_bot_starts_capturing_once_recording_is_requested(self):
+        cid, enabled = await self.insert(beat_ago=2), []
+        await request_recording(AsyncSessionLocal, cid)
+        loop = asyncio.create_task(beat_forever(AsyncSessionLocal, cid, on_recording=lambda: enabled.append(1)))
+        await asyncio.sleep(0.2)
+        loop.cancel()
+        self.assertEqual(enabled, [1], "capture switched on once, not on every beat")
 
 
 if __name__ == "__main__":

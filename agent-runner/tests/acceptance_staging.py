@@ -428,15 +428,36 @@ async def scenario_chat():
 SCENARIOS = {"start": scenario_start, "stoptask": scenario_stoptask, "removed": scenario_removed,
              "kill9": scenario_kill9, "stop_early": scenario_stop_early,
              "audio_recording": scenario_audio_recording, "video_recording": scenario_video_recording,
-             "transcript": scenario_transcript, "prewarm": scenario_prewarm,
-             "two_humans": scenario_two_humans, "refresh": scenario_refresh, "chat": scenario_chat}
+             "transcript": scenario_transcript, "two_humans": scenario_two_humans, "refresh": scenario_refresh,
+             "chat": scenario_chat,
+             "prewarm": scenario_prewarm}  # last: its Stop preparing cools the pool the run prepared
 
 
 SCENARIO_TIMEOUT = 600
 TIMEOUTS = {"transcript": 3300}  # may wait for a cold NIM first
 
 
+async def _prepared():
+    """Prepare for study, as a researcher would, so scenarios don't wait 2-3 min for a
+    machine (no bot machine is kept warm on staging: LEDGER)."""
+    from datetime import datetime, timezone
+
+    _post("/api/console/login", {"password": os.environ["CONSOLE_PASSWORD"]})
+    until = (datetime.now(timezone.utc) + timedelta(minutes=90)).isoformat()
+    _capacity("POST", {"sessions": 1, "until": until})
+    waited = await _until(lambda: _capacity()["ready_instances"] >= 1, 420, "a prepared bot machine")
+    print(f"prepared: a bot machine ready after {waited:.0f} s", flush=True)
+
+
 async def main(names):
+    await _prepared()
+    try:
+        return await _run(names)
+    finally:
+        _capacity("DELETE")  # the pool returns to its baseline even if a scenario hangs
+
+
+async def _run(names):
     results = []
     for name in names:
         t0 = time.time()

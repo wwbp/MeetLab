@@ -21,8 +21,12 @@ export function describeCapacity(s: CapacityStatus): string {
   const warning = stuck
     ? ` ${stuck} machine${stuck === 1 ? ' is' : 's are'} stuck shutting down and block the pool; ask an engineer.`
     : '';
-  if (s.min_instances === 0 || !s.warm_until) {
-    return 'Not prepared: the first bot of a study waits about 2 minutes for a machine.' + warning;
+  if (!s.warm_until) {
+    return (
+      (s.min_instances
+        ? `Always ready for about ${s.min_instances * s.sessions_per_instance} sessions at once. Prepare for more.`
+        : 'Not prepared: the first bot of a study waits about 2 minutes for a machine.') + warning
+    );
   }
   return (
     `${s.ready_instances} of ${s.min_instances} machines ready, for about ` +

@@ -62,7 +62,7 @@ resource "aws_launch_template" "bots" {
 
 resource "aws_autoscaling_group" "bots" {
   name                  = "meetlab-v2-staging-bots"
-  min_size              = 0
+  min_size              = var.bot_pool_min
   max_size              = 2
   vpc_zone_identifier   = [for s in aws_subnet.private : s.id]
   protect_from_scale_in = true
@@ -81,9 +81,10 @@ resource "aws_autoscaling_group" "bots" {
     propagate_at_launch = true
   }
   lifecycle {
-    # ECS managed scaling owns the desired count; "Prepare for study" (capacity.py)
-    # owns the minimum, so a deploy mid-study doesn't reset a warm pool.
-    ignore_changes = [desired_capacity, min_size]
+    # ECS managed scaling owns the desired count. Terraform keeps the minimum at the
+    # baseline, so a deploy mid-study resets a prepared pool to it; machines running
+    # bots are never taken (managed termination protection). Merges avoid studies.
+    ignore_changes = [desired_capacity]
   }
 }
 

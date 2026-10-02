@@ -1,5 +1,4 @@
 import asyncio
-import json
 import os
 import re
 import sys
@@ -50,6 +49,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 import audio_tracks
 from config import load_config, require
 from db.config_loader import load_bot_config
+from chat import chat_message
 from heartbeat import beat_forever
 from presence import wait_until_empty
 from sessions import end
@@ -1153,7 +1153,7 @@ async def _bot(runner_args: LiveKitRunnerArguments):
 
     @transport.event_handler("on_data_received")
     async def on_data_received(transport, data, participant_id):
-        logger.info(f"Received data from participant {participant_id}: {data}")
+        logger.info(f"Received data from participant {participant_id} ({len(data)} bytes)")
         # Guard against race with on_participant_connected: if this sender isn't
         # in our SID→identity map yet, look them up directly from the room now.
         if participant_id not in _sid_to_identity:
@@ -1173,13 +1173,12 @@ async def _bot(runner_args: LiveKitRunnerArguments):
                             })
                             .on_conflict_do_nothing(index_elements=["id"])
                         )
-        _last_data_sender[0] = participant_id
-        try:
-            json_data = json.loads(data)
-        except Exception:
-            logger.warning(f"on_data_received: invalid JSON from {participant_id}")
+        chat = chat_message(data)
+        if chat is None:
+            logger.warning(f"on_data_received: not a chat message, ignored ({participant_id})")
             return
-        timestamp = json_data.get("timestamp", 0)
+        text, timestamp = chat
+        _last_data_sender[0] = participant_id
         await task.queue_frames(
             [
                 InterruptionFrame(),
@@ -1187,7 +1186,7 @@ async def _bot(runner_args: LiveKitRunnerArguments):
                 TranscriptionFrame(
                     user_id=participant_id,
                     timestamp=timestamp,
-                    text=json_data.get("message", ""),
+                    text=text,
                 ),
                 UserStoppedSpeakingFrame(),
             ],

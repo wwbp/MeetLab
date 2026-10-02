@@ -8,12 +8,16 @@ variables {
   image_tag = "0123abc"
 }
 
-run "the_bot_pool_starts_empty_on_a_small_instance" {
+run "the_bot_pool_keeps_one_small_machine_warm" {
   command = apply
 
   assert {
-    condition     = aws_autoscaling_group.bots.min_size == 0 && aws_launch_template.bots.instance_type == "c6i.large"
-    error_message = "staging bots: 0 instances until a test needs one, on the smallest size that runs them (LEDGER)"
+    condition     = aws_autoscaling_group.bots.min_size == 1 && aws_launch_template.bots.instance_type == "c6i.large"
+    error_message = "staging bots: one machine always warm (no 2-3 min cold start), on the smallest size that runs them (LEDGER)"
+  }
+  assert {
+    condition     = contains([for e in jsondecode(aws_ecs_task_definition.runner_app.container_definitions)[0].environment : "${e.name}=${e.value}"], "BOT_POOL_MIN=1")
+    error_message = "Prepare for study returns to the same baseline Terraform keeps"
   }
   assert {
     condition     = aws_autoscaling_group.bots.protect_from_scale_in && one(aws_ecs_capacity_provider.bots.auto_scaling_group_provider).managed_termination_protection == "ENABLED"

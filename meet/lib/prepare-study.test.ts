@@ -20,6 +20,13 @@ describe('describeCapacity', () => {
   });
 });
 
+describe('describeCapacity with the always-warm baseline', () => {
+  it('says how many sessions the warm machines hold before anything is prepared', () => {
+    expect(describeCapacity({ available: true, min_instances: 1, ready_instances: 1, sessions_per_instance: 3, warm_until: null }))
+      .toBe('Always ready for about 3 sessions at once. Prepare for more.');
+  });
+});
+
 describe('describeCapacity with a stuck machine', () => {
   it('asks for an engineer when a machine is stuck', () => {
     const text = describeCapacity({ available: true, min_instances: 0, ready_instances: 0, sessions_per_instance: 3, warm_until: null, unhealthy_instances: 1 });

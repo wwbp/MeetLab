@@ -46,37 +46,42 @@ class InstancesForTests(unittest.TestCase):
 class PrewarmTests(unittest.TestCase):
     def test_raises_the_minimum_and_schedules_its_return_to_zero(self):
         asg, until = _asg(), NOW + timedelta(hours=3)
-        capacity.prewarm(asg, GROUP, sessions=4, until=until, per_instance=3, now=NOW)
+        capacity.prewarm(asg, GROUP, sessions=4, until=until, per_instance=3, now=NOW, baseline=1)
         asg.update_auto_scaling_group.assert_called_once_with(AutoScalingGroupName=GROUP, MinSize=2)
         asg.put_scheduled_update_group_action.assert_called_once_with(
-            AutoScalingGroupName=GROUP, ScheduledActionName=capacity.SCHEDULE, StartTime=until, MinSize=0)
+            AutoScalingGroupName=GROUP, ScheduledActionName=capacity.SCHEDULE, StartTime=until, MinSize=1)
+
+    def test_never_prepares_below_the_always_warm_baseline(self):
+        asg = _asg()
+        capacity.prewarm(asg, GROUP, sessions=1, until=NOW + timedelta(hours=1), per_instance=3, now=NOW, baseline=2)
+        asg.update_auto_scaling_group.assert_called_once_with(AutoScalingGroupName=GROUP, MinSize=2)
 
     def test_says_when_the_group_cannot_hold_every_session(self):
         out = capacity.prewarm(_asg(max_size=2), GROUP, sessions=50, until=NOW + timedelta(hours=1),
-                               per_instance=3, now=NOW)
+                               per_instance=3, now=NOW, baseline=1)
         self.assertEqual((out["instances"], out["capped"]), (2, True))
 
     def test_refuses_an_end_time_in_the_past_or_more_than_a_day_away(self):
         # A forgotten warm pool costs money all night; a past end time would never fire.
         for until in (NOW - timedelta(minutes=1), NOW + timedelta(hours=25)):
             with self.assertRaises(ValueError):
-                capacity.prewarm(_asg(), GROUP, sessions=1, until=until, per_instance=3, now=NOW)
+                capacity.prewarm(_asg(), GROUP, sessions=1, until=until, per_instance=3, now=NOW, baseline=1)
 
     def test_refuses_fewer_than_one_session(self):
         with self.assertRaises(ValueError):
-            capacity.prewarm(_asg(), GROUP, sessions=0, until=NOW + timedelta(hours=1), per_instance=3, now=NOW)
+            capacity.prewarm(_asg(), GROUP, sessions=0, until=NOW + timedelta(hours=1), per_instance=3, now=NOW, baseline=1)
 
 
 class CancelTests(unittest.TestCase):
-    def test_drops_the_minimum_and_removes_the_scheduled_end(self):
+    def test_returns_to_the_baseline_and_removes_the_scheduled_end(self):
         asg = _asg(min_size=2, scheduled=NOW)
-        capacity.cancel(asg, GROUP)
-        asg.update_auto_scaling_group.assert_called_once_with(AutoScalingGroupName=GROUP, MinSize=0)
+        capacity.cancel(asg, GROUP, baseline=1)
+        asg.update_auto_scaling_group.assert_called_once_with(AutoScalingGroupName=GROUP, MinSize=1)
         asg.delete_scheduled_action.assert_called_once_with(AutoScalingGroupName=GROUP, ScheduledActionName=capacity.SCHEDULE)
 
     def test_cancelling_with_nothing_scheduled_is_fine(self):
         asg = _asg()
-        capacity.cancel(asg, GROUP)
+        capacity.cancel(asg, GROUP, baseline=1)
         asg.delete_scheduled_action.assert_not_called()
 
 

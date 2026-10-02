@@ -43,6 +43,7 @@ $7.1k in September, all lab projects). So this is priced from what runs:
 
 | Found | Item | Where | Why it matters |
 |---|---|---|---|
+| 2026-10-01 | **v1's egress key is far broader than egress needs**: IAM user `meetlab-egress-writer` has `s3:*` on the media bucket plus account-wide `s3:PutAccountPublicAccessBlock` and `s3:CreateJob`, and the key sits with LiveKit | v1 IAM (not Terraform) | Anyone holding that key can read and delete every study recording, or turn off the account's public-access block. Not changed: v1 is frozen. Rotate or narrow it before v1 carries another study |
 | 2026-10-02 | ~~Stop 0.5 s after start: the bot still joined~~ (fixed: a bot whose session is no longer running exits before joining) | ECS ListTasks did not yet show the just-started task, so the runner's /stop found nothing to stop; caught by acceptance `stop_early` after #107 | Timing-dependent; it had passed twice before |
 | 2026-10-01 | ~~Since 4c, console Record started video egress but never per-speaker audio capture~~ (fixed: the runner sets `recording_requested`, the bot reads it on its heartbeat) | `runner.start_recording_for_room` switched on a sink from its own in-process registry, empty once bots run as tasks | Up to 10 s of audio after Record is missed (one heartbeat) |
 | 2026-10-01 | The socket proxy passed a request to create an exec (400 from Docker, not 403 from the proxy); starting one is governed by `EXEC=0`, now set explicitly | `.devcontainer/docker-compose.yml` | Local laptop only; confirm exec start is refused before relying on it |
@@ -88,6 +89,9 @@ Also seen: managed scaling launched **two** instances for one pending task.
 
 | Date | Decision | Why | Revisit when |
 |---|---|---|---|
+| 2026-10-01 | Video egress uploads with a Terraform-made IAM user `meetlab-v2-staging-egress-writer` (PutObject + AbortMultipartUpload on `recordings/*` only, under the boundary); its access key is minted by a person into SSM and pasted nowhere else | LiveKit Cloud uploads from its own servers, so it needs a key; `assume_role_arn` is Enterprise-only and still needs a base key. Terraform never creates the key, so it is never in state, and CI can't mint one | LiveKit plan with assume-role; then drop the key |
+| 2026-10-01 | Only the runner gets the egress key (`EGRESS_S3_KEY_*`); bots and the runner otherwise use their task roles | The runner is what calls LiveKit egress; a bot never needs it | — |
+| 2026-10-01 | First-time deployment steps live in `docs/v2-deployment.md` | Steps a person does outside the pipeline (bootstrap, secrets, the egress key) were only in PR threads | — |
 | 2026-10-01 | Local bots run as Docker containers (`BOT_DISPATCHER=docker`, the default in compose): each copies the runner's own container with the `bot_task` command, through a socket proxy allowing only container create, start, stop and inspect | Mirrors one ECS task per meeting (D5); a local code edit reaches local bots through the shared mount | — |
 | 2026-10-01 | Docker stop is sent without waiting for the container to exit | Docker's stop blocks up to the 120 s grace, ECS StopTask returns at once; meet gives /stop 10 s | — |
 | 2026-10-01 | Console Stop goes through the runner (`/stop`: StopTask + close the session) before removing the participant | Removal alone did nothing before the bot joined, and the bot joined anyway (acceptance `stop_early`); removal also threw (500) when the bot wasn't in the room yet | — |

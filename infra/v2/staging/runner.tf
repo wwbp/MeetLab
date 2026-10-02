@@ -53,7 +53,11 @@ resource "aws_ecs_task_definition" "runner_app" {
       # heartbeat.py: a session silent for 30 s is failed; look every 10 s.
       { name = "CONVERSATION_RECONCILE_INTERVAL_SECONDS", value = "10" },
     ])
-    secrets = local.bot_secrets
+    # The runner requests video egress and sends LiveKit the write-only egress key
+    # with each request (egress.tf); bots never hold it. Minted by a person into SSM:
+    # docs/v2-deployment.md.
+    secrets = concat(local.bot_secrets, [for n in ["EGRESS_S3_KEY_ID", "EGRESS_S3_KEY_SECRET"] :
+    { name = n, valueFrom = "${local.parameters}/${n}" }])
     healthCheck = {
       command     = ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:7860/health')\""]
       interval    = 15

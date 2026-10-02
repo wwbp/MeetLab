@@ -169,3 +169,30 @@ class TestIsLocal(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestEgressKeys(unittest.TestCase):
+    """LiveKit Cloud egress writes from LiveKit's servers, so it needs a key; the
+    runner's own S3 calls use its task role. In v2 the two must not mix: a write-only
+    egress key used for the runner's reads would fail them (8b, 2026-10-02)."""
+
+    def test_egress_uses_its_own_key_when_set(self):
+        env = {"EGRESS_S3_KEY_ID": "egress-id", "EGRESS_S3_KEY_SECRET": "egress-secret",
+               "S3_KEY_ID": "", "S3_KEY_SECRET": ""}
+        with patch.dict(os.environ, env):
+            cfg = storage._cfg()
+        self.assertEqual((cfg["egress_key_id"], cfg["egress_key_secret"]), ("egress-id", "egress-secret"))
+
+    def test_the_runners_own_s3_calls_keep_using_the_task_role(self):
+        env = {"EGRESS_S3_KEY_ID": "egress-id", "EGRESS_S3_KEY_SECRET": "egress-secret",
+               "S3_KEY_ID": "", "S3_KEY_SECRET": "", "S3_REGION": "us-east-1"}
+        mock_boto = MagicMock()
+        with patch.dict(os.environ, env), patch.dict("sys.modules", {"boto3": mock_boto}):
+            storage._s3(storage._cfg())
+        self.assertNotIn("aws_access_key_id", mock_boto.client.call_args.kwargs)
+
+    def test_v1_s3_keys_still_serve_egress(self):
+        env = {"EGRESS_S3_KEY_ID": "", "EGRESS_S3_KEY_SECRET": "", "S3_KEY_ID": "v1-id", "S3_KEY_SECRET": "v1-secret"}
+        with patch.dict(os.environ, env):
+            cfg = storage._cfg()
+        self.assertEqual((cfg["egress_key_id"], cfg["egress_key_secret"]), ("v1-id", "v1-secret"))

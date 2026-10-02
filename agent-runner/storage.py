@@ -27,6 +27,11 @@ def _cfg() -> dict:
         "path": os.environ.get("RECORDINGS_PATH", "/recordings"),
         "key_id": os.environ.get("S3_KEY_ID"),
         "key_secret": os.environ.get("S3_KEY_SECRET"),
+        # LiveKit Cloud egress uploads from LiveKit's servers, so it needs a key of its
+        # own; v2 sets a write-only one here and keeps the runner on its task role.
+        # v1 has no EGRESS_ key and uses S3_KEY_* for both.
+        "egress_key_id": os.environ.get("EGRESS_S3_KEY_ID") or os.environ.get("S3_KEY_ID"),
+        "egress_key_secret": os.environ.get("EGRESS_S3_KEY_SECRET") or os.environ.get("S3_KEY_SECRET"),
         "bucket": os.environ.get("S3_BUCKET"),
         "region": os.environ.get("S3_REGION"),
         "endpoint": os.environ.get("S3_ENDPOINT") or None,

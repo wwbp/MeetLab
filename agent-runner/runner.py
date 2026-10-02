@@ -1041,20 +1041,21 @@ async def start_recording_for_room(room_name: str) -> tuple[int, dict]:
         return 400, {
             "error": (
                 "LiveKit Cloud requires S3 storage for recordings. "
-                "Set STORAGE_BACKEND=s3 and configure S3_KEY_ID, S3_KEY_SECRET, "
+                "Set STORAGE_BACKEND=s3 and configure EGRESS_S3_KEY_ID (or S3_KEY_ID), "
+                "EGRESS_S3_KEY_SECRET (or S3_KEY_SECRET), "
                 "S3_BUCKET, S3_REGION in the environment."
             )
         }
 
     if cfg["backend"] == "s3":
-        missing = [k for k in ("key_id", "key_secret", "bucket", "region") if not cfg[k]]
+        missing = [k for k in ("egress_key_id", "egress_key_secret", "bucket", "region") if not cfg[k]]
         if missing:
             return 500, {"error": f"S3 not fully configured: {missing}"}
         file_output = EncodedFileOutput(
             filepath=f"recordings/{filename}",
             s3=S3Upload(
-                access_key=cfg["key_id"],
-                secret=cfg["key_secret"],
+                access_key=cfg["egress_key_id"],
+                secret=cfg["egress_key_secret"],
                 bucket=cfg["bucket"],
                 region=cfg["region"],
                 **({"endpoint": cfg["endpoint"]} if cfg["endpoint"] else {}),

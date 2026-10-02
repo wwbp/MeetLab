@@ -319,9 +319,9 @@ run "acceptance_can_check_the_permission_contract_of_staging_roles_only" {
 
   assert {
     condition = anytrue([for s in jsondecode(aws_iam_role_policy.acceptance.policy).Statement :
-      contains(flatten([s.Action]), "iam:SimulatePrincipalPolicy") && flatten([s.Resource]) == ["arn:aws:iam::123456789012:role/meetlab-v2-staging-*"]
+      contains(flatten([s.Action]), "iam:SimulatePrincipalPolicy") && toset(flatten([s.Resource])) == toset(["arn:aws:iam::123456789012:role/meetlab-v2-staging-*", "arn:aws:iam::123456789012:user/meetlab-v2-staging-*"])
     ])
-    error_message = "permission_contract.py simulates meetlab-v2-staging-* roles, and only those"
+    error_message = "permission_contract.py simulates meetlab-v2-staging-* roles and users (the LiveKit egress user), and only those"
   }
 }
 

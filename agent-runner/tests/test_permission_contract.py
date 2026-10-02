@@ -51,6 +51,20 @@ class ContractTest(unittest.TestCase):
         self.assertIn(("meetlab-v2-staging-bot-task", "s3:PutObject"), needed)      # per-speaker audio
         self.assertIn(("meetlab-v2-staging-runner-task", "s3:GetObject"), needed)   # downloads
 
+    def test_the_livekit_egress_key_can_only_add_recordings(self):
+        # v1's egress key could read, list and delete every recording and switch off
+        # the account-wide S3 public-access block; v2's must not be able to.
+        egress = "user/meetlab-v2-staging-egress-writer"
+        self.assertIn((egress, "s3:PutObject"), {(c.role, c.action) for c in ALLOW})
+        forbidden = {(c.role, c.action) for c in DENY}
+        for action in ("s3:GetObject", "s3:DeleteObject", "s3:ListBucket", "s3:PutAccountPublicAccessBlock"):
+            self.assertIn((egress, action), forbidden)
+
+    def test_users_and_roles_are_simulated_by_their_own_arns(self):
+        from permission_contract import principal_arn
+        self.assertTrue(principal_arn("user/meetlab-v2-staging-egress-writer").endswith(":user/meetlab-v2-staging-egress-writer"))
+        self.assertTrue(principal_arn("meetlab-v2-staging-bot-task").endswith(":role/meetlab-v2-staging-bot-task"))
+
     def test_recordings_cannot_be_read_or_deleted_by_the_bot(self):
         forbidden = {(c.role, c.action) for c in DENY}
         self.assertIn(("meetlab-v2-staging-bot-task", "s3:DeleteObject"), forbidden)

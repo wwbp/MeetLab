@@ -39,6 +39,10 @@ Watch it under **Actions → Infra v2** on GitHub.
 
 ## Things only a person does
 
+**Log every one of these** in the "Manual actions" table in
+[`infra/v2/LEDGER.md`](https://github.com/wwbp/MeetLab/blob/v2/infra/v2/LEDGER.md):
+when, who, what, why. Never the secret itself.
+
 The pipeline's roles can't change their own permissions, can't read v1, and
 can't create access keys. That's on purpose; these steps are the price.
 

@@ -86,6 +86,19 @@ Also seen: managed scaling launched **two** instances for one pending task.
 | Database | `db.t4g.small`, single-AZ | Sized up, multi-AZ before a study |
 | NAT | one | One per AZ before production |
 
+## Manual actions (outside the pipeline)
+
+Everything else is applied by GitHub Actions. These were done by a person on purpose,
+because the pipeline is not allowed to; log each one here when it happens, so the
+next person knows what exists that no PR created. Never record secret values.
+
+| When (UTC) | Who | What | Why it was manual | Undo / rotate |
+|---|---|---|---|---|
+| 2026-10-02 02:51 | AbhaySingh | Minted the access key for `meetlab-v2-staging-egress-writer` straight into SSM `/meetlab-v2/staging/EGRESS_S3_KEY_ID` and `_SECRET` (both version 2; never displayed) | LiveKit Cloud needs a real key to upload video. CI is explicitly denied `iam:CreateAccessKey` so a PR can never mint credentials, and Terraform would keep the secret in its state. The AI assistant's session is also blocked from writing secrets | Rotate: [docs/v2-deployment.md](../../docs/v2-deployment.md) step 3. Deleting the user requires deleting this key first |
+| 2026-10-01 | AbhaySingh (run by the assistant on approval) | Placeholder values in the two `EGRESS_S3_KEY_*` parameters before #111 merged | ECS can't start agent-runner if a referenced parameter is missing | Replaced by the real key above |
+| 2026-10-01 | AbhaySingh (run by the assistant on approval) | `terraform apply` of `infra/v2/bootstrap` (egress user permissions) | Bootstrap holds CI's own permissions; CI must not be able to widen them | Re-apply bootstrap from `v2` |
+| 2026-09-30 | AbhaySingh | `infra/v2/seed-staging-secrets.sh`: vendor keys copied from v1 into SSM | CI can't read v1's settings, by design | Re-run with `--force` |
+
 ## Decisions
 
 | Date | Decision | Why | Revisit when |

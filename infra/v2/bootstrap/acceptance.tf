@@ -22,7 +22,7 @@ resource "aws_iam_role_policy" "acceptance" {
       {
         Effect   = "Allow"
         Action   = "ssm:GetParameter"
-        Resource = [for n in ["CONSOLE_PASSWORD", "LIVEKIT_URL", "LIVEKIT_API_KEY", "LIVEKIT_API_SECRET"] : "arn:aws:ssm:us-east-1:${local.account}:parameter/meetlab-v2/staging/${n}"]
+        Resource = [for n in ["CONSOLE_PASSWORD", "LIVEKIT_URL", "LIVEKIT_API_KEY", "LIVEKIT_API_SECRET", "SELFHOSTED_LIVEKIT_API_KEY", "SELFHOSTED_LIVEKIT_API_SECRET"] : "arn:aws:ssm:us-east-1:${local.account}:parameter/meetlab-v2/staging/${n}"]
       },
       {
         Effect    = "Allow"

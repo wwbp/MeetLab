@@ -101,6 +101,8 @@ jobs:
     permissions:
       contents: read
       id-token: write
+    outputs:
+      livekit: ${{ steps.livekit.outputs.livekit }}
     steps:
       - uses: actions/checkout@v4
       - uses: hashicorp/setup-terraform@v3
@@ -119,6 +121,11 @@ jobs:
       - name: Verify no drift after apply
         working-directory: infra/v2/staging
         run: terraform plan -input=false -no-color -detailed-exitcode -var="image_tag=${{ github.sha }}"
+      # Which LiveKit the live tests join (parameter names, never values), and whether it records video.
+      - name: LiveKit for the live tests
+        id: livekit
+        working-directory: infra/v2/staging
+        run: echo "livekit=$(terraform output -json livekit | jq -c .)" >> "$GITHUB_OUTPUT"
 
   # PRs: prove both images still build. No credentials.
   build:
@@ -213,8 +220,13 @@ jobs:
         run: |
           set -euo pipefail
           get() { aws ssm get-parameter --with-decryption --name "/meetlab-v2/staging/$1" --query Parameter.Value --output text; }
-          for n in CONSOLE_PASSWORD LIVEKIT_URL LIVEKIT_API_KEY LIVEKIT_API_SECRET; do
-            v="$(get "$n")"; echo "::add-mask::$v"; export "$n=$v"
-          done
+          secret() { v="$(get "$2")"; echo "::add-mask::$v"; export "$1=$v"; }
+          lk='${{ needs.apply.outputs.livekit }}'  # LiveKit Cloud, or our own (livekit.tf)
+          secret CONSOLE_PASSWORD CONSOLE_PASSWORD
+          secret LIVEKIT_API_KEY "$(jq -r .key_parameter <<<"$lk")"
+          secret LIVEKIT_API_SECRET "$(jq -r .secret_parameter <<<"$lk")"
+          url="$(jq -r '.url // empty' <<<"$lk")"
+          if [ -n "$url" ]; then export LIVEKIT_URL="$url"; else secret LIVEKIT_URL LIVEKIT_URL; fi
+          [ "$(jq -r .video <<<"$lk")" = true ] || export NO_VIDEO=1
           uv run --no-project --with livekit --with livekit-api --with boto3 \
             python agent-runner/tests/acceptance_staging.py

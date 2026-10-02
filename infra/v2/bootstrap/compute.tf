@@ -124,7 +124,7 @@ locals {
         Effect    = "Allow"
         Action    = "route53:ChangeResourceRecordSets"
         Resource  = data.aws_route53_zone.wwbp.arn
-        Condition = { "ForAllValues:StringEquals" = { "route53:ChangeResourceRecordSetsNormalizedRecordNames" = ["meet-staging.wwbp.org"] } }
+        Condition = { "ForAllValues:StringEquals" = { "route53:ChangeResourceRecordSetsNormalizedRecordNames" = ["meet-staging.wwbp.org", "livekit-staging.wwbp.org"] } }
       },
     ]
   })

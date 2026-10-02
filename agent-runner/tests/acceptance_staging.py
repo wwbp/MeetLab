@@ -508,4 +508,7 @@ async def _run(names):
 
 if __name__ == "__main__":
     names = sys.argv[1:] or list(SCENARIOS)
+    if os.getenv("NO_VIDEO"):  # self-hosted LiveKit has no egress server yet (livekit.tf)
+        print("not run (no video recording on this LiveKit): video_recording, auto_record", flush=True)
+        names = [n for n in names if n not in ("video_recording", "auto_record")]
     sys.exit(0 if asyncio.run(main(names)) else 1)

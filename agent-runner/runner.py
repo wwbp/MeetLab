@@ -520,6 +520,11 @@ def _prewarm_target():
             int(os.environ.get("BOTS_PER_INSTANCE", "3")))
 
 
+def _pool_baseline() -> int:
+    """Bot machines kept warm at all times (Terraform's bot_pool_min)."""
+    return int(os.environ.get("BOT_POOL_MIN", "0"))
+
+
 _LOCAL_BOTS = "bots run as local containers here; there is no pool to warm"
 
 
@@ -546,7 +551,7 @@ async def prewarm_capacity(request: Request, _=Depends(verify_api_key)):
             raise ValueError("sessions must be a whole number and until must carry a time zone")
         asg, ecs, cluster, group, per = target
         result = await asyncio.to_thread(capacity.prewarm, asg, group, sessions, until, per,
-                                         datetime.now(timezone.utc))
+                                         datetime.now(timezone.utc), _pool_baseline())
     except (KeyError, TypeError, ValueError) as e:
         return JSONResponse({"error": f"bad request: {e}"}, status_code=400)
     logger.info(f"bot pool pre-warmed: {sessions} sessions, {result['instances']} instance(s) until {until.isoformat()}")
@@ -559,7 +564,7 @@ async def cancel_prewarm(_=Depends(verify_api_key)):
     if target is None:
         return JSONResponse({"error": _LOCAL_BOTS}, status_code=409)
     asg, ecs, cluster, group, per = target
-    await asyncio.to_thread(capacity.cancel, asg, group)
+    await asyncio.to_thread(capacity.cancel, asg, group, _pool_baseline())
     logger.info("bot pool pre-warm cancelled")
     return {"available": True, **await asyncio.to_thread(capacity.status, asg, ecs, cluster, group, per)}
 

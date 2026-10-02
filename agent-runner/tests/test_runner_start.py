@@ -406,14 +406,14 @@ class RunnerStartApiTests(unittest.TestCase):
                 self.assertEqual(response.status_code, 400, (body, response.text))
         asg.update_auto_scaling_group.assert_not_called()
 
-    def test_cancel_prewarm_drops_the_minimum(self):
+    def test_cancel_prewarm_returns_to_the_always_warm_baseline(self):
         asg, _ = self._asg()
-        with mock.patch.dict(os.environ, {**self.ECS_ENV, "BOT_ASG_NAME": "meetlab-v2-staging-bots"}), \
+        with mock.patch.dict(os.environ, {**self.ECS_ENV, "BOT_ASG_NAME": "meetlab-v2-staging-bots", "BOT_POOL_MIN": "1"}), \
              mock.patch.object(self.runner_module, "_asg_client", return_value=asg), \
              mock.patch.object(self.runner_module, "_ecs_client", return_value=mock.Mock()):
             response = self.client.delete("/capacity/prewarm")
         self.assertEqual(response.status_code, 200, response.text)
-        asg.update_auto_scaling_group.assert_called_once_with(AutoScalingGroupName="meetlab-v2-staging-bots", MinSize=0)
+        asg.update_auto_scaling_group.assert_called_once_with(AutoScalingGroupName="meetlab-v2-staging-bots", MinSize=1)
 
     def test_local_bots_have_nothing_to_prewarm(self):
         # The class runs with the Docker dispatcher: each bot is a local container.

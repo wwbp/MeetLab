@@ -1,9 +1,9 @@
 """Pre-warming the bot pool before a study: the console's "Prepare for study".
 
-A cold bot takes 132 s to join (4c spike: instance boot, image pull), so before a
-study the bot group's minimum goes up, and an AWS scheduled action drops it back to 0
-at the end time. AWS does the expiry; nothing here has to remember it. Cancelling
-drops the minimum at once.
+A cold bot takes 2–3 min to join (instance boot, image pull), so a baseline of
+machines stays warm (BOT_POOL_MIN), and before a study the group's minimum goes up;
+an AWS scheduled action returns it to the baseline at the end time. AWS does the
+expiry; nothing here has to remember it. Cancelling returns to the baseline at once.
 
 ECS managed scaling still owns the desired count; it can't go below the minimum, and
 managed termination protection keeps instances with running bots on scale-in.
@@ -29,21 +29,22 @@ def _scheduled_end(asg, group: str):
     return actions[0]["StartTime"] if actions else None
 
 
-def prewarm(asg, group: str, sessions: int, until: datetime, per_instance: int, now: datetime) -> dict:
+def prewarm(asg, group: str, sessions: int, until: datetime, per_instance: int, now: datetime,
+            baseline: int) -> dict:
     if sessions < 1:
         raise ValueError("sessions must be at least 1")
     if not now < until <= now + MAX_WARM:
         raise ValueError("the end time must be in the future and within 24 hours")
     ceiling = _group(asg, group)["MaxSize"]
-    n = instances_for(sessions, per_instance, ceiling)
+    n = max(baseline, instances_for(sessions, per_instance, ceiling))
     asg.update_auto_scaling_group(AutoScalingGroupName=group, MinSize=n)
     asg.put_scheduled_update_group_action(
-        AutoScalingGroupName=group, ScheduledActionName=SCHEDULE, StartTime=until, MinSize=0)
+        AutoScalingGroupName=group, ScheduledActionName=SCHEDULE, StartTime=until, MinSize=baseline)
     return {"instances": n, "capped": n * per_instance < sessions}
 
 
-def cancel(asg, group: str) -> None:
-    asg.update_auto_scaling_group(AutoScalingGroupName=group, MinSize=0)
+def cancel(asg, group: str, baseline: int) -> None:
+    asg.update_auto_scaling_group(AutoScalingGroupName=group, MinSize=baseline)
     if _scheduled_end(asg, group) is not None:
         asg.delete_scheduled_action(AutoScalingGroupName=group, ScheduledActionName=SCHEDULE)
 

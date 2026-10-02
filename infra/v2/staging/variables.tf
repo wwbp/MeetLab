@@ -8,3 +8,9 @@ variable "stt_nim_enabled" {
   type        = bool
   default     = false # on for its first live test 2026-10-02 (#116, #117); passed
 }
+
+variable "bot_pool_min" {
+  description = "Bot machines kept warm at all times, so a bot joins in seconds, not 2-3 min ($62/month each)"
+  type        = number
+  default     = 1
+}

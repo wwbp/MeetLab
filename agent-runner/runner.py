@@ -453,6 +453,8 @@ async def start_bot(request: Request, _=Depends(verify_api_key)):
             logger.error(f"bot dispatch failed for {room_name}: {e}")
             return JSONResponse({"error": str(e), "session_id": session_id}, status_code=503)
         logger.info(f"Started bot {task_arn} for session {session_id}")
+        if (await load_bot_config(room_name)).auto_record:
+            _record_from_the_start(room_name)
         logger.info(f"Starting bot session {session_id} in room {room_name}")
 
         return {
@@ -465,6 +467,21 @@ async def start_bot(request: Request, _=Depends(verify_api_key)):
     except Exception as e:
         logger.error(f"Error starting bot: {e}\n{traceback.format_exc()}")
         return JSONResponse({"error": str(e)}, status_code=500)
+
+
+_RECORDING_STARTS: set = set()  # keep each background start alive until it finishes
+
+
+def _record_from_the_start(room_name: str) -> None:
+    """Auto-record: the room recording starts with the session, before the bot joins,
+    so its greeting is recorded. Here because only the runner holds the egress key."""
+    async def start():
+        status, payload = await start_recording_for_room(room_name)
+        logger.info(f"auto_record: {room_name} recording → {status} {payload}")
+
+    task = asyncio.create_task(start())
+    _RECORDING_STARTS.add(task)
+    task.add_done_callback(_RECORDING_STARTS.discard)
 
 
 @app.post("/stop")

@@ -295,6 +295,32 @@ class RunnerStartApiTests(unittest.TestCase):
         self.client.post("/stop", json={"room_name": room})
         self.assertIsNone(self.client.get(f"/rooms/{room}/session").json()["session"])
 
+    def _start_with_auto_record(self, on: bool):
+        import time as _time
+        from types import SimpleNamespace
+
+        started = mock.AsyncMock(return_value=(200, {}))
+        with mock.patch.object(self.runner_module, "load_bot_config",
+                               mock.AsyncMock(return_value=SimpleNamespace(auto_record=on))), \
+             mock.patch.object(self.runner_module, "start_recording_for_room", started):
+            room = _room("auto-record")
+            response = self.client.post("/start", json={"room_name": room})
+            deadline = _time.monotonic() + 2
+            while on and not started.await_count and _time.monotonic() < deadline:
+                _time.sleep(0.05)
+        self.assertEqual(response.status_code, 200, response.text)
+        return room, started
+
+    def test_auto_record_starts_the_room_recording_with_the_session(self):
+        # Before the bot joins, so its greeting is recorded; in the runner, which
+        # holds the egress key (the bot task does not: auto-record recorded no video).
+        room, started = self._start_with_auto_record(True)
+        started.assert_awaited_once_with(room)
+
+    def test_without_auto_record_nothing_is_recorded_at_start(self):
+        _, started = self._start_with_auto_record(False)
+        started.assert_not_awaited()
+
     def test_stopping_a_room_with_no_bot_is_not_an_error(self):
         response = self.client.post("/stop", json={"room_name": _room("never-started")})
         self.assertEqual(response.status_code, 200, response.text)

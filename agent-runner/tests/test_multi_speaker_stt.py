@@ -461,6 +461,18 @@ class TestMultiSpeakerSTTRouting(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(len(bob_tx) >= 1, "Expected at least one TranscriptionFrame for bob_sid")
         self.assertEqual(len(wrong), 0, f"Cross-contaminated transcriptions: {[f.user_id for f in wrong]}")
 
+    async def test_each_speakers_transcriber_hears_only_that_speaker(self):
+        """F11, layer 1: interleaved audio from two speakers. Routing must keep the audio
+        itself apart, not just copy the user_id (which the fake STT would echo anyway)."""
+        for i in range(20):
+            sid = ("alice_sid", "bob_sid")[i % 2]
+            frame = UserAudioRawFrame(audio=(b"A" if sid == "alice_sid" else b"B") * 320,
+                                      sample_rate=16000, num_channels=1, user_id=sid)
+            await self.multi_stt.process_frame(frame, FrameDirection.DOWNSTREAM)
+        await asyncio.sleep(0.05)
+        heard = {sid: {bytes(f.audio[:1]) for f in stt.received_audio} for sid, stt in self.multi_stt._stts.items()}
+        self.assertEqual(heard, {"alice_sid": {b"A"}, "bob_sid": {b"B"}})
+
     async def test_end_frame_clears_stts_and_pump(self):
         """EndFrame tears down all per-participant STTs and stops the pump task."""
         await self.multi_stt.process_frame(_make_audio_frame("alice_sid"), FrameDirection.DOWNSTREAM)

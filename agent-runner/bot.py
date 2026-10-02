@@ -6,7 +6,7 @@ import sys
 import time
 import uuid as _uuid_mod
 from dataclasses import replace
-from datetime import datetime, timezone
+from datetime import datetime
 
 from loguru import logger
 from PIL import Image
@@ -52,6 +52,7 @@ from config import load_config, require
 from db.config_loader import load_bot_config
 from heartbeat import beat_forever
 from presence import wait_until_empty
+from sessions import end
 from db.engine import AsyncSessionLocal
 from db.models import Conversation, MediaFile, Speaker, Utterance
 from interruption import InterruptionTracker
@@ -450,13 +451,9 @@ async def _finalize_conversation(session_id: str, status: str) -> None:
     one cancelled, we still wait for the shielded write to finish before re-raising.
     """
     async def _write() -> None:
-        async with AsyncSessionLocal() as db:
-            async with db.begin():
-                await db.execute(
-                    update(Conversation)
-                    .where(Conversation.id == session_id)
-                    .values(ended_at=datetime.now(timezone.utc), status=status)
-                )
+        # Compare-and-set (sessions.py): a session the sweep or Stop already ended keeps its status.
+        async with AsyncSessionLocal() as db, db.begin():
+            await end(db, [session_id], {"completed": "finished", "error": "crashed"}[status])
 
     write_task = asyncio.ensure_future(_write())
     try:

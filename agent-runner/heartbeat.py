@@ -11,6 +11,7 @@ from loguru import logger
 from sqlalchemy import select, update
 
 from db.models import Conversation
+from sessions import end
 
 BEAT = timedelta(seconds=10)
 TTL = timedelta(seconds=30)
@@ -70,11 +71,7 @@ async def fail_silent_sessions(db_factory, stop) -> list[str]:
     if not ids:
         return []
     async with db_factory() as db, db.begin():
-        closed = (await db.execute(
-            update(Conversation)
-            .where(Conversation.id.in_(ids), Conversation.status == "running")
-            .values(status="error", ended_at=now)
-            .returning(Conversation.id))).scalars().all()
+        closed = await end(db, ids, "silent")
     for sid in closed:
         try:
             stop(sid)

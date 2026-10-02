@@ -43,6 +43,7 @@ $7.1k in September, all lab projects). So this is priced from what runs:
 
 | Found | Item | Where | Why it matters |
 |---|---|---|---|
+| 2026-10-02 | ~~Stop 0.5 s after start: the bot still joined~~ (fixed: a bot whose session is no longer running exits before joining) | ECS ListTasks did not yet show the just-started task, so the runner's /stop found nothing to stop; caught by acceptance `stop_early` after #107 | Timing-dependent; it had passed twice before |
 | 2026-10-01 | ~~Since 4c, console Record started video egress but never per-speaker audio capture~~ (fixed: the runner sets `recording_requested`, the bot reads it on its heartbeat) | `runner.start_recording_for_room` switched on a sink from its own in-process registry, empty once bots run as tasks | Up to 10 s of audio after Record is missed (one heartbeat) |
 | 2026-10-01 | The socket proxy passed a request to create an exec (400 from Docker, not 403 from the proxy); starting one is governed by `EXEC=0`, now set explicitly | `.devcontainer/docker-compose.yml` | Local laptop only; confirm exec start is refused before relying on it |
 | 2026-10-01 | A bot alone in a room never leaves, so tests that start bots in empty rooms leave containers running | `bot.py` (design iteration 4, `should_leave`); `make test-unit` cleans them up | Same leak existed in-process, just invisible |

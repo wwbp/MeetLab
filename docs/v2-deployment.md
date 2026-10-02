@@ -128,15 +128,16 @@ Off by default: bots use Deepgram and the GPU costs nothing. To turn it on, open
 that sets `default = true` on `stt_nim_enabled` in `infra/v2/staging/variables.tf`,
 and merge it (merge = deploy). What happens:
 
-- A spot `g6.xlarge` starts, downloads the server and **builds the model: about
+- An on-demand `g6.xlarge` starts, downloads the server and **builds the model: about
   20–30 minutes** before it answers. Bots started meanwhile still point at it and
   their speech is not transcribed, so wait.
 - The `transcript` live test waits for it, then checks a bot's transcript came from it.
-- Turn it off again with a PR setting `default = false`. It costs about $0.30–0.45
-  per hour while on (spot price varies) plus a small load balancer.
+- Turn it off again with a PR setting `default = false`. It costs $0.805 per hour
+  while on (on-demand; spot was tried and AWS had none) plus a small load balancer,
+  so an hour-long test costs under $1. **Don't leave it on.**
 
-AWS can reclaim a spot GPU at any time; ECS then starts another (and the model
-build starts over).
+`g6.xlarge` is the smallest machine that can run it: the model needs 13.75 GB of GPU
+memory, and the fractional-GPU machines top out at 11.4 GB (ledger).
 
 ## Running the live tests yourself
 

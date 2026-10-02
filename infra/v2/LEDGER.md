@@ -23,7 +23,7 @@ $7.1k in September, all lab projects). So this is priced from what runs:
 
 | Added | PR | Resource | $/month | Notes |
 |---|---|---|---|---|
-| 2026-10-02 | STT NIM PR | Staging Parakeet NIM: `g6.xlarge` spot, 0 to 1, + internal NLB and 100 GB disk while on | 0 off | ~$0.30–0.45/hour spot + $0.03/hour NLB while on |
+| 2026-10-02 | #114, on-demand PR | Staging Parakeet NIM: `g6.xlarge` on-demand, 0 to 1, + internal NLB and 100 GB disk while on | 0 off | $0.805/hour + ~$0.03/hour NLB while on (an hour-long test ≈ $0.85) |
 | 2026-09-30 | 4c PR 1 | Bot pool: c6i.large, 0 to 2 instances | 0 idle | $0.085/hour each while bots run |
 | 2026-09-30 | #89 | agent-runner service + Service Connect namespace | ~0 | Shares the t3.medium; a rolling deploy may briefly add a second |
 | 2026-09-30 | #88 | ECS instance `t3.medium` + 30 GB disk | 33 | Services only; bots get their own group |
@@ -45,6 +45,7 @@ $7.1k in September, all lab projects). So this is priced from what runs:
 
 | Found | Item | Where | Why it matters |
 |---|---|---|---|
+| 2026-10-02 | The apply role still may launch spot instances (`spot-instances-request/*`), unused since the NIM went on-demand | `infra/v2/bootstrap/compute.tf` | Least privilege: drop it at the next bootstrap change |
 | 2026-10-01 | **v1's egress key is far broader than egress needs**: IAM user `meetlab-egress-writer` has `s3:*` on the media bucket plus account-wide `s3:PutAccountPublicAccessBlock` and `s3:CreateJob`, and the key sits with LiveKit | v1 IAM (not Terraform) | Anyone holding that key can read and delete every study recording, or turn off the account's public-access block. Not changed: v1 is frozen. Rotate or narrow it before v1 carries another study |
 | 2026-10-02 | ~~Stop 0.5 s after start: the bot still joined~~ (fixed: a bot whose session is no longer running exits before joining) | ECS ListTasks did not yet show the just-started task, so the runner's /stop found nothing to stop; caught by acceptance `stop_early` after #107 | Timing-dependent; it had passed twice before |
 | 2026-10-01 | ~~Since 4c, console Record started video egress but never per-speaker audio capture~~ (fixed: the runner sets `recording_requested`, the bot reads it on its heartbeat) | `runner.start_recording_for_room` switched on a sink from its own in-process registry, empty once bots run as tasks | Up to 10 s of audio after Record is missed (one heartbeat) |
@@ -81,7 +82,7 @@ Also seen: managed scaling launched **two** instances for one pending task.
 
 | Item | Staging now | At load testing |
 |---|---|---|
-| STT | Deepgram (`STT_MODEL_OVERRIDE`); NIM to come as `g6.xlarge` **spot**, 0 instances unless a test needs it (~$0.55/hour on) | On-demand or reserved NIM capacity, sized from the test |
+| STT | Deepgram (`STT_MODEL_OVERRIDE`) unless the NIM is switched on: `g6.xlarge` on-demand, 0 instances unless a test needs it ($0.805/hour on) | On-demand or reserved NIM capacity, sized from the test |
 | Bot pool | `c6i.large`, 0 to 2 | Instance type, floor and ceiling from measured per-session load |
 | Services instance | one `t3.medium` | Sized from the test |
 | Database | `db.t4g.small`, single-AZ | Sized up, multi-AZ before a study |
@@ -107,7 +108,9 @@ next person knows what exists that no PR created. Never record secret values.
 
 | Date | Decision | Why | Revisit when |
 |---|---|---|---|
-| 2026-10-02 | **Switched on 2026-10-02 for its first live test; switch off after.** Staging's Parakeet NIM is an ECS service on a spot `g6.xlarge` group (0 to 1), off unless `stt_nim_enabled`; then bots use it, else Deepgram | Same server and GPU as v1, so measurements carry over; ~$0 idle | Load tests: size it; before a study, on-demand or a warm instance |
+| 2026-10-02 | **STT NIM on on-demand `g6.xlarge`, not spot** (user's choice) | Spot never started: AWS's placement score for one spot g6.xlarge was 1/10 in every us-east-1 zone, and spot cost $0.56–0.68/hour against $0.805 on-demand, so it saved ~25% at best. Off by default, so on-demand costs only during tests | Before a study: reserved or savings-plan capacity if it runs for hours a day |
+| 2026-10-02 | `g6.xlarge` is the smallest instance that runs the Parakeet NIM | NVIDIA's ASR NIM support matrix: Parakeet 0.6b TDT offline needs 13.75 GB GPU memory, and the ASR NIM needs compute capability 8.0+ and 16 GB VRAM. Fractional L4s (g6f) top out at 11.4 GB, and NVIDIA doesn't document fractional GPU support; T4 (g4dn) is compute capability 7.5. g5.xlarge (A10G) also fits but costs $1.006/hour | NVIDIA ships a smaller profile, or load tests show several sessions per GPU |
+| 2026-10-02 | **Switched on 2026-10-02 for its first live test; switch off after.** Staging's Parakeet NIM is an ECS service on an on-demand `g6.xlarge` group (0 to 1), off unless `stt_nim_enabled`; then bots use it, else Deepgram | Same server and GPU as v1, so measurements carry over; ~$0 idle | Load tests: size it; before a study, on-demand or a warm instance |
 | 2026-10-02 | Bots reach the NIM through an internal network load balancer, created only while it runs | Bot tasks are one-off RunTask tasks and can't use Service Connect; an NLB is a stable address with health checks, and already within CI's load-balancer permissions | — |
 | 2026-10-02 | The NGC key is a Secrets Manager secret `meetlab-v2/staging/ngc` (`{"username":"$oauthtoken","password":...}`), stored by a person | ECS private-registry pulls need that shape; never in Terraform state | — |
 | 2026-10-02 | The model cache lives on the instance disk; each cold start rebuilds it (~20 min) | Simplest; staging runs it only for tests | Before a study: EFS cache or a warm instance |

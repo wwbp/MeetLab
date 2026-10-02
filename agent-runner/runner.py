@@ -389,7 +389,7 @@ async def start_bot(request: Request, _=Depends(verify_api_key)):
             bot_identity = f"bot_{_room_slug(room_name)}_{uuid.uuid4().hex[:10]}"
 
         # One task (ECS) or container (local Docker) per meeting (4c); there is no
-        # in-process bot (iteration 9). Refuse before a session row exists, so a
+        # in-process bot (removed in #113). Refuse before a session row exists, so a
         # misconfigured runner never leaves a 'running' session no bot will join.
         dispatcher = os.environ.get("BOT_DISPATCHER")
         if dispatcher not in ("ecs", "docker"):

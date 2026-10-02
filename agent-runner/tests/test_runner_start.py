@@ -349,7 +349,7 @@ class RunnerStartApiTests(unittest.TestCase):
         self.assertLess(took, 1.0, f"/stop waited {took:.1f}s for the container to exit")
 
     def test_without_a_dispatcher_start_refuses_and_leaves_no_running_session(self):
-        # The in-process path is gone (iteration 9): a runner with no dispatcher must
+        # The in-process path is gone (#113): a runner with no dispatcher must
         # say so, not leave a 'running' session that no bot will ever join.
         room = _room("no-dispatcher")
         env = {k: v for k, v in os.environ.items() if k != "BOT_DISPATCHER"}

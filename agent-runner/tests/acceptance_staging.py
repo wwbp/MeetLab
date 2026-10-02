@@ -19,6 +19,7 @@ room-gone cleanup can never be what closes a session and hide a failure.
                    preparing resets the pool; no bot machine is stuck unhealthy
   two_humans       two humans in before the bot, one leaves: the bot stays     (F1)
   refresh          the only human refreshes: the bot is still there after the grace
+  chat             a malformed packet is ignored; a chat message becomes a turn   (F13)
 
 A scenario that cannot reach its situation (e.g. the participant drops before the
 kill) is a FAIL, not a skip: an acceptance test that didn't test anything passed nothing.
@@ -412,11 +413,23 @@ async def scenario_refresh():
         return "the bot was still there after the refresh, past the rejoin grace"
 
 
+async def scenario_chat():
+    """Diagnosis F13: a packet that isn't chat is ignored; a chat message becomes a turn."""
+    async with Meeting() as m:
+        await asyncio.sleep(5)  # the greeting
+        await m.human.local_participant.publish_data(b"5", reliable=True, topic="lk-chat-topic")
+        message = {"id": uuid.uuid4().hex, "timestamp": int(time.time() * 1000), "message": "What is two plus two?"}
+        await m.human.local_participant.publish_data(json.dumps(message).encode(), reliable=True, topic="lk-chat-topic")
+        await _until(lambda: any("user utterance" in l for l in _log_lines("/meetlab-v2/staging/bot", m.session, m.started)),
+                     60, "the chat message stored as a user turn")
+        return "a malformed packet ignored; the chat message stored as a user turn"
+
+
 SCENARIOS = {"start": scenario_start, "stoptask": scenario_stoptask, "removed": scenario_removed,
              "kill9": scenario_kill9, "stop_early": scenario_stop_early,
              "audio_recording": scenario_audio_recording, "video_recording": scenario_video_recording,
              "transcript": scenario_transcript, "prewarm": scenario_prewarm,
-             "two_humans": scenario_two_humans, "refresh": scenario_refresh}
+             "two_humans": scenario_two_humans, "refresh": scenario_refresh, "chat": scenario_chat}
 
 
 SCENARIO_TIMEOUT = 600

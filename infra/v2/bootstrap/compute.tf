@@ -10,6 +10,7 @@ locals {
   arn      = "arn:aws:%s:us-east-1:${data.aws_caller_identity.current.account_id}:%s"
   roles    = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/meetlab-v2-staging-*"
   boundary = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:policy/meetlab-v2-boundary"
+  users    = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:user/meetlab-v2-staging-*"
 
   compute_read = jsonencode({
     Version = "2012-10-17"
@@ -36,6 +37,11 @@ locals {
           "arn:aws:iam::${local.account}:instance-profile/meetlab-v2-staging-*",
           "arn:aws:iam::aws:policy/*",
         ]
+      },
+      {
+        Effect   = "Allow"
+        Action   = ["iam:GetUser", "iam:GetUserPolicy", "iam:ListUserPolicies"]
+        Resource = local.users
       },
       {
         # The ECS-optimized AMI id is a public AWS parameter.
@@ -143,6 +149,20 @@ locals {
         Resource = local.roles
       },
       {
+        # The LiveKit egress user (staging egress.tf); a person mints its key.
+        Sid       = "CreateUsersOnlyWithTheBoundary"
+        Effect    = "Allow"
+        Action    = ["iam:CreateUser", "iam:PutUserPermissionsBoundary"]
+        Resource  = local.users
+        Condition = { StringEquals = { "iam:PermissionsBoundary" = local.boundary } }
+      },
+      {
+        Sid      = "ManageOwnUsers"
+        Effect   = "Allow"
+        Action   = ["iam:DeleteUser", "iam:TagUser", "iam:UntagUser", "iam:PutUserPolicy", "iam:DeleteUserPolicy"]
+        Resource = local.users
+      },
+      {
         Sid    = "OwnInstanceProfiles"
         Effect = "Allow"
         Action = [
@@ -168,6 +188,12 @@ locals {
         Sid      = "NoRoleLosesItsBoundary"
         Effect   = "Deny"
         Action   = "iam:DeleteRolePermissionsBoundary"
+        Resource = "*"
+      },
+      {
+        Sid      = "NoKeysNoUserLosesItsBoundary"
+        Effect   = "Deny"
+        Action   = ["iam:CreateAccessKey", "iam:UpdateAccessKey", "iam:DeleteUserPermissionsBoundary"]
         Resource = "*"
       },
     ]

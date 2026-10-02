@@ -37,6 +37,7 @@ $7.1k in September, all lab projects). So this is priced from what runs:
 
 | Since | Item | Why | Resume when |
 |---|---|---|---|
+| 2026-10-01 | **Self-hosting LiveKit (server + egress)** | Would remove the egress key (egress uploads with its own task role) and give staging its own media quota, but needs public UDP, TURN on 443, Redis, and about 3 CPUs per recorded room: ~$200/month on staging, ~$4.7k/month for 50 always-on recorders. Staying on LiveKit Cloud (Ship) for now | Load tests show Cloud's per-minute egress costs more than our own recorders, or we need to leave the vendor. Plan: L1 server + Redis, L2 egress, L3 TURN/TLS |
 | 2026-09-30 | **Load testing (50 / 100 sessions)** | Staging uses v1's vendor keys (OpenAI, ElevenLabs, Deepgram, LiveKit), which share v1's quotas and bill; an exhausted ElevenLabs quota makes bots silent with no error | Staging has its own keys, or free drop-in models for STT/TTS/LLM, so scale tests measure our infrastructure without spending vendor quota |
 
 ## Follow-ups found along the way
@@ -121,7 +122,7 @@ Also seen: managed scaling launched **two** instances for one pending task.
 | 2026-09-30 | Separate capacity providers for services and bots | Bots scale 0..N per study; meet and the control API stay up | — |
 | 2026-09-30 | Pipeline order: images → apply; apply waits for healthy services, and a failing deploy rolls back | The task definition points at the SHA just pushed | — |
 | 2026-09-30 | IMDSv2 required on instances | A container can't read the instance role with a plain GET | — |
-| 2026-09-30 | CI permissions are inline policies, at 7.1k of the 10.2k-character limit per role | Simplest while small | Move to managed policies when the next PR would pass the limit |
+| 2026-09-30 | CI permissions are inline policies, at 8.3k of the 10.2k-character limit per role (2026-10-01, after the egress user) | Simplest while small | Move to managed policies when the next PR would pass the limit |
 | 2026-09-30 | Images tagged with the git SHA, immutable; one image per service for every environment | A task definition's image can never change under it; staging and prod run the same bytes | — |
 | 2026-09-30 | The bot task reuses the agent-runner image with another command | One image to build and scan; the bot code already lives there | If the bot's dependencies diverge |
 | 2026-09-30 | One pipeline on `v2`: test → apply → images | Chained workflows only run from the default branch, and images need the repositories the apply creates | When `v2` becomes the default branch |

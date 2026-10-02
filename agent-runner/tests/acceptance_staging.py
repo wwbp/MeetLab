@@ -336,7 +336,9 @@ async def scenario_transcript():
         stream = f"bot/bot/{m.task.rsplit('/', 1)[-1]}"
         lines = [e["message"] for e in logs.filter_log_events(
             logGroupName="/meetlab-v2/staging/bot", logStreamNames=[stream], startTime=int(m.started * 1000))["events"]]
-        if not any("→ parakeet-tdt-0.6b-v2" in l for l in lines):
+        # Logged for every session ("override" is only logged when it differs from the
+        # stored config, and staging's stored default is already Parakeet).
+        if not any("STT: model=parakeet-" in l for l in lines):
             raise Fail("the bot did not use the NIM's model")
         if any("NemotronHTTPSTTService error" in l for l in lines):
             raise Fail("the NIM returned errors")

@@ -66,6 +66,18 @@ $7.1k in September, all lab projects). So this is priced from what runs:
 
 ## Measurements
 
+**Staging STT NIM cold start, 2026-10-02** (#117, on-demand `g6.xlarge`, NIM log timestamps):
+
+| Step | Time (UTC) | Elapsed |
+|---|---|---|
+| Instance launched | 05:51 | 0 |
+| Image pulled, model manifest cached | 05:58 | 7 min |
+| Model downloaded, TensorRT engine build starts | 05:59 | 8 min |
+| Engine built (one tactic hit out-of-memory at 16.2 GB and was skipped) | 06:11 | 20 min |
+| Healthy behind the NLB; first bot turn transcribed | ~06:14 | ~23 min |
+
+A warm NIM then transcribed an acceptance turn in a 21 s scenario, with no NIM errors. Cost of the test: about 50 min on, ~$0.70.
+
 **4c spike, 2026-10-01** (`agent-runner/tests/spike_dispatch.py`, bots started through staging meet, `c6i.large` pool):
 
 | Path | Start request → bot in LiveKit room | Where the time goes |
@@ -110,7 +122,7 @@ next person knows what exists that no PR created. Never record secret values.
 |---|---|---|---|
 | 2026-10-02 | **STT NIM on on-demand `g6.xlarge`, not spot** (user's choice) | Spot never started: AWS's placement score for one spot g6.xlarge was 1/10 in every us-east-1 zone, and spot cost $0.56–0.68/hour against $0.805 on-demand, so it saved ~25% at best. Off by default, so on-demand costs only during tests | Before a study: reserved or savings-plan capacity if it runs for hours a day |
 | 2026-10-02 | `g6.xlarge` is the smallest instance that runs the Parakeet NIM | NVIDIA's ASR NIM support matrix: Parakeet 0.6b TDT offline needs 13.75 GB GPU memory, and the ASR NIM needs compute capability 8.0+ and 16 GB VRAM. Fractional L4s (g6f) top out at 11.4 GB, and NVIDIA doesn't document fractional GPU support; T4 (g4dn) is compute capability 7.5. g5.xlarge (A10G) also fits but costs $1.006/hour | NVIDIA ships a smaller profile, or load tests show several sessions per GPU |
-| 2026-10-02 | **Switched on 2026-10-02 for its first live test; switch off after.** Staging's Parakeet NIM is an ECS service on an on-demand `g6.xlarge` group (0 to 1), off unless `stt_nim_enabled`; then bots use it, else Deepgram | Same server and GPU as v1, so measurements carry over; ~$0 idle | Load tests: size it; before a study, on-demand or a warm instance |
+| 2026-10-02 | First live test passed 2026-10-02 (bots transcribed by it, no NIM errors); switched off again. Staging's Parakeet NIM is an ECS service on an on-demand `g6.xlarge` group (0 to 1), off unless `stt_nim_enabled`; then bots use it, else Deepgram | Same server and GPU as v1, so measurements carry over; ~$0 idle | Load tests: size it; before a study, on-demand or a warm instance |
 | 2026-10-02 | Bots reach the NIM through an internal network load balancer, created only while it runs | Bot tasks are one-off RunTask tasks and can't use Service Connect; an NLB is a stable address with health checks, and already within CI's load-balancer permissions | — |
 | 2026-10-02 | The NGC key is a Secrets Manager secret `meetlab-v2/staging/ngc` (`{"username":"$oauthtoken","password":...}`), stored by a person | ECS private-registry pulls need that shape; never in Terraform state | — |
 | 2026-10-02 | The model cache lives on the instance disk; each cold start rebuilds it (~20 min) | Simplest; staging runs it only for tests | Before a study: EFS cache or a warm instance |

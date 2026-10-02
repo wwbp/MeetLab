@@ -6,5 +6,5 @@ variable "image_tag" {
 variable "stt_nim_enabled" {
   description = "Run staging's Parakeet NIM (an on-demand g6.xlarge, $0.805/hour) and point bots at it; off = Deepgram"
   type        = bool
-  default     = true # on for its first live test (2026-10-02); off again after
+  default     = false # on for its first live test 2026-10-02 (#116, #117); passed
 }

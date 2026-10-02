@@ -52,7 +52,7 @@ resource "aws_iam_role_policy" "acceptance" {
         # agent-runner/tests/permission_contract.py
         Effect   = "Allow"
         Action   = "iam:SimulatePrincipalPolicy"
-        Resource = "arn:aws:iam::${local.account}:role/meetlab-v2-staging-*"
+        Resource = ["arn:aws:iam::${local.account}:role/meetlab-v2-staging-*", "arn:aws:iam::${local.account}:user/meetlab-v2-staging-*"]
       },
       {
         Effect   = "Allow"

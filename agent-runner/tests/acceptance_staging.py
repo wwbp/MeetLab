@@ -10,6 +10,9 @@ room-gone cleanup can never be what closes a session and hide a failure.
   kill9      kill -9 inside the task (ECS Exec): exit 137, and the heartbeat check
              fails the session within 60 s while the participant is still there, and
              is able to stop its task (a hung bot must not keep running)              (4c PR 5)
+  stop_early       Stop before the bot joins: it never joins, and its task stops
+  audio_recording  per-speaker audio reaches the media bucket through the bot's role  (8a)
+  video_recording  LiveKit egress uploads the room's mp4 with the egress key          (8b)
 
 A scenario that cannot reach its situation (e.g. the participant drops before the
 kill) is a FAIL, not a skip: an acceptance test that didn't test anything passed nothing.
@@ -266,9 +269,26 @@ async def scenario_audio_recording():
         return f"{len(audio_in_bucket())} audio file(s) in s3://{MEDIA_BUCKET}/recordings/"
 
 
+async def scenario_video_recording():
+    """Record pressed, someone speaks, Stop recording pressed: LiveKit's composite
+    egress must upload the room's mp4 to the media bucket with the write-only egress
+    key (8b). Failing to start is a FAIL: every session needs its video."""
+    s3 = boto3.client("s3", region_name=REGION)
+    async with Meeting() as m:
+        _web.open(urllib.request.Request(f"{MEET}/api/record/start?roomName={m.room}"), timeout=30)
+        await _speak(m.human, 15)
+        _web.open(urllib.request.Request(f"{MEET}/api/record/stop?roomName={m.room}"), timeout=30)
+
+        def video_in_bucket():
+            listed = s3.list_objects_v2(Bucket=MEDIA_BUCKET, Prefix="recordings/").get("Contents", [])
+            return [o["Key"] for o in listed if m.room in o["Key"] and o["Key"].endswith("-recording.mp4")]
+        await _until(video_in_bucket, 180, "the room's mp4 in the media bucket")
+        return f"{video_in_bucket()[0]} in s3://{MEDIA_BUCKET}"
+
+
 SCENARIOS = {"start": scenario_start, "stoptask": scenario_stoptask, "removed": scenario_removed,
              "kill9": scenario_kill9, "stop_early": scenario_stop_early,
-             "audio_recording": scenario_audio_recording}
+             "audio_recording": scenario_audio_recording, "video_recording": scenario_video_recording}
 
 
 SCENARIO_TIMEOUT = 600

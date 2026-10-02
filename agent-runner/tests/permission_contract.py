@@ -10,7 +10,7 @@ Adding an AWS call to the code means adding it here.
 
     uv run --no-project --with boto3 python agent-runner/tests/permission_contract.py
 
-Needs iam:SimulatePrincipalPolicy on the meetlab-v2-staging-* roles.
+Needs iam:SimulatePrincipalPolicy on the meetlab-v2-staging-* roles and users.
 """
 import os
 import sys
@@ -22,6 +22,7 @@ CLUSTER = f"{ARN}:cluster/meetlab-v2-staging"
 OTHER_CLUSTER = f"{ARN}:cluster/bcfg-twilio-bot-dev-Cluster-c7MF3TrrR6WL"  # another lab project
 ROLE = f"arn:aws:iam::{ACCOUNT}:role"
 RUNNER, BOT = "meetlab-v2-staging-runner-task", "meetlab-v2-staging-bot-task"
+EGRESS = "user/meetlab-v2-staging-egress-writer"  # LiveKit uploads video with its key
 IN_CLUSTER = {"ecs:cluster": CLUSTER}
 MEDIA = f"arn:aws:s3:::meetlab-v2-staging-media-{ACCOUNT}"
 TO_ECS = {"iam:PassedToService": "ecs-tasks.amazonaws.com"}
@@ -46,6 +47,9 @@ ALLOW = [
     # storage.py: per-speaker audio written by the bot, read back by the runner
     Call(BOT, "s3:PutObject", f"{MEDIA}/recordings/speaker.wav"),
     Call(RUNNER, "s3:GetObject", f"{MEDIA}/recordings/speaker.wav"),
+    # LiveKit Cloud egress, with the key the runner sends in each recording request
+    Call(EGRESS, "s3:PutObject", f"{MEDIA}/recordings/room-recording.mp4"),
+    Call(EGRESS, "s3:AbortMultipartUpload", f"{MEDIA}/recordings/room-recording.mp4"),
     # ECS Exec into a bot (the kill9 acceptance scenario; debugging)
     *[Call(BOT, f"ssmmessages:{a}", "*") for a in
       ("CreateControlChannel", "CreateDataChannel", "OpenControlChannel", "OpenDataChannel")],
@@ -61,6 +65,11 @@ DENY = [
     Call(BOT, "s3:DeleteObject", f"{MEDIA}/recordings/speaker.wav"),
     Call(BOT, "s3:PutObject", f"{MEDIA}/elsewhere/speaker.wav"),
     Call(RUNNER, "s3:PutObject", f"{MEDIA}/recordings/speaker.wav"),
+    Call(EGRESS, "s3:GetObject", f"{MEDIA}/recordings/room-recording.mp4"),
+    Call(EGRESS, "s3:DeleteObject", f"{MEDIA}/recordings/room-recording.mp4"),
+    Call(EGRESS, "s3:ListBucket", MEDIA),
+    Call(EGRESS, "s3:PutObject", f"{MEDIA}/elsewhere/room-recording.mp4"),
+    Call(EGRESS, "s3:PutAccountPublicAccessBlock", "*"),  # v1's egress key could
     Call(RUNNER, "s3:DeleteObject", f"{MEDIA}/recordings/speaker.wav"),
     Call(BOT, "ssm:GetParameter", f"arn:aws:ssm:us-east-1:{ACCOUNT}:parameter/copilot/bcfg-twilio-bot/dev/secrets/OPENAI_API_KEY"),
 ]
@@ -80,10 +89,15 @@ def violations(allow, deny, simulate):
     return out
 
 
+def principal_arn(principal: str) -> str:
+    """'user/<name>' is an IAM user; anything else is a role name."""
+    return f"arn:aws:iam::{ACCOUNT}:{principal}" if principal.startswith("user/") else f"{ROLE}/{principal}"
+
+
 def iam_simulate(iam):
     def simulate(c: Call) -> str:
         r = iam.simulate_principal_policy(
-            PolicySourceArn=f"{ROLE}/{c.role}", ActionNames=[c.action], ResourceArns=[c.resource],
+            PolicySourceArn=principal_arn(c.role), ActionNames=[c.action], ResourceArns=[c.resource],
             ContextEntries=[{"ContextKeyName": k, "ContextKeyValues": [v], "ContextKeyType": "string"}
                             for k, v in c.context.items()])
         return r["EvaluationResults"][0]["EvalDecision"]

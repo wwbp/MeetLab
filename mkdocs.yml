@@ -27,6 +27,7 @@ nav:
       - Performance tests: performance-tests.md
       - Meeting simulations: meeting-simulations.md
       - Parakeet soak tests: test-plan-parakeet-soak.md
+      - Deploying v2 (first time): v2-deployment.md
   - Historical investigations:
       - Latency experiments: latency-experiments.md
       - GPU deployment: gpu-stt-deployment.md

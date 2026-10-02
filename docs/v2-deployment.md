@@ -1,0 +1,127 @@
+# Deploying v2 (staging) — a first-timer's guide
+
+v2 is MeetLab rebuilt as code: every AWS resource is in Terraform under `infra/v2/`,
+and GitHub Actions deploys it. Nobody clicks around the AWS console or runs
+`terraform apply` against staging by hand. This page is what you need the first
+time you deploy, and the few steps a **person** has to do because the pipeline is
+deliberately not allowed to.
+
+- Staging: <https://meet-staging.wwbp.org> (console at `/console`)
+- Branch: `v2`. **Never merge v2 work into `main`** — `main` is v1 and is frozen.
+- Decisions, costs and known issues: [`infra/v2/LEDGER.md`](https://github.com/wwbp/MeetLab/blob/v2/infra/v2/LEDGER.md)
+
+## How a deploy happens
+
+```mermaid
+flowchart LR
+  PR[PR into v2] --> T[tests + terraform plan<br/>posted on the PR]
+  T --> M[merge = deploy]
+  M --> I[build images<br/>tagged with the commit]
+  I --> A[terraform apply<br/>waits for healthy services]
+  A --> C[permission contract<br/>+ live acceptance tests]
+```
+
+1. Open a PR into `v2`. CI runs the unit and Terraform tests and posts the
+   Terraform plan as a comment. **Read the plan**: anything "destroy" or "replace"
+   on the database, bucket or load balancer deserves a second look.
+2. **Merging is the deploy.** There is no separate approval button (GitHub's free
+   plan has none for private repos).
+3. Every merge restarts the services, so a call in progress can drop. **Time
+   merges around studies.** Instances also pick up the latest Amazon ECS image on
+   replacement; we chose not to pin it.
+4. After the apply, the `acceptance` job checks every AWS permission the code uses
+   (and ones it must never have), then runs real meetings against staging: a bot
+   joins, is stopped several ways, is killed, and recordings land in S3. A red
+   acceptance job means the deploy is live but broken — look at it before the
+   next merge.
+
+Watch it under **Actions → Infra v2** on GitHub.
+
+## Things only a person does
+
+The pipeline's roles can't change their own permissions, can't read v1, and
+can't create access keys. That's on purpose; these steps are the price.
+
+### 1. Bootstrap (once, and whenever CI needs new permissions)
+
+`infra/v2/bootstrap/` holds the CI roles and the permissions boundary. It is
+applied from a laptop by someone with admin rights in the AWS account:
+
+```bash
+cd infra/v2/bootstrap
+terraform init
+terraform plan     # read it: only meetlab-v2-* roles and policies should change
+terraform apply
+```
+
+When a PR changes `bootstrap/`, apply it **before** merging that PR, or the
+pipeline will fail with "AccessDenied".
+
+### 2. Secrets (once per environment)
+
+Vendor keys live in SSM Parameter Store under `/meetlab-v2/staging/`. They are
+never in Terraform or in the repo. To fill them (copies v1's keys, generates the
+rest, prints no values):
+
+```bash
+infra/v2/seed-staging-secrets.sh
+```
+
+Staging uses v1's vendor keys for sanity checks only — **no load tests** on them
+(see "On hold" in the ledger).
+
+### 3. The video-recording key for LiveKit
+
+LiveKit Cloud records the room on *its* servers and uploads the mp4 to our bucket,
+so it needs an AWS access key. Terraform creates a user for this,
+`meetlab-v2-staging-egress-writer`, that can **only add files under
+`recordings/`** — it can't read, list or delete anything. Terraform does **not**
+create its key (a key in Terraform would sit in the state file). You mint it:
+
+```bash
+# once the egress user exists (after the PR that adds it is applied)
+aws iam create-access-key --user-name meetlab-v2-staging-egress-writer \
+  --query 'AccessKey.[AccessKeyId,SecretAccessKey]' --output text \
+| { read -r id secret
+    aws ssm put-parameter --name /meetlab-v2/staging/EGRESS_S3_KEY_ID     --type SecureString --overwrite --value "$id"
+    aws ssm put-parameter --name /meetlab-v2/staging/EGRESS_S3_KEY_SECRET --type SecureString --overwrite --value "$secret"; }
+```
+
+The key goes straight into SSM and is never shown. agent-runner hands it to
+LiveKit with each recording request, so there is nothing to paste into LiveKit's
+dashboard.
+
+!!! warning "Order matters"
+    agent-runner won't start if those two parameters are missing (ECS can't
+    fetch the secret). Before the very first deploy that needs them, put
+    placeholder values in, deploy, mint the real key, then force a new
+    deployment of agent-runner (or just merge the next PR).
+
+**Rotating the key:** create a second key (a user may have two), write it to SSM
+with the command above, redeploy agent-runner, then delete the old key with
+`aws iam delete-access-key`.
+
+## Running the live tests yourself
+
+The same tests CI runs, from your laptop:
+
+```bash
+CONSOLE_PASSWORD=... LIVEKIT_URL=... LIVEKIT_API_KEY=... LIVEKIT_API_SECRET=... \
+caffeinate -i uv run --no-project --with livekit --with livekit-api --with boto3 \
+  python agent-runner/tests/acceptance_staging.py video_recording
+```
+
+Leave out the scenario name to run all of them. Offline infra tests:
+`make test-infra`.
+
+## Gotchas we've hit
+
+| Symptom | Cause | What to do |
+|---|---|---|
+| Live tests time out at random from a laptop | The Mac slept; signatures and sockets expired | `caffeinate -i`, or rely on the CI acceptance job |
+| `pnpm test:api` fails tests with 429 | Start-link rate limit, 5 per minute | Wait a minute between runs |
+| Local `make start` can't bind port 3000 | Another app holds it | Stop the other app, then `docker compose ... up -d --force-recreate meet` |
+| Local tests pass/fail on code you already changed | Dev containers serve stale mounts | Restart the container before trusting a result |
+| Bot joins but never speaks, no errors | ElevenLabs quota used up | Check the ElevenLabs subscription before blaming the deploy |
+| Pipeline "AccessDenied" right after a merge | The PR needed bootstrap permissions that weren't applied yet | Apply bootstrap (step 1), re-run the job |
+| Bot containers left running locally | A bot alone in a room never leaves | `make down` cleans them up |

@@ -222,9 +222,9 @@ run "ci_can_only_create_roles_that_carry_the_boundary" {
   assert {
     condition = alltrue([for s in flatten([for p in aws_iam_role_policy.apply : jsondecode(p.policy).Statement]) :
       try(s.Condition.StringEquals["iam:PermissionsBoundary"], "") == "arn:aws:iam::123456789012:policy/meetlab-v2-boundary"
-      if s.Effect == "Allow" && anytrue([for a in flatten([s.Action]) : contains(["iam:CreateRole", "iam:PutRolePermissionsBoundary"], a)])
+      if s.Effect == "Allow" && anytrue([for a in flatten([s.Action]) : contains(["iam:CreateRole", "iam:PutRolePermissionsBoundary", "iam:CreateUser", "iam:PutUserPermissionsBoundary"], a)])
     ])
-    error_message = "CreateRole must require meetlab-v2-boundary"
+    error_message = "CreateRole and CreateUser must require meetlab-v2-boundary"
   }
 }
 
@@ -250,6 +250,37 @@ run "ci_cannot_touch_its_own_roles_or_the_boundary" {
     condition = anytrue([for s in flatten([for p in aws_iam_role_policy.apply : jsondecode(p.policy).Statement]) :
     s.Effect == "Deny" && contains(flatten([s.Action]), "iam:DeleteRolePermissionsBoundary")])
     error_message = "no role may lose its boundary"
+  }
+}
+
+# The LiveKit egress user (staging egress.tf). CI manages the user and its policy;
+# its access key is minted by a person (docs/v2-deployment.md), so CI never holds one.
+run "ci_manages_only_staging_users_and_never_their_keys" {
+  command = plan
+
+  assert {
+    condition = alltrue([for s in flatten([for p in aws_iam_role_policy.apply : jsondecode(p.policy).Statement]) :
+      flatten([s.Resource]) == ["arn:aws:iam::123456789012:user/meetlab-v2-staging-*"]
+      if s.Effect == "Allow" && anytrue([for a in flatten([s.Action]) : strcontains(a, "User")])
+    ])
+    error_message = "user actions reach only meetlab-v2-staging-* users"
+  }
+  assert {
+    condition = length([for s in flatten([for p in aws_iam_role_policy.apply : jsondecode(p.policy).Statement]) : s
+    if s.Effect == "Allow" && contains(flatten([s.Action]), "iam:CreateUser")]) == 1
+    error_message = "the apply role can create the egress user"
+  }
+  assert {
+    condition = anytrue([for s in flatten([for p in aws_iam_role_policy.apply : jsondecode(p.policy).Statement]) :
+      s.Effect == "Deny" && flatten([s.Resource]) == ["*"] &&
+      alltrue([for a in ["iam:CreateAccessKey", "iam:UpdateAccessKey", "iam:DeleteUserPermissionsBoundary"] : contains(flatten([s.Action]), a)])
+    ])
+    error_message = "CI must never mint or revive an access key, or strip a user's boundary"
+  }
+  assert {
+    condition = alltrue([for a in ["iam:GetUser", "iam:GetUserPolicy", "iam:ListUserPolicies"] :
+    contains(flatten([for p in aws_iam_role_policy.plan : [for s in jsondecode(p.policy).Statement : s.Action]]), a)])
+    error_message = "plan needs to refresh the egress user"
   }
 }
 
@@ -319,9 +350,9 @@ run "acceptance_can_check_the_permission_contract_of_staging_roles_only" {
 
   assert {
     condition = anytrue([for s in jsondecode(aws_iam_role_policy.acceptance.policy).Statement :
-      contains(flatten([s.Action]), "iam:SimulatePrincipalPolicy") && flatten([s.Resource]) == ["arn:aws:iam::123456789012:role/meetlab-v2-staging-*"]
+      contains(flatten([s.Action]), "iam:SimulatePrincipalPolicy") && toset(flatten([s.Resource])) == toset(["arn:aws:iam::123456789012:role/meetlab-v2-staging-*", "arn:aws:iam::123456789012:user/meetlab-v2-staging-*"])
     ])
-    error_message = "permission_contract.py simulates meetlab-v2-staging-* roles, and only those"
+    error_message = "permission_contract.py simulates meetlab-v2-staging-* roles and users (the LiveKit egress user), and only those"
   }
 }
 

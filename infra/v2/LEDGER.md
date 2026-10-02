@@ -37,12 +37,14 @@ $7.1k in September, all lab projects). So this is priced from what runs:
 
 | Since | Item | Why | Resume when |
 |---|---|---|---|
+| 2026-10-01 | **Self-hosting LiveKit (server + egress)** | Would remove the egress key (egress uploads with its own task role) and give staging its own media quota, but needs public UDP, TURN on 443, Redis, and about 3 CPUs per recorded room: ~$200/month on staging, ~$4.7k/month for 50 always-on recorders. Staying on LiveKit Cloud (Ship) for now | Load tests show Cloud's per-minute egress costs more than our own recorders, or we need to leave the vendor. Plan: L1 server + Redis, L2 egress, L3 TURN/TLS |
 | 2026-09-30 | **Load testing (50 / 100 sessions)** | Staging uses v1's vendor keys (OpenAI, ElevenLabs, Deepgram, LiveKit), which share v1's quotas and bill; an exhausted ElevenLabs quota makes bots silent with no error | Staging has its own keys, or free drop-in models for STT/TTS/LLM, so scale tests measure our infrastructure without spending vendor quota |
 
 ## Follow-ups found along the way
 
 | Found | Item | Where | Why it matters |
 |---|---|---|---|
+| 2026-10-01 | **v1's egress key is far broader than egress needs**: IAM user `meetlab-egress-writer` has `s3:*` on the media bucket plus account-wide `s3:PutAccountPublicAccessBlock` and `s3:CreateJob`, and the key sits with LiveKit | v1 IAM (not Terraform) | Anyone holding that key can read and delete every study recording, or turn off the account's public-access block. Not changed: v1 is frozen. Rotate or narrow it before v1 carries another study |
 | 2026-10-02 | ~~Stop 0.5 s after start: the bot still joined~~ (fixed: a bot whose session is no longer running exits before joining) | ECS ListTasks did not yet show the just-started task, so the runner's /stop found nothing to stop; caught by acceptance `stop_early` after #107 | Timing-dependent; it had passed twice before |
 | 2026-10-01 | ~~Since 4c, console Record started video egress but never per-speaker audio capture~~ (fixed: the runner sets `recording_requested`, the bot reads it on its heartbeat) | `runner.start_recording_for_room` switched on a sink from its own in-process registry, empty once bots run as tasks | Up to 10 s of audio after Record is missed (one heartbeat) |
 | 2026-10-01 | The socket proxy passed a request to create an exec (400 from Docker, not 403 from the proxy); starting one is governed by `EXEC=0`, now set explicitly | `.devcontainer/docker-compose.yml` | Local laptop only; confirm exec start is refused before relying on it |
@@ -88,6 +90,9 @@ Also seen: managed scaling launched **two** instances for one pending task.
 
 | Date | Decision | Why | Revisit when |
 |---|---|---|---|
+| 2026-10-01 | Video egress uploads with a Terraform-made IAM user `meetlab-v2-staging-egress-writer` (PutObject + AbortMultipartUpload on `recordings/*` only, under the boundary); its access key is minted by a person into SSM and pasted nowhere else | LiveKit Cloud uploads from its own servers, so it needs a key; `assume_role_arn` is Enterprise-only and still needs a base key. Terraform never creates the key, so it is never in state, and CI can't mint one | LiveKit plan with assume-role; then drop the key |
+| 2026-10-01 | Only the runner gets the egress key (`EGRESS_S3_KEY_*`); bots and the runner otherwise use their task roles | The runner is what calls LiveKit egress; a bot never needs it | — |
+| 2026-10-01 | First-time deployment steps live in `docs/v2-deployment.md` | Steps a person does outside the pipeline (bootstrap, secrets, the egress key) were only in PR threads | — |
 | 2026-10-01 | Local bots run as Docker containers (`BOT_DISPATCHER=docker`, the default in compose): each copies the runner's own container with the `bot_task` command, through a socket proxy allowing only container create, start, stop and inspect | Mirrors one ECS task per meeting (D5); a local code edit reaches local bots through the shared mount | — |
 | 2026-10-01 | Docker stop is sent without waiting for the container to exit | Docker's stop blocks up to the 120 s grace, ECS StopTask returns at once; meet gives /stop 10 s | — |
 | 2026-10-01 | Console Stop goes through the runner (`/stop`: StopTask + close the session) before removing the participant | Removal alone did nothing before the bot joined, and the bot joined anyway (acceptance `stop_early`); removal also threw (500) when the bot wasn't in the room yet | — |
@@ -117,7 +122,7 @@ Also seen: managed scaling launched **two** instances for one pending task.
 | 2026-09-30 | Separate capacity providers for services and bots | Bots scale 0..N per study; meet and the control API stay up | — |
 | 2026-09-30 | Pipeline order: images → apply; apply waits for healthy services, and a failing deploy rolls back | The task definition points at the SHA just pushed | — |
 | 2026-09-30 | IMDSv2 required on instances | A container can't read the instance role with a plain GET | — |
-| 2026-09-30 | CI permissions are inline policies, at 7.1k of the 10.2k-character limit per role | Simplest while small | Move to managed policies when the next PR would pass the limit |
+| 2026-09-30 | CI permissions are inline policies, at 8.3k of the 10.2k-character limit per role (2026-10-01, after the egress user) | Simplest while small | Move to managed policies when the next PR would pass the limit |
 | 2026-09-30 | Images tagged with the git SHA, immutable; one image per service for every environment | A task definition's image can never change under it; staging and prod run the same bytes | — |
 | 2026-09-30 | The bot task reuses the agent-runner image with another command | One image to build and scan; the bot code already lives there | If the bot's dependencies diverge |
 | 2026-09-30 | One pipeline on `v2`: test → apply → images | Chained workflows only run from the default branch, and images need the repositories the apply creates | When `v2` becomes the default branch |

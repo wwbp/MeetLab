@@ -126,3 +126,19 @@ run "silent_bots_are_noticed_within_seconds" {
     error_message = "reconcile every 10 s on staging"
   }
 }
+
+# Video egress (8b): the runner sends LiveKit a write-only key with each recording
+# request, so the runner, and only the runner, holds it.
+run "only_the_runner_gets_the_egress_key" {
+  command = apply
+
+  assert {
+    condition = alltrue([for n in ["EGRESS_S3_KEY_ID", "EGRESS_S3_KEY_SECRET"] :
+    contains([for s in jsondecode(aws_ecs_task_definition.runner_app.container_definitions)[0].secrets : s.valueFrom if s.name == n], "${local.parameters}/${n}")])
+    error_message = "the runner requests egress, so it holds the key, from SSM"
+  }
+  assert {
+    condition     = !anytrue([for s in jsondecode(aws_ecs_task_definition.bot.container_definitions)[0].secrets : startswith(s.name, "EGRESS_")])
+    error_message = "bots never need the egress key"
+  }
+}

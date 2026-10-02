@@ -81,7 +81,9 @@ resource "aws_autoscaling_group" "bots" {
     propagate_at_launch = true
   }
   lifecycle {
-    ignore_changes = [desired_capacity] # ECS managed scaling owns it
+    # ECS managed scaling owns the desired count; "Prepare for study" (capacity.py)
+    # owns the minimum, so a deploy mid-study doesn't reset a warm pool.
+    ignore_changes = [desired_capacity, min_size]
   }
 }
 
@@ -138,6 +140,25 @@ resource "aws_iam_role_policy" "runner_recordings" {
   policy = jsonencode({
     Version   = "2012-10-17"
     Statement = [{ Effect = "Allow", Action = "s3:GetObject", Resource = "${aws_s3_bucket.media.arn}/recordings/*" }]
+  })
+}
+
+# Prepare for study (capacity.py): the runner raises the bot pool's minimum and
+# schedules its return to 0. This group only; the rest of autoscaling is read-only.
+resource "aws_iam_role_policy" "runner_prewarm" {
+  name = "prewarm-bots"
+  role = aws_iam_role.runner_task.id
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = ["autoscaling:UpdateAutoScalingGroup", "autoscaling:PutScheduledUpdateGroupAction", "autoscaling:DeleteScheduledAction"]
+        # By name: the ARN's middle is a random ID (and the permission contract can't know it).
+        Resource = "arn:aws:autoscaling:us-east-1:${data.aws_caller_identity.current.account_id}:autoScalingGroup:*:autoScalingGroupName/${aws_autoscaling_group.bots.name}"
+      },
+      { Effect = "Allow", Action = ["autoscaling:DescribeAutoScalingGroups", "autoscaling:DescribeScheduledActions"], Resource = "*" },
+    ]
   })
 }
 

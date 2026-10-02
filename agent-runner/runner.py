@@ -27,6 +27,7 @@ from sqlalchemy import func, select, text, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import selectinload
 
+import capacity
 import metrics
 import storage
 import transcript as transcript_mod
@@ -496,6 +497,66 @@ async def stop_bot(request: Request, _=Depends(verify_api_key)):
                 .values(status="completed", ended_at=func.now()))
     logger.info(f"Stopped bot session {running.id} in room {room_name}")
     return {"stopped": running.id}
+
+
+# --- Prepare for study: pre-warm the bot pool (capacity.py) -----------------------
+
+def _asg_client():
+    import boto3
+
+    return boto3.client("autoscaling")
+
+
+def _prewarm_target():
+    """(client, group, sessions per instance), or None when bots aren't ECS tasks."""
+    if os.environ.get("BOT_DISPATCHER") != "ecs":
+        return None
+    # ponytail: 3 bots per c6i.large (1 GB each in 4 GB); measure at load testing.
+    return _asg_client(), os.environ["BOT_ASG_NAME"], int(os.environ.get("BOTS_PER_INSTANCE", "3"))
+
+
+_LOCAL_BOTS = "bots run as local containers here; there is no pool to warm"
+
+
+@app.get("/capacity")
+async def get_capacity(_=Depends(verify_api_key)):
+    target = _prewarm_target()
+    if target is None:
+        return {"available": False, "reason": _LOCAL_BOTS}
+    asg, group, per = target
+    return {"available": True, **await asyncio.to_thread(capacity.status, asg, group, per)}
+
+
+@app.post("/capacity/prewarm")
+async def prewarm_capacity(request: Request, _=Depends(verify_api_key)):
+    """Warm enough bot instances for `sessions` until `until` (ISO 8601 with offset)."""
+    target = _prewarm_target()
+    if target is None:
+        return JSONResponse({"error": _LOCAL_BOTS}, status_code=409)
+    body = await request.json()
+    try:
+        sessions = body["sessions"]
+        until = datetime.fromisoformat(body["until"])
+        if not isinstance(sessions, int) or isinstance(sessions, bool) or until.tzinfo is None:
+            raise ValueError("sessions must be a whole number and until must carry a time zone")
+        asg, group, per = target
+        result = await asyncio.to_thread(capacity.prewarm, asg, group, sessions, until, per,
+                                         datetime.now(timezone.utc))
+    except (KeyError, TypeError, ValueError) as e:
+        return JSONResponse({"error": f"bad request: {e}"}, status_code=400)
+    logger.info(f"bot pool pre-warmed: {sessions} sessions, {result['instances']} instance(s) until {until.isoformat()}")
+    return {**result, "available": True, **await asyncio.to_thread(capacity.status, asg, group, per)}
+
+
+@app.delete("/capacity/prewarm")
+async def cancel_prewarm(_=Depends(verify_api_key)):
+    target = _prewarm_target()
+    if target is None:
+        return JSONResponse({"error": _LOCAL_BOTS}, status_code=409)
+    asg, group, per = target
+    await asyncio.to_thread(capacity.cancel, asg, group)
+    logger.info("bot pool pre-warm cancelled")
+    return {"available": True, **await asyncio.to_thread(capacity.status, asg, group, per)}
 
 
 # Reads are for a human scrolling a console, not for bulk export.

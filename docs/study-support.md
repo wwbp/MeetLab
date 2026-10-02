@@ -6,6 +6,22 @@ leave with proof they sat the session. Neither is a gate — nobody is blocked
 from the room and nobody is disconnected — because the pilot showed that a
 participant stuck on a form is a participant who emails you instead.
 
+## 0. Prepare for study (before the first participant)
+
+A bot needs a machine to run on. When none is running, the first bot of a study waits
+about **2 minutes** for one to start, and the participant sits in an empty room.
+So before a study, open the console's home page and use **Prepare for study**:
+
+1. **Sessions at once**: how many rooms will run at the same time at the busiest point.
+2. **Until**: when the study ends (at most 24 hours ahead).
+3. Press **Prepare**. The line above the form shows how many machines are ready
+   ("1 of 2 machines ready…"); wait until they all are, which takes about 2 minutes.
+
+At the end time the machines are released by themselves; **Stop preparing** releases
+them early. Machines already running a session are never taken away mid-meeting.
+If the console says the environment "cannot hold that many sessions", it prepared as
+many as it can; ask an engineer before the study (staging holds 6).
+
 ## 1. The Prolific ID
 
 Send participants to the room with their ID in the URL:

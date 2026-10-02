@@ -52,7 +52,7 @@ def _registered(ecs, cluster: str, instance_ids: list[str]) -> int:
     """Machines ECS can place a bot on. Auto Scaling's InService comes about a minute sooner."""
     if not instance_ids:
         return 0
-    ids = ", ".join(f'"{i}"' for i in instance_ids)
+    ids = ", ".join(f"'{i}'" for i in instance_ids)  # single quotes: ECS rejects double
     return len(ecs.list_container_instances(
         cluster=cluster, status="ACTIVE", filter=f"ec2InstanceId in [{ids}]")["containerInstanceArns"])
 

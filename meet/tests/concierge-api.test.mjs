@@ -401,7 +401,10 @@ test('room delete clears bot claim and supports clean recreate/start cycle', asy
       );
       return response.status === 200 && json?.bots?.some((b) => b.identity === firstBotIdentity);
     },
-    { timeoutMs: 15_000, description: `bot ${firstBotIdentity} to join room before delete` }
+    // Bots are containers locally and in CI (BOT_DISPATCHER=docker, #106): a fresh
+    // Python process loading its models, which on a 2-vCPU CI runner can pass 15 s.
+    // This test is about cleanup on delete, not join speed.
+    { timeoutMs: 60_000, description: `bot ${firstBotIdentity} to join room before delete` }
   );
 
   await deleteRoom(roomName);

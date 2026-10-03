@@ -150,6 +150,7 @@ resource "aws_ecs_task_definition" "stt_nim" {
   container_definitions = jsonencode([{
     name                  = "stt-nim"
     mountPoints           = [{ sourceVolume = "stt-nim-cache", containerPath = "/opt/nim/.cache" }]
+    dependsOn             = [{ containerName = "cache-permissions", condition = "SUCCESS" }]
     image                 = local.stt_nim_image
     essential             = true
     memoryReservation     = 8192
@@ -160,6 +161,24 @@ resource "aws_ecs_task_definition" "stt_nim" {
     secrets               = [{ name = "NGC_API_KEY", valueFrom = "${local.ngc_secret}:password::" }]
     linuxParameters       = { sharedMemorySize = 8192 }
     ulimits               = [{ name = "nofile", softLimit = 2048, hardLimit = 2048 }]
+    logConfiguration = {
+      logDriver = "awslogs"
+      options = {
+        awslogs-group         = aws_cloudwatch_log_group.stt_nim.name
+        awslogs-region        = "us-east-1"
+        awslogs-stream-prefix = "stt-nim"
+      }
+    }
+    }, {
+    # The NIM runs as a non-root user, and a fresh volume is root's: it could not write its
+    # cache ("Permission denied", 3 failed starts, rolled back, 2026-10-03). NVIDIA's step:
+    # make the cache directory writable. Once, before the NIM starts.
+    name              = "cache-permissions"
+    image             = "public.ecr.aws/docker/library/busybox:1.37"
+    essential         = false
+    memoryReservation = 16
+    command           = ["sh", "-c", "chmod 777 /cache"]
+    mountPoints       = [{ sourceVolume = "stt-nim-cache", containerPath = "/cache" }]
     logConfiguration = {
       logDriver = "awslogs"
       options = {

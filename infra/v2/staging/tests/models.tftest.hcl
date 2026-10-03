@@ -153,3 +153,25 @@ run "models_restart_from_the_machines_disk" {
     error_message = "Qwen's weights and the NIM's built model stay on the machine across restarts"
   }
 }
+
+# The NIM runs as a non-root user and could not write a fresh volume ("Permission denied
+# (os error 13)", 3 failed starts, rolled back, 2026-10-03). NVIDIA: the cache must be made
+# writable (chmod 777). An init container does it before the NIM starts.
+run "the_nim_can_write_its_cache" {
+  command = apply
+
+  variables {
+    stt_nim_enabled = true
+  }
+
+  assert {
+    condition = (
+      jsondecode(aws_ecs_task_definition.stt_nim.container_definitions)[1].name == "cache-permissions" &&
+      !jsondecode(aws_ecs_task_definition.stt_nim.container_definitions)[1].essential &&
+      strcontains(join(" ", jsondecode(aws_ecs_task_definition.stt_nim.container_definitions)[1].command), "chmod 777 /cache") &&
+      one(jsondecode(aws_ecs_task_definition.stt_nim.container_definitions)[1].mountPoints) == { sourceVolume = "stt-nim-cache", containerPath = "/cache" } &&
+      jsondecode(aws_ecs_task_definition.stt_nim.container_definitions)[0].dependsOn == [{ containerName = "cache-permissions", condition = "SUCCESS" }]
+    )
+    error_message = "a one-shot container opens the cache volume before the NIM starts, and the NIM waits for it to succeed"
+  }
+}

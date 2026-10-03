@@ -33,9 +33,12 @@ on:
 permissions:
   contents: read
 
+# A deploy has its own group: GitHub keeps one pending run per group, so sharing one
+# with PR plans let a PR push silently cancel a queued deploy (2026-10-03, #138).
+# A PR's newer push supersedes its own plan; plans wait on the state lock (-lock-timeout).
 concurrency:
-  group: infra-v2-staging
-  cancel-in-progress: false
+  group: ${{ github.event_name == 'push' && 'infra-v2-staging-deploy' || format('infra-v2-plan-{0}', github.ref) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   AWS_REGION: us-east-1

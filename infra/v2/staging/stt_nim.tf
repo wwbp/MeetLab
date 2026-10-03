@@ -135,8 +135,21 @@ resource "aws_ecs_task_definition" "stt_nim" {
   network_mode             = "bridge"
   skip_destroy             = true # see tests/runner.tftest.hcl
   execution_role_arn       = aws_iam_role.execution.arn
+  # The built model stays on this machine across restarts (deploys stop the old task
+  # first): a Docker volume filled from the image's own cache directory, so the NIM's user
+  # can write it (NVIDIA: the cache must be writable). Without it, every restart rebuilds
+  # the model (~20 min; v1 never kept it either).
+  volume {
+    name = "stt-nim-cache"
+    docker_volume_configuration {
+      scope         = "shared"
+      autoprovision = true
+      driver        = "local"
+    }
+  }
   container_definitions = jsonencode([{
     name                  = "stt-nim"
+    mountPoints           = [{ sourceVolume = "stt-nim-cache", containerPath = "/opt/nim/.cache" }]
     image                 = local.stt_nim_image
     essential             = true
     memoryReservation     = 8192
@@ -202,11 +215,19 @@ resource "aws_lb_listener" "stt_nim" {
 }
 
 resource "aws_ecs_service" "stt_nim" {
-  count                             = var.stt_nim_enabled ? 1 : 0
-  name                              = "meetlab-v2-staging-stt-nim"
-  cluster                           = aws_ecs_cluster.this.id
-  task_definition                   = aws_ecs_task_definition.stt_nim.arn
-  desired_count                     = 1
+  count           = var.stt_nim_enabled ? 1 : 0
+  name            = "meetlab-v2-staging-stt-nim"
+  cluster         = aws_ecs_cluster.this.id
+  task_definition = aws_ecs_task_definition.stt_nim.arn
+  desired_count   = 1
+  # One machine (max_size 1): stop the old task first, or the new one can never be placed
+  # and the deploy waits forever (FP8, 2026-10-03).
+  deployment_minimum_healthy_percent = 0
+  deployment_maximum_percent         = 100
+  deployment_circuit_breaker {
+    enable   = true # a deploy that cannot start ends and rolls back (3 failures)
+    rollback = true
+  }
   health_check_grace_period_seconds = 2700 # first boot builds the model (~20 min, v1)
   # ponytail: the apply doesn't wait for a ready NIM (up to ~30 min cold); the stt_nim
   # acceptance scenario waits for it instead.

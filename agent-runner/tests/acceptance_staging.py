@@ -312,9 +312,25 @@ def _service_on(name):
     return bool(svc) and svc[0]["status"] == "ACTIVE" and svc[0]["desiredCount"] > 0
 
 
+def deploy_state(service: dict) -> tuple[str, str]:
+    """ready, waiting, or failed (with ECS's reason) for a service's current deploy.
+    A task ECS cannot place is failed at once: it would only retry every 30 min for ever
+    (the FP8 deploy, 2026-10-03), and the wait for a model is 45 min."""
+    primary = next(d for d in service["deployments"] if d["status"] == "PRIMARY")
+    if primary["rolloutState"] == "COMPLETED" and len(service["deployments"]) == 1:
+        return "ready", ""  # targets healthy behind the NLB
+    if primary["rolloutState"] == "FAILED":
+        return "failed", primary.get("rolloutStateReason", "")
+    stuck = [e["message"] for e in service["events"]
+             if e["createdAt"] >= primary["createdAt"] and "unable to place a task" in e["message"]]
+    return ("failed", stuck[0]) if stuck else ("waiting", "")
+
+
 def _service_ready(name):
-    deployments = ecs.describe_services(cluster=CLUSTER, services=[f"meetlab-v2-staging-{name}"])["services"][0]["deployments"]
-    return [d.get("rolloutState") for d in deployments] == ["COMPLETED"]  # targets healthy behind the NLB
+    state, why = deploy_state(ecs.describe_services(cluster=CLUSTER, services=[f"meetlab-v2-staging-{name}"])["services"][0])
+    if state == "failed":
+        raise Fail(f"{name}'s deploy will not finish: {why}")
+    return state == "ready"
 
 
 async def _play_wav(room: rtc.Room, path: str, seconds: float):

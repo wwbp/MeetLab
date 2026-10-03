@@ -1507,6 +1507,21 @@ async def list_conversations(
     }
 
 
+@app.get("/conversations/{conv_id}/utterances")
+async def conversation_utterances(conv_id: str, _=Depends(verify_api_key)):
+    """A conversation's turns as data, in order: exact time, who spoke, what was said.
+    Load tests score quality from it (quality.py); the Markdown transcript is for people."""
+    async with AsyncSessionLocal() as db:
+        if not await db.get(Conversation, conv_id):
+            return JSONResponse({"error": "conversation not found"}, status_code=404)
+        rows = (await db.execute(
+            select(Utterance).options(selectinload(Utterance.speaker))
+            .where(Utterance.conv_id == conv_id).order_by(Utterance.ts)
+        )).scalars().all()
+    return {"utterances": [{"speaker": u.speaker_id, "bot": bool(u.speaker and u.speaker.meta.get("role") == "bot"),
+                            "ts": u.ts, "text": u.text} for u in rows]}
+
+
 @app.post("/conversations/{conv_id}/transcript")
 async def queue_transcript(
     conv_id: str,

@@ -91,3 +91,36 @@ class TestScoreRooms(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestVoice(unittest.TestCase):
+    """How the bot sounds: each recorded reply matched to the text the bot meant to say."""
+
+    rooms = [{"room": 0, "said": [[10.0, "Hello?"], [30.0, "Why?"]],
+              "turns": [{"bot": False, "ts": 12.0, "text": "Hello?"},
+                        {"bot": True, "ts": 18.0, "text": "Hi there, how can I help?"},
+                        {"bot": False, "ts": 32.0, "text": "Why?"},
+                        {"bot": True, "ts": 40.0, "text": "Because it matters."}]}]
+
+    def test_a_clip_is_the_reply_stored_after_the_sentence_it_answered(self):
+        from quality import reply_for
+        self.assertEqual(reply_for(self.rooms, room=0, said_at=30.0), "Because it matters.")
+        self.assertIsNone(reply_for(self.rooms, room=1, said_at=30.0))
+
+    def test_intelligibility_is_the_word_error_rate_of_what_a_listener_hears(self):
+        from quality import voice
+        v = voice([("Hi there, how can I help?", "Hi there how can I help", 4.1),
+                   ("Because it matters.", "Because it scatters.", 3.5)])
+        self.assertEqual((v["clips"], v["errors"], v["words"]), (2, 1, 9))
+        self.assertAlmostEqual(v["wer"], 1 / 9)
+        self.assertAlmostEqual(v["naturalness"], 3.8)
+
+    def test_no_clips_is_nothing_to_score(self):
+        from quality import voice
+        self.assertEqual(voice([])["wer"], None)
+
+    def test_which_turns_are_recorded(self):
+        from quality import record_turn
+        # A few per room, from the first rooms only: enough to score, little to upload.
+        self.assertEqual([n for n in range(12) if record_turn(room=0, n=n)], [1, 4, 7, 10])
+        self.assertFalse(record_turn(room=10, n=1))

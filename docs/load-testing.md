@@ -61,10 +61,23 @@ So every load test also scores quality, from the same rooms, step by step:
 | **Fragmented** | Sentences the bot stored as two or more turns, because it took a pause for the end of the turn. The pilot's "chained answers" came from this | Count of sentences with 2+ stored turns |
 | **Missed** | Sentences the bot never stored at all | Count of sentences with no stored turn |
 | **Reply length** | How many words the bot says per answer (typical, worst 1 in 20, longest), and how many answers ran over 40 words. Spoken answers are heard, not skimmed: long ones feel slow and hard to follow | Word count of each stored reply (the greeting excluded) |
+| **Answers** (1–5) | *answers*: does the reply respond to what was said, correctly? *context*: on the scripts' follow-up turns, does it use what was said earlier? *suits speech*: short and natural enough to follow by ear? *overall* | Up to 20 replies per step, each with the conversation before it, scored by a fixed judge model (OpenAI `gpt-5.4`) against a fixed rubric (`agent-runner/judge.py`). Only the test's synthetic conversations are sent. Results compare only within the same rubric version (`RUBRIC_VERSION`) |
 
-Still to come: whether the answers are *good* (a fixed rubric, scored by a judge model) and
-how clear and natural the bot *sounds* (its audio heard back by a reference transcriber, and
-a naturalness score). See the plan in the LEDGER.
+**The rule for speed changes:** a change that makes the bot faster (like 8-bit weights) stays
+only if quality holds: judged *overall* no more than 0.2 lower, word error rate no more than
+1 point higher, than the configuration it replaces.
+
+**How the bot sounds** is scored from recordings: the synthetic participant records the bot's
+reply to every third turn in the first 10 rooms (at most 40 clips a run), as a person in the
+room hears it. After the run:
+
+| Score | What it means | How it is measured |
+|---|---|---|
+| **Intelligibility** | Of the words the bot meant to say, the share a listener gets wrong. 0% is perfectly clear | An independent transcriber (open Whisper, `base.en`) listens to each clip; its words are compared with the reply the bot stored |
+| **Naturalness** (1–5) | How natural the voice sounds, as listeners would rate it | UTMOS22, an open model trained to predict listener ratings (`tarepan/SpeechMOS` v1.2.0) |
+
+Both models run on the report's machine (GitHub's runner), never in the bot's image. The
+clips are saved next to the result, under `loadtests/…-clips/`.
 
 The scores come from the conversation's stored turns, which the console serves as data at
 `/api/meetings/<conversation id>/utterances` (the Markdown transcript is the readable version).
@@ -122,6 +135,8 @@ docker compose -f .devcontainer/docker-compose.yml exec -T \
 |---|---|
 | Shapes, rules, measurements (pure, unit-tested) | `agent-runner/load_plan.py`, `tests/test_load_plan.py` |
 | Quality scores (pure, unit-tested) | `agent-runner/quality.py`, `tests/test_quality.py` |
+| The answer judge: rubric, sampling, parsing (unit-tested; the model call is one function) | `agent-runner/judge.py`, `tests/test_judge.py` |
+| Voice scores: which turns are recorded, matching clips to replies (unit-tested) | `agent-runner/quality.py` (`record_turn`, `reply_for`, `voice`) |
 | A conversation's turns as data | runner `GET /conversations/{id}/utterances`, console `/api/meetings/{id}/utterances` |
 | The report (both tables, quality, staging's side) | `agent-runner/tests/load_report.py` |
 | The driver: rooms, participants, listening | `agent-runner/tests/load_run.py` |

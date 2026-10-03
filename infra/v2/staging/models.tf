@@ -218,13 +218,17 @@ resource "aws_lb_listener" "model" {
 }
 
 resource "aws_ecs_service" "model" {
-  for_each                          = local.running_models
-  name                              = "meetlab-v2-staging-${each.key}"
-  cluster                           = aws_ecs_cluster.this.id
-  task_definition                   = aws_ecs_task_definition.model[each.key].arn
-  desired_count                     = 1
-  health_check_grace_period_seconds = 1800  # cold start: image and weights download
-  wait_for_steady_state             = false # the live test waits for a ready model instead
+  for_each        = local.running_models
+  name            = "meetlab-v2-staging-${each.key}"
+  cluster         = aws_ecs_cluster.this.id
+  task_definition = aws_ecs_task_definition.model[each.key].arn
+  desired_count   = 1
+  # One machine (max_size 1): stop the old task first, or the new one can never be placed
+  # and the deploy waits forever (FP8, 2026-10-03).
+  deployment_minimum_healthy_percent = 0
+  deployment_maximum_percent         = 100
+  health_check_grace_period_seconds  = 1800  # cold start: image and weights download
+  wait_for_steady_state              = false # the live test waits for a ready model instead
   capacity_provider_strategy {
     capacity_provider = aws_ecs_capacity_provider.model[each.key].name
     weight            = 1

@@ -202,12 +202,16 @@ resource "aws_lb_listener" "stt_nim" {
 }
 
 resource "aws_ecs_service" "stt_nim" {
-  count                             = var.stt_nim_enabled ? 1 : 0
-  name                              = "meetlab-v2-staging-stt-nim"
-  cluster                           = aws_ecs_cluster.this.id
-  task_definition                   = aws_ecs_task_definition.stt_nim.arn
-  desired_count                     = 1
-  health_check_grace_period_seconds = 2700 # first boot builds the model (~20 min, v1)
+  count           = var.stt_nim_enabled ? 1 : 0
+  name            = "meetlab-v2-staging-stt-nim"
+  cluster         = aws_ecs_cluster.this.id
+  task_definition = aws_ecs_task_definition.stt_nim.arn
+  desired_count   = 1
+  # One machine (max_size 1): stop the old task first, or the new one can never be placed
+  # and the deploy waits forever (FP8, 2026-10-03).
+  deployment_minimum_healthy_percent = 0
+  deployment_maximum_percent         = 100
+  health_check_grace_period_seconds  = 2700 # first boot builds the model (~20 min, v1)
   # ponytail: the apply doesn't wait for a ready NIM (up to ~30 min cold); the stt_nim
   # acceptance scenario waits for it instead.
   wait_for_steady_state = false

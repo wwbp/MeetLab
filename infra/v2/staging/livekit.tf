@@ -208,6 +208,9 @@ resource "aws_ecs_service" "livekit" {
   cluster         = aws_ecs_cluster.this.id
   task_definition = aws_ecs_task_definition.livekit.arn
   desired_count   = 1
+  # One machine, host ports (max_size 1): stop the old task first (see models.tf).
+  deployment_minimum_healthy_percent = 0
+  deployment_maximum_percent         = 100
   capacity_provider_strategy {
     capacity_provider = aws_ecs_capacity_provider.livekit.name
     weight            = 1

@@ -102,3 +102,21 @@ run "one_alone" {
     error_message = "each switches on alone: Kokoro without paying for the LLM's GPU"
   }
 }
+
+# One machine each (max_size 1): a rolling deploy starts the new task before stopping the
+# old, which can never be placed, so the deploy waits forever (FP8, 2026-10-03). Stop
+# first, then start: minutes of downtime on staging instead of a stuck deploy.
+run "single_machine_services_replace_their_task_instead_of_rolling" {
+  command = apply
+
+  variables {
+    model_services  = ["llm", "tts"]
+    stt_nim_enabled = true
+  }
+
+  assert {
+    condition = alltrue([for s in concat(values(aws_ecs_service.model), aws_ecs_service.stt_nim, aws_ecs_service.livekit) :
+    s.deployment_minimum_healthy_percent == 0 && s.deployment_maximum_percent == 100])
+    error_message = "a one-machine service stops its old task before starting the new one"
+  }
+}

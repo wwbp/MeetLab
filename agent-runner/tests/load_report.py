@@ -84,6 +84,7 @@ def _voice(r: dict) -> dict | None:
     import numpy as np
     import soundfile as sf
     import torch
+    import torchaudio
     from faster_whisper import WhisperModel
 
     listener = WhisperModel("base.en", device="cpu", compute_type="int8")
@@ -100,8 +101,12 @@ def _voice(r: dict) -> dict | None:
             audio, rate = sf.read(path, dtype="float32")
             if not meant or len(audio) < rate // 2:
                 continue  # no stored reply, or (almost) no audio: nothing to compare
-            heard = " ".join(seg.text for seg in listener.transcribe(path, language="en")[0])
-            mos = float(utmos(torch.from_numpy(np.asarray(audio))[None], rate).item())
+            wave = torch.from_numpy(np.asarray(audio))
+            # Whisper gets the samples, not the file: its own decoder (PyAV) broke on a PyAV
+            # release that dropped an option it passes (load test 2026-10-03).
+            at_16k = torchaudio.functional.resample(wave, rate, 16000).numpy()
+            heard = " ".join(seg.text for seg in listener.transcribe(at_16k, language="en")[0])
+            mos = float(utmos(wave[None], rate).item())
             scored.append((meant, heard, round(mos, 2)))
     return voice(scored)
 

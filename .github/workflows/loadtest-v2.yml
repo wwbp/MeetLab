@@ -27,6 +27,11 @@ on:
       hold_s:
         description: "Seconds per step; 0 = the shape's own (a rehearsal uses ~60)"
         default: "0"
+      library:
+        description: "Conversations: v1 = 100 everyday dialogues in 20 voices, rooms of 1-3 people (docs/load-testing.md); none = the 5 original scripts, 1 person"
+        type: choice
+        options: [v1, none]
+        default: v1
       cpu:
         description: "Load generator vCPUs x 1024 (a worker per vCPU; raise if it reports HARNESS OVERLOADED)"
         type: choice
@@ -66,6 +71,7 @@ jobs:
           TARGET: ${{ inputs.target }}
           HOLD_S: ${{ inputs.hold_s }}
           CPU: ${{ inputs.cpu }}
+          LIBRARY_VERSION: ${{ inputs.library }}
         run: |
           set -euo pipefail
           account="$(aws sts get-caller-identity --query Account --output text)"
@@ -76,10 +82,11 @@ jobs:
           overrides="$(jq -n --arg cpu "$CPU" --arg mem "$((CPU * 2))" \
             --arg p "$PROFILE" --arg s "$SHAPE" --arg t "$TARGET" --arg h "$HOLD_S" \
             --arg r "s3://$bucket/$key" --arg g "$GITHUB_SHA" --arg w "$((CPU / 1024))" \
+            --arg l "$([ "$LIBRARY_VERSION" = none ] || echo "s3://$bucket/loadtests/library/$LIBRARY_VERSION/library.json")" \
             '{cpu: $cpu, memory: $mem, containerOverrides: [{name: "loadgen", environment: [
               {name: "PROFILE", value: $p}, {name: "SHAPE", value: $s}, {name: "TARGET", value: $t},
               {name: "HOLD_S", value: $h}, {name: "RESULTS", value: $r}, {name: "GIT_SHA", value: $g},
-              {name: "WORKERS", value: $w}]}]}')"
+              {name: "WORKERS", value: $w}, {name: "LIBRARY", value: $l}]}]}')"
           network="$(jq -n --argjson s "$subnets" --argjson g "$sg" '{awsvpcConfiguration: {subnets: $s, securityGroups: $g, assignPublicIp: "DISABLED"}}')"
           task="$(aws ecs run-task --cluster "$CLUSTER" --task-definition meetlab-v2-staging-loadgen \
             --launch-type FARGATE --started-by loadtest --network-configuration "$network" \

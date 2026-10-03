@@ -50,6 +50,25 @@ still marked running counts as a failure: something didn't close.
 If the load generator itself falls behind (its participants can't speak in real time), the
 result says **HARNESS OVERLOADED** and its numbers are not trusted. Rerun with more CPU.
 
+## Quality: is it still good while it is fast?
+
+Speed alone can mislead: a faster model or a busier server can hear worse or answer worse.
+So every load test also scores quality, from the same rooms, step by step:
+
+| Score | What it means | How it is measured |
+|---|---|---|
+| **Word error rate** | Of the words the participant said, the share the bot got wrong (misheard, missed or invented). 0% is perfect | Each recorded sentence is compared with what the bot stored for it. British and American spellings count as the same word |
+| **Fragmented** | Sentences the bot stored as two or more turns, because it took a pause for the end of the turn. The pilot's "chained answers" came from this | Count of sentences with 2+ stored turns |
+| **Missed** | Sentences the bot never stored at all | Count of sentences with no stored turn |
+| **Reply length** | How many words the bot says per answer (typical, worst 1 in 20, longest), and how many answers ran over 40 words. Spoken answers are heard, not skimmed: long ones feel slow and hard to follow | Word count of each stored reply (the greeting excluded) |
+
+Still to come: whether the answers are *good* (a fixed rubric, scored by a judge model) and
+how clear and natural the bot *sounds* (its audio heard back by a reference transcriber, and
+a naturalness score). See the plan in the LEDGER.
+
+The scores come from the conversation's stored turns, which the console serves as data at
+`/api/meetings/<conversation id>/utterances` (the Markdown transcript is the readable version).
+
 ## Stack profiles
 
 A profile is the bot configuration every test room gets, in `agent-runner/load_profiles/`:
@@ -102,6 +121,9 @@ docker compose -f .devcontainer/docker-compose.yml exec -T \
 | What | Where |
 |---|---|
 | Shapes, rules, measurements (pure, unit-tested) | `agent-runner/load_plan.py`, `tests/test_load_plan.py` |
+| Quality scores (pure, unit-tested) | `agent-runner/quality.py`, `tests/test_quality.py` |
+| A conversation's turns as data | runner `GET /conversations/{id}/utterances`, console `/api/meetings/{id}/utterances` |
+| The report (both tables, quality, staging's side) | `agent-runner/tests/load_report.py` |
 | The driver: rooms, participants, listening | `agent-runner/tests/load_run.py` |
 | Load generator in AWS | `infra/v2/staging/loadgen.tf` |
 | The workflow | `.github/workflows/loadtest-v2.yml` |

@@ -917,7 +917,7 @@ async def _bot(runner_args: LiveKitRunnerArguments):
                         conv_id=runner_args.session_id,
                         reply_to=_last_bot_utt_id[0],
                         ts=ts,
-                        text=message.content,
+                        text=_spoken_text(message.content, {_sid_to_name.get(speaker_sid), identity.split("__")[0]}),
                     )
                 )
                 await _set_root_utterance_if_needed(db, runner_args.session_id, utt_id)
@@ -1319,6 +1319,14 @@ def _build_llm(api_key: str, bot_config) -> OpenAILLMService:
     return OpenAILLMService(
         api_key=api_key, base_url=os.environ["SELFHOSTED_LLM_URL"] if ours else None,
         settings=OpenAILLMService.Settings(model=bot_config.llm_model, system_instruction=bot_config.system_prompt))
+
+
+def _spoken_text(content: str, names) -> str:
+    """A person's words without the "Name: " label SpeakerLabelInjector adds for the LLM, at
+    the start of every fragment a turn merged. The speaker is stored in its own column."""
+    for name in filter(None, names):
+        content = re.sub(rf"(^|\s){re.escape(name)}: ", r"\1", content)
+    return content.strip()
 
 
 def _ttfb_stage(processor: str) -> str | None:

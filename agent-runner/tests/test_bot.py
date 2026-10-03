@@ -421,6 +421,29 @@ class TestBuildLLM(unittest.TestCase):
         self.assertEqual((llm._settings.model, llm._settings.system_instruction), ("gpt-4o-mini", "Facilitate."))
 
 
+class TestSpokenText(unittest.TestCase):
+    """What a person said is stored without the speaker label the LLM sees (SpeakerLabelInjector):
+    the speaker is its own column, and the label turned up in researchers' transcripts and in
+    the load test's hearing score as words nobody said (2026-10-03)."""
+
+    def test_the_label_is_removed(self):
+        from bot import _spoken_text
+        self.assertEqual(_spoken_text("load_000: Why does that matter?", {"load_000"}), "Why does that matter?")
+
+    def test_every_fragment_of_a_merged_turn_loses_its_label(self):
+        from bot import _spoken_text
+        self.assertEqual(_spoken_text("Alice: Candidate A is strong. Alice: But B is popular.", {"Alice", "alice_x"}),
+                         "Candidate A is strong. But B is popular.")
+
+    def test_text_without_a_label_is_unchanged(self):
+        from bot import _spoken_text
+        self.assertEqual(_spoken_text("What should we prioritise?", {"Alice"}), "What should we prioritise?")
+
+    def test_a_name_is_matched_literally(self):
+        from bot import _spoken_text
+        self.assertEqual(_spoken_text("Dr. A+B: Hello.", {"Dr. A+B", None}), "Hello.")
+
+
 class TestStageOfMetric(unittest.TestCase):
     """Which stage a time-to-first-byte belongs to, by the processor that reported it."""
 

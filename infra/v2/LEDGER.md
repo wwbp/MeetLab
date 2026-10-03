@@ -37,10 +37,11 @@ $7.1k in September, all lab projects). So this is priced from what runs:
 | NAT (vivaprox-vpc) | 33 |
 | meet: `t3.medium` | 30 |
 
-**v2 staging, running total:** **$114/month**, plus $0.085/hour per running bot instance (c6i.large, 0 when idle)
+**v2 staging, running total:** **~$180/month** always on, plus per hour while testing: $0.085 per bot machine, $0.83 per GPU service (NIM, LLM, TTS), ~$0.20 for the load generator
 
 | Added | PR | Resource | $/month | Notes |
 |---|---|---|---|---|
+| 2026-10-02 | #134, on in #135 | Self-hosted LiveKit: `c6i.large` with a public IP, always on (`livekit_self_hosted`) | 66 | $0.085/hour + $3.65 public IPv4; missing from this table until 2026-10-03 |
 | 2026-10-02 | L3 PR | Our models (`models.tf`, `model_services`): `llm` (Qwen2.5-7B-Instruct on vLLM) and `tts` (Kokoro), each a `g6.xlarge` on-demand, 0 to 1, + internal NLB and 100 GB disk while on | 0 off | $0.805/hour + ~$0.03/hour NLB each while on; with the NIM, a fully-ours hour ≈ $2.50 |
 | 2026-10-03 | load harness PR | Load generator (`loadgen.tf`): one-off Fargate task per load test, 4–16 vCPU | 0 idle | ~$0.20/hour at 4 vCPU, ~$0.80 at 16, only while a run lasts |
 | 2026-10-02 | #126, then reverted | One bot machine always warm (`bot_pool_min = 1`, `c6i.large`) | ~~62~~ 0 | Set back to 0 the same day (user's choice: save money until production); the live tests press Prepare for study instead (~$0.10 a run) |
@@ -94,6 +95,23 @@ $7.1k in September, all lab projects). So this is priced from what runs:
 | 2026-09-30 | Harness logs `KeyError` on LiveKit reconnect | `livekit.rtc` `local_track_published` after a signal resume | Noise, but hides real errors in sanity output |
 
 ## Measurements
+
+**First ours-vs-v1 comparison, 2026-10-03** (`load`, target 3, `hold_s=180`; same speech, same STT: our NIM; runs 37142384043, 37143343566; reports scored with #150):
+
+| | ours (Qwen2.5-7B FP8 + Kokoro) | v1 (gpt-5.4-nano + ElevenLabs) |
+|---|---|---|
+| Verdict | PASS every step | FAIL at 2 rooms (p95 2,019 ms) |
+| Answered | 100% | 100% |
+| End of speech → first audio, p95 | 1.5–1.8 s | 1.7–2.0 s |
+| LLM first token, p95 | 58–104 ms | 662–814 ms |
+| TTS first audio, p95 | 90–227 ms | 120–154 ms |
+| STT word error rate | 0.7–4.3% | 0.5–3.5% |
+| Judged answers / context / suits speech / overall (1–5) | 4.0–4.2 / 4.3–4.7 / 2.4–3.1 / 3.4–3.9 | 4.2–4.8 / 4.4–5.0 / 2.3–2.7 / 3.2–4.0 |
+| Reply length, typical | 46–61 words | 74–89 words |
+| Voice: heard back / naturalness (UTMOS) | 5.9% / 4.46 | 4.7% / 3.90 |
+| Peak CPU anywhere | < 30% | < 30% |
+
+Ours is faster (the LLM starts ~8× sooner) at about the same quality; both talk too long (*suits speech* lowest). 3 rooms: first readings, not capacity.
 
 **First load test on our own stack, 2026-10-03** (`load`, target 5, profile `ours`: NIM + Qwen2.5-7B 16-bit on vLLM + Kokoro, self-hosted LiveKit; run 37090373932). The 15-minute hold at 5 rooms, 161 turns:
 

@@ -6,13 +6,13 @@ variable "image_tag" {
 variable "stt_nim_enabled" {
   description = "Run staging's Parakeet NIM (an on-demand g6.xlarge, $0.805/hour) and point bots at it; off = Deepgram"
   type        = bool
-  default     = true # on with our LLM and voice: L3 live test, fully on our models
+  default     = false # off between test runs; on 2026-10-02/03 for L3 and the first comparisons
 }
 
 variable "model_services" {
   description = "Our own models to run, each on an on-demand g6.xlarge ($0.805/hour): llm (Qwen on vLLM), tts (Kokoro)"
   type        = set(string)
-  default     = ["llm", "tts"] # on for L3's live test 2026-10-02
+  default     = [] # off between test runs; on for L3 and the first comparisons (2026-10-02/03)
   validation {
     condition     = length(setsubtract(var.model_services, ["llm", "tts"])) == 0
     error_message = "model_services names llm and/or tts"

@@ -29,8 +29,13 @@ resource "aws_iam_role_policy" "loadgen_results" {
   name = "write-results"
   role = aws_iam_role.loadgen.id
   policy = jsonencode({
-    Version   = "2012-10-17"
-    Statement = [{ Effect = "Allow", Action = "s3:PutObject", Resource = "${aws_s3_bucket.media.arn}/loadtests/*" }]
+    Version = "2012-10-17"
+    Statement = [
+      { Effect = "Allow", Action = "s3:PutObject", Resource = "${aws_s3_bucket.media.arn}/loadtests/*" },
+      # The conversation library (tests/build_conversation_library.py): read, never written here.
+      { Effect = "Allow", Action = "s3:GetObject", Resource = "${aws_s3_bucket.media.arn}/loadtests/library/*" },
+      { Effect = "Allow", Action = "s3:ListBucket", Resource = aws_s3_bucket.media.arn, Condition = { StringLike = { "s3:prefix" = "loadtests/library/*" } } },
+    ]
   })
 }
 

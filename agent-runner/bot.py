@@ -665,11 +665,11 @@ async def _bot(runner_args: LiveKitRunnerArguments):
             import metrics as _prom
             if isinstance(m, TTFBMetricsData):
                 val_ms = m.value * 1000
-                p = m.processor.lower()
-                if "llm" in p or "openai" in p:
+                stage = _ttfb_stage(m.processor)
+                if stage == "llm_ttft_ms":
                     _metrics_data["llm_ttft_ms"] = val_ms
                     _prom.llm_ttft.record(val_ms, {"llm_model": bot_config.llm_model})
-                elif "elevenlabs" in p or "tts" in p:
+                elif stage == "tts_ttfb_ms":
                     _metrics_data["tts_ttfb_ms"] = val_ms
                     _prom.tts_ttfb.record(val_ms, {"tts_provider": bot_config.tts_provider})
             elif isinstance(m, TextAggregationMetricsData):
@@ -1319,6 +1319,13 @@ def _build_llm(api_key: str, bot_config) -> OpenAILLMService:
     return OpenAILLMService(
         api_key=api_key, base_url=os.environ["SELFHOSTED_LLM_URL"] if ours else None,
         settings=OpenAILLMService.Settings(model=bot_config.llm_model, system_instruction=bot_config.system_prompt))
+
+
+def _ttfb_stage(processor: str) -> str | None:
+    """The stage a time-to-first-byte belongs to, by the processor that reported it.
+    By service kind, not vendor: OpenAITTSService (and Kokoro through it) is speech."""
+    p = processor.lower()
+    return "tts_ttfb_ms" if "ttsservice" in p else "llm_ttft_ms" if "llmservice" in p else None  # not "tts": s-TTS-ervice
 
 
 def _build_tts(bot_config, openai_api_key: str, elevenlabs_api_key: str, mode):

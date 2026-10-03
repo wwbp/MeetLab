@@ -12,6 +12,10 @@ variables {
 run "switched_off_bots_use_the_vendors" {
   command = apply
 
+  variables {
+    model_services = [] # the default is the switch (variables.tf)
+  }
+
   assert {
     condition     = length(aws_ecs_service.model) == 0 && length(aws_lb.model) == 0
     error_message = "off by default: no GPU service, no load balancer"

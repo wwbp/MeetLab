@@ -113,13 +113,16 @@ class Meeting:
         self.room = room or f"accept-{uuid.uuid4().hex[:6]}"
 
     async def __aenter__(self):
+        # The real order: the console creates the room, people join, then the bot starts.
+        # (Joining creates a LiveKit room, and the console refuses to create an existing
+        # one; LiveKit Cloud's room list lagged long enough to hide that, ours doesn't.)
+        _post("/api/console/login", {"password": os.environ["CONSOLE_PASSWORD"]})
+        _post("/api/concierge/rooms", {"name": self.room})
         self.human = rtc.Room()
         await self.human.connect(os.environ["LIVEKIT_URL"], _token(self.room, "human_standin"))
         self.second = rtc.Room()
         if self.second_human:  # in the room before the bot, as in diagnosis F1
             await self.second.connect(os.environ["LIVEKIT_URL"], _token(self.room, "human_second"))
-        _post("/api/console/login", {"password": os.environ["CONSOLE_PASSWORD"]})
-        _post("/api/concierge/rooms", {"name": self.room})
         started = _post(f"/api/concierge/rooms/{self.room}/bots", {})["request"]
         self.session, self.bot_identity = started["runnerSessionId"], started["botIdentity"]
         self.started = time.time()
@@ -509,6 +512,8 @@ async def _run(names):
 if __name__ == "__main__":
     names = sys.argv[1:] or list(SCENARIOS)
     if os.getenv("NO_VIDEO"):  # self-hosted LiveKit has no egress server yet (livekit.tf)
-        print("not run (no video recording on this LiveKit): video_recording, auto_record", flush=True)
-        names = [n for n in names if n not in ("video_recording", "auto_record")]
+        skipped = [n for n in names if n in ("video_recording", "auto_record")]
+        if skipped:
+            print(f"not run (no video recording on this LiveKit): {', '.join(skipped)}", flush=True)
+        names = [n for n in names if n not in skipped]
     sys.exit(0 if asyncio.run(main(names)) else 1)

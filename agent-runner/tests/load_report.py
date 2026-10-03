@@ -1,6 +1,9 @@
 """A load test's report: what participants heard (the load generator's result) and, step
 by step, what each part of staging was doing meanwhile, so a failing step says why.
 
+Quality, per step (quality.py): what the bot heard against what the participant said
+(word error rate, fragmented and missed sentences) and how long its replies ran.
+
 Inside staging, per step: the bot's own stage timings (its "bot reply" log lines:
 speech-to-text, LLM first token, TTS first audio) and CloudWatch maxima (CPU and memory
 of each service, CPU of each machine group, database CPU and connections).
@@ -19,6 +22,7 @@ import boto3
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from load_plan import parse_reply, stage_summary, step_of  # noqa: E402
+from quality import score_rooms  # noqa: E402
 
 REGION, CLUSTER, DB = "us-east-1", "meetlab-v2-staging", "meetlab-v2-staging"
 SERVICES = ["meet", "agent-runner", "livekit"]          # ECS services with their own CPU/memory
@@ -94,6 +98,18 @@ def markdown(r: dict) -> str:
                          f"{g('meet_cpu')}/{g('meet_mem')} | {g('agent-runner_cpu')}/{g('agent-runner_mem')} | "
                          f"{g('livekit_hosts_cpu')} | {g('bots_hosts_cpu')} | "
                          f"{g('llm_hosts_cpu')} / {g('tts_hosts_cpu')} / {g('stt-nim_hosts_cpu')} | {g('db_cpu')} / {g('db_connections')} |")
+    if r.get("rooms"):
+        lines += ["", "**Quality** (what the bot heard against what was said; how long it talked)", "",
+                  "| step | rooms | sentences | word error rate | fragmented | missed | replies | words p50 / p95 / max | over 40 words |",
+                  "|---|---|---|---|---|---|---|---|---|"]
+        for k, (a, b) in enumerate(r["bounds"][:len(r["steps"])]):
+            q = score_rooms(r["rooms"], a, b)
+            h, rep = q["hearing"], q["replies"]
+            if not h["sentences"]:
+                continue
+            r["steps"][k]["quality"] = q
+            lines.append(f"| {k} | {r['steps'][k]['rooms']} | {h['sentences']} | {h['wer']:.1%} | {h['fragmented']} | {h['missed']} | "
+                         f"{rep['replies']} | {rep['p50_words']} / {rep['p95_words']} / {rep['max_words']} | {rep['over_40_words']} |")
     lines += ["", f"**Capacity** (largest passing step): {r.get('capacity_rooms')} rooms. "
               f"Sessions left running: {len(r.get('sessions_left_running', []))}. "
               f"Harness valid: {r.get('harness_valid')}. **Verdict: {'PASS' if r.get('pass') else 'FAIL'}**"]
@@ -106,8 +122,9 @@ def main(path: str):
     if bounds:
         for m, stages, mx in zip(r["steps"], _stages(bounds), _metrics(bounds)):
             m["server"] = {"stages": stages, "max": mx}
+    text = markdown(r)  # adds each step's quality scores to r
     open(path, "w").write(json.dumps(r, indent=2))
-    print(markdown(r))
+    print(text)
 
 
 if __name__ == "__main__":

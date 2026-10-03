@@ -97,7 +97,8 @@ async def run_room(i: int, run_id: str, steps, t0: float, profile: dict, console
         mic = rtc.LocalAudioTrack.create_audio_track("mic", source)
         await room.local_participant.publish_track(mic)
         asked = time.time()
-        await asyncio.to_thread(console.call, "POST", f"/api/concierge/rooms/{name}/bots", {})
+        started = await asyncio.to_thread(console.call, "POST", f"/api/concierge/rooms/{name}/bots", {})
+        q.put(("session", asked, i, started["request"]["runnerSessionId"]))  # its stored turns, for quality
         while not any(p.identity.startswith("bot_") for p in room.remote_participants.values()):
             if time.time() - asked > 600 or abort.is_set():
                 raise TimeoutError("the bot did not join within 10 min")
@@ -118,6 +119,7 @@ async def run_room(i: int, run_id: str, steps, t0: float, profile: dict, console
                 break
             await listener.wait_until_quiet()
             audio = load_turn_audio(turn.text)
+            q.put(("said", time.time(), i, turn.text))  # quality.py: what the bot should have heard
             for k in range(0, len(audio) - n, n):
                 await source.capture_frame(rtc.AudioFrame(audio[k:k + n].tobytes(), SAMPLE_RATE, 1, n))
             ended = time.time()
@@ -241,6 +243,15 @@ def main() -> int:
             except urllib.error.HTTPError:
                 pass  # the room is gone, and with it the bot
         result["sessions_left_running"] = still
+        # What each room's participant said, and what its conversation stored (quality.py).
+        result["rooms"] = []
+        for _, _, i, session in (e for e in events if e[0] == "session"):
+            try:
+                turns = console.call("GET", f"/api/meetings/{session}/utterances")["utterances"]
+            except urllib.error.HTTPError as e:
+                turns, _ = [], print(f"no turns for room {i}: {e}")
+            result["rooms"].append({"room": i, "session": session, "turns": turns,
+                                    "said": [[t, text] for kind, t, j, text in events if kind == "said" and j == i]})
         passed = [m["rooms"] for m in result["steps"] if m["pass"] and m["rooms"]]
         result["capacity_rooms"] = max(passed, default=0)
         result["harness_valid"] = all(m["harness_lag_ms"] == 0 for m in result["steps"])

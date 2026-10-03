@@ -421,6 +421,26 @@ class TestBuildLLM(unittest.TestCase):
         self.assertEqual((llm._settings.model, llm._settings.system_instruction), ("gpt-4o-mini", "Facilitate."))
 
 
+class TestStageOfMetric(unittest.TestCase):
+    """Which stage a time-to-first-byte belongs to, by the processor that reported it."""
+
+    def test_each_service_reports_its_own_stage(self):
+        from bot import _ttfb_stage
+        self.assertEqual(_ttfb_stage("OpenAILLMService#0"), "llm_ttft_ms")
+        self.assertEqual(_ttfb_stage("ElevenLabsTTSService#0"), "tts_ttfb_ms")
+
+    def test_openais_voice_is_speech_not_the_llm(self):
+        # Kokoro is driven through OpenAITTSService: its first audio overwrote the
+        # LLM's first token when "openai" in the name meant LLM (load test 2026-10-03).
+        from bot import _ttfb_stage
+        self.assertEqual(_ttfb_stage("OpenAITTSService#0"), "tts_ttfb_ms")
+
+    def test_speech_to_text_is_neither(self):
+        from bot import _ttfb_stage
+        self.assertIsNone(_ttfb_stage("OpenAISTTService#0"))
+        self.assertIsNone(_ttfb_stage("NemotronHTTPSTTService#0"))
+
+
 class TestSelfHostedModels(unittest.TestCase):
     """Load-test readiness L3: our own LLM (vLLM) and voice (Kokoro), chosen by config."""
 

@@ -12,7 +12,7 @@ transfer. Budget rule (2026-09-30): staging may cost up to v1 production's avera
 - L4 quality, in every load test: hearing (word error rate, fragmented/missed sentences), reply length, answers judged 1–5 (`judge.py`), voice (intelligibility heard back, UTMOS naturalness).
 - One-machine GPU/LiveKit services: stop-first deploys, circuit breaker, zone rebalancing off, model caches on the machine (NIM ready in 0 s after its one build; was ~20 min every restart).
 
-**Blocked:** GitHub Actions stopped starting jobs: *"recent account payments have failed or your spending limit needs to be increased"* (wwbp → Settings → Billing & plans; an org owner fixes it). Deploys, PR checks and load tests all wait on it.
+**Unblocked by going public (Manual actions):** GitHub Actions had stopped starting jobs (*"recent account payments have failed or your spending limit needs to be increased"*). The repo is public for now; to return to private, a self-hosted runner or the org's spending limit.
 
 **Running, costing money:** the three GPU services (NIM, Qwen, Kokoro) are on: ~$2.50/hour (~$60/day). Switching them off is a PR (`model_services = []`, `stt_nim_enabled = false`), which needs Actions.
 
@@ -150,6 +150,7 @@ next person knows what exists that no PR created. Never record secret values.
 
 | When (UTC) | Who | What | Why it was manual | Undo / rotate |
 |---|---|---|---|---|
+| 2026-10-03 ~17:40 | the user (repo owner) | **wwbp/MeetLab made public**; Actions → fork pull request workflows: *Require approval for all external contributors*. Before: secrets scan of all 59 branches, 304 commits (gitleaks): no leaks | GitHub Actions stopped starting jobs (monthly free quota used; payment/spending limit needs an org owner, ~3 days on a weekend). Public repos run on GitHub's standard runners for free. Accepted exposure: known open gaps (e.g. `/api/record/*` public, F10) and study docs are now readable | Back to private once unblocked: a self-hosted runner (free for private repos), or the org raises the Actions spending limit |
 | 2026-10-03 01:40 | Claude, on the user's yes | `terraform apply` in `infra/v2/bootstrap` (#139): the acceptance role may start the load generator's task (and pass its two roles), find its subnets and group, read `loadtests/` results and CloudWatch metrics; session 1 h → 4 h | CI roles live in bootstrap, which the pipeline cannot change (it would grant itself permissions) | Revert the PR's `acceptance.tf` and apply again |
 | 2026-10-02 | AbhaySingh (run by the assistant on approval) | `terraform apply` of `infra/v2/bootstrap`: DNS name `livekit-staging.wwbp.org` for the apply role; the two self-hosted LiveKit parameters for the acceptance role (#134) | Bootstrap holds CI's own permissions | Re-apply bootstrap from `v2` |
 | 2026-10-02 22:53 | AbhaySingh | Minted the self-hosted LiveKit API key and secret into SSM `/meetlab-v2/staging/SELFHOSTED_LIVEKIT_API_KEY` and `_SECRET` (random, never displayed) | The server's keys must not be in Terraform state; CI can't write secrets | Rotate: put new values, then force a new deployment of livekit, meet, the runner (bots read them at start) |

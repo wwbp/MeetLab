@@ -143,7 +143,7 @@ run "models_restart_from_the_machines_disk" {
       { td = aws_ecs_task_definition.model["llm"], path = "/root/.cache/huggingface" },
       { td = aws_ecs_task_definition.stt_nim, path = "/opt/nim/.cache" },
       ] : anytrue([for v in c.td.volume : v.name == one(jsondecode(c.td.container_definitions)[0].mountPoints).sourceVolume &&
-        one(v.docker_volume_configuration).scope == "shared" && one(v.docker_volume_configuration).autoprovision]) &&
+      one(v.docker_volume_configuration).scope == "shared" && one(v.docker_volume_configuration).autoprovision]) &&
     one(jsondecode(c.td.container_definitions)[0].mountPoints).containerPath == c.path])
     error_message = "Qwen's weights and the NIM's built model stay on the machine across restarts"
   }

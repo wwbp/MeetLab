@@ -90,6 +90,7 @@ A profile is the bot configuration every test room gets, in `agent-runner/load_p
 |---|---|---|
 | `ours` | Qwen2.5-7B-Instruct on our own GPU (vLLM) | Kokoro on our own GPU |
 | `v1` | gpt-5.4-nano (OpenAI) | ElevenLabs |
+| `ours-short` | as `ours`, with one sentence added to today's system prompt: *"Keep each reply to one or two short sentences, the way people speak in conversation."* (the reply-length experiment) | Kokoro |
 | `stored` | whatever the console's global config says | |
 
 Speech-to-text is set for all of staging: Parakeet on our GPU when the NIM is on,

@@ -12,9 +12,9 @@ on:
   workflow_dispatch:
     inputs:
       profile:
-        description: "Stack profile (agent-runner/load_profiles): ours = our models, v1 = v1's vendors, stored = the console's config"
+        description: "Stack profile (agent-runner/load_profiles): ours = our models, ours-short = ours + a short-replies instruction, v1 = v1's vendors, stored = the console's config"
         type: choice
-        options: [ours, v1, stored]
+        options: [ours, ours-short, v1, stored]
         default: ours
       shape:
         description: "smoke | load | stress | spike | soak | breakpoint (agent-runner/load_plan.py)"

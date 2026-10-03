@@ -2,6 +2,7 @@
 import os
 import sys
 import unittest
+from unittest import mock
 from dataclasses import dataclass
 from unittest.mock import MagicMock, patch
 
@@ -418,3 +419,43 @@ class TestBuildLLM(unittest.TestCase):
 
         llm = _build_llm("sk-test", SimpleNamespace(llm_model="gpt-4o-mini", system_prompt="Facilitate."))
         self.assertEqual((llm._settings.model, llm._settings.system_instruction), ("gpt-4o-mini", "Facilitate."))
+
+
+class TestSelfHostedModels(unittest.TestCase):
+    """Load-test readiness L3: our own LLM (vLLM) and voice (Kokoro), chosen by config."""
+
+    def _config(self, **kw):
+        from types import SimpleNamespace
+
+        return SimpleNamespace(**{"llm_model": "gpt-5.4-nano", "system_prompt": "Facilitate.",
+                                  "tts_provider": "elevenlabs", "tts_voice": "", **kw})
+
+    def test_the_model_our_vllm_serves_goes_to_our_server(self):
+        from bot import _build_llm
+
+        env = {"SELFHOSTED_LLM_URL": "http://models.internal:8000/v1", "SELFHOSTED_LLM_MODEL": "Qwen/Qwen2.5-7B-Instruct"}
+        with mock.patch.dict(os.environ, env):
+            llm = _build_llm("sk-test", self._config(llm_model="Qwen/Qwen2.5-7B-Instruct"))
+        self.assertEqual(str(llm._client.base_url), "http://models.internal:8000/v1/")
+
+    def test_any_other_model_still_goes_to_openai(self):
+        from bot import _build_llm
+
+        with mock.patch.dict(os.environ, {"SELFHOSTED_LLM_URL": "http://models.internal:8000/v1",
+                                          "SELFHOSTED_LLM_MODEL": "Qwen/Qwen2.5-7B-Instruct"}):
+            llm = _build_llm("sk-test", self._config(llm_model="gpt-5.4-nano"))
+        self.assertIn("api.openai.com", str(llm._client.base_url))
+
+    def test_kokoro_speaks_through_our_server(self):
+        from bot import _build_tts
+
+        with mock.patch.dict(os.environ, {"KOKORO_TTS_URL": "http://models.internal:8880/v1"}):
+            tts = _build_tts(self._config(tts_provider="kokoro", tts_voice="alloy"), "sk-test", "el-test", None)
+        self.assertEqual(str(tts._client.base_url), "http://models.internal:8880/v1/")
+
+    def test_kokoro_without_its_server_fails_at_setup(self):
+        from bot import _build_tts
+
+        env = {k: v for k, v in os.environ.items() if k != "KOKORO_TTS_URL"}
+        with mock.patch.dict(os.environ, env, clear=True), self.assertRaises(ValueError):
+            _build_tts(self._config(tts_provider="kokoro"), "sk-test", "el-test", None)

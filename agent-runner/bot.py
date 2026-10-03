@@ -611,19 +611,8 @@ async def _bot(runner_args: LiveKitRunnerArguments):
         from mock_services import MockTTSService
         logger.warning("BOT_MOCK_TTS enabled — synthetic silence, no TTS API calls")
         tts = MockTTSService(text_aggregation_mode=_tts_mode)
-    elif bot_config.tts_provider == "openai":
-        from pipecat.services.openai.tts import OpenAITTSService
-        tts = OpenAITTSService(
-            api_key=openai_api_key,
-            voice=bot_config.tts_voice or "alloy",
-            text_aggregation_mode=_tts_mode,
-        )
     else:
-        tts = ElevenLabsTTSService(
-            api_key=elevenlabs_api_key,
-            settings=ElevenLabsTTSService.Settings(voice=bot_config.tts_voice),
-            text_aggregation_mode=_tts_mode,
-        )
+        tts = _build_tts(bot_config, openai_api_key, elevenlabs_api_key, _tts_mode)
     logger.info(
         f"TTS: provider={bot_config.tts_provider} voice={bot_config.tts_voice}"
         f" aggregation={bot_config.tts_aggregation_mode}"
@@ -1013,6 +1002,7 @@ async def _bot(runner_args: LiveKitRunnerArguments):
                 )
                 await _set_root_utterance_if_needed(db, runner_args.session_id, utt_id)
         _last_bot_utt_id[0] = utt_id
+        logger.info(f"bot reply {utt_id} stored for session {runner_args.session_id} latency_ms={meta.get('latency_ms')}")
 
     # --- transport hooks ---
 
@@ -1320,9 +1310,30 @@ def build_audio_track_sink(
 
 
 def _build_llm(api_key: str, bot_config) -> OpenAILLMService:
-    """Model and system prompt as settings (Pipecat 1.9+; a "system" context message is removed in 2.0)."""
-    return OpenAILLMService(api_key=api_key, settings=OpenAILLMService.Settings(
-        model=bot_config.llm_model, system_instruction=bot_config.system_prompt))
+    """Model and system prompt as settings (Pipecat 1.9+; a "system" context message is removed in 2.0).
+    The model our vLLM serves (SELFHOSTED_LLM_MODEL) goes to our server; any other to OpenAI."""
+    ours = bot_config.llm_model == os.environ.get("SELFHOSTED_LLM_MODEL")
+    return OpenAILLMService(
+        api_key=api_key, base_url=os.environ["SELFHOSTED_LLM_URL"] if ours else None,
+        settings=OpenAILLMService.Settings(model=bot_config.llm_model, system_instruction=bot_config.system_prompt))
+
+
+def _build_tts(bot_config, openai_api_key: str, elevenlabs_api_key: str, mode):
+    """The voice the config names. "kokoro" is our own server (Kokoro-FastAPI), which speaks
+    OpenAI's API and maps OpenAI voice names to Kokoro voices."""
+    if bot_config.tts_provider in ("openai", "kokoro"):
+        from pipecat.services.openai.tts import OpenAITTSService
+
+        base_url = None
+        if bot_config.tts_provider == "kokoro":
+            base_url = os.environ.get("KOKORO_TTS_URL")
+            if not base_url:
+                raise ValueError("tts_provider=kokoro needs KOKORO_TTS_URL (our Kokoro server)")
+        return OpenAITTSService(api_key=openai_api_key, base_url=base_url,
+                                voice=bot_config.tts_voice or "alloy", text_aggregation_mode=mode)
+    return ElevenLabsTTSService(api_key=elevenlabs_api_key,
+                                settings=ElevenLabsTTSService.Settings(voice=bot_config.tts_voice),
+                                text_aggregation_mode=mode)
 
 
 def _find_participant(remote_participants: dict, participant_id: str):

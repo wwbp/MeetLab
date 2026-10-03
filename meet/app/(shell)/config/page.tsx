@@ -46,13 +46,14 @@ const STT_MODELS = [
 
 const LLM_MODELS = [
   'gpt-5.4-nano',
+  'Qwen/Qwen2.5-7B-Instruct', // ours (vLLM), when staging runs it
   'gpt-5.4-mini',
   'gpt-4.1-nano',
   'gpt-4.1-mini',
   'gpt-4o-mini',
 ];
 
-const TTS_PROVIDERS = ['elevenlabs', 'openai'];
+const TTS_PROVIDERS = ['elevenlabs', 'openai', 'kokoro']; // kokoro: our server, OpenAI voice names
 
 export default function ConfigPage() {
   const [scope, setScope] = useState('global');
@@ -273,13 +274,13 @@ export default function ConfigPage() {
                   ))}
                 </select>
               </Field>
-              <Field label={form.tts_provider === 'openai' ? 'Voice Name' : 'Voice ID'}>
+              <Field label={form.tts_provider === 'elevenlabs' ? 'Voice ID' : 'Voice Name'}>
                 <input
                   type="text"
                   value={form.tts_voice}
                   onChange={(e) => setForm((f) => ({ ...f, tts_voice: e.target.value }))}
                   className={inp}
-                  placeholder={form.tts_provider === 'openai' ? 'alloy' : 'WhMcMcvXQ8T2QfmQmlYh'}
+                  placeholder={form.tts_provider === 'elevenlabs' ? 'WhMcMcvXQ8T2QfmQmlYh' : 'alloy'}
                   required
                 />
               </Field>

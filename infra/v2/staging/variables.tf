@@ -9,6 +9,16 @@ variable "stt_nim_enabled" {
   default     = false # on for its first live test 2026-10-02 (#116, #117); passed
 }
 
+variable "model_services" {
+  description = "Our own models to run, each on an on-demand g6.xlarge ($0.805/hour): llm (Qwen on vLLM), tts (Kokoro)"
+  type        = set(string)
+  default     = []
+  validation {
+    condition     = length(setsubtract(var.model_services, ["llm", "tts"])) == 0
+    error_message = "model_services names llm and/or tts"
+  }
+}
+
 variable "bot_pool_min" {
   description = "Bot machines kept warm at all times (each $62/month); 0 on staging: tests and studies use Prepare for study"
   type        = number

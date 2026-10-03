@@ -139,6 +139,16 @@ and merge it (merge = deploy). What happens:
 `g6.xlarge` is the smallest machine that can run it: the model needs 13.75 GB of GPU
 memory, and the fractional-GPU machines top out at 11.4 GB (ledger).
 
+## Switching our own LLM and voice on and off
+
+Same idea, for the language model (Qwen, on vLLM) and the voice (Kokoro): set
+`default = ["llm", "tts"]` on `model_services` in `infra/v2/staging/variables.tf` (or
+just one of them) and merge. Each starts its own `g6.xlarge` ($0.805/hour) and
+downloads its model first (minutes). Then, in the console's Bot Config, a room uses
+them by choosing `Qwen/Qwen2.5-7B-Instruct` as its model and `kokoro` as its voice
+provider (voice names like `alloy` work). The `our_models` live test waits for both,
+then checks a bot answers and speaks on them. Turn them off with `default = []`.
+
 ## Running the live tests yourself
 
 The same tests CI runs, from your laptop:

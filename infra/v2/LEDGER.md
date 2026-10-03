@@ -23,6 +23,7 @@ $7.1k in September, all lab projects). So this is priced from what runs:
 
 | Added | PR | Resource | $/month | Notes |
 |---|---|---|---|---|
+| 2026-10-02 | L3 PR | Our models (`models.tf`, `model_services`): `llm` (Qwen2.5-7B-Instruct on vLLM) and `tts` (Kokoro), each a `g6.xlarge` on-demand, 0 to 1, + internal NLB and 100 GB disk while on | 0 off | $0.805/hour + ~$0.03/hour NLB each while on; with the NIM, a fully-ours hour ≈ $2.50 |
 | 2026-10-02 | #126, then reverted | One bot machine always warm (`bot_pool_min = 1`, `c6i.large`) | ~~62~~ 0 | Set back to 0 the same day (user's choice: save money until production); the live tests press Prepare for study instead (~$0.10 a run) |
 | 2026-10-02 | #114, on-demand PR | Staging Parakeet NIM: `g6.xlarge` on-demand, 0 to 1, + internal NLB and 100 GB disk while on | 0 off | $0.805/hour + ~$0.03/hour NLB while on (an hour-long test ≈ $0.85) |
 | 2026-09-30 | 4c PR 1 | Bot pool: c6i.large, 0 to 2 instances | 0 idle | $0.085/hour each while bots run |
@@ -101,6 +102,7 @@ Also seen: managed scaling launched **two** instances for one pending task.
 | Item | Staging now | At load testing |
 |---|---|---|
 | STT | Deepgram (`STT_MODEL_OVERRIDE`) unless the NIM is switched on: `g6.xlarge` on-demand, 0 instances unless a test needs it ($0.805/hour on) | On-demand or reserved NIM capacity, sized from the test |
+| LLM, TTS | One `g6.xlarge` each, weights downloaded on every cold start | Size from the load test (rooms per GPU); cache weights (EFS or warm instance); maybe both on one bigger GPU |
 | Bot pool | `c6i.large`, 0 to 2 | Instance type, floor and ceiling from measured per-session load |
 | Services instance | one `t3.medium` | Sized from the test |
 | Database | `db.t4g.small`, single-AZ | Sized up, multi-AZ before a study |
@@ -131,6 +133,7 @@ next person knows what exists that no PR created. Never record secret values.
 
 | Date | Decision | Why | Revisit when |
 |---|---|---|---|
+| 2026-10-02 | **Our own LLM and voice** (load-test readiness L3; `models.tf`, `model_services`, off by default): Qwen2.5-7B-Instruct on `vllm/vllm-openai:v0.30.0` and Kokoro on `ghcr.io/remsky/kokoro-fastapi-gpu:v0.9.0`, each its own GPU service behind an internal NLB. A room picks them in its config: `llm_model = Qwen/Qwen2.5-7B-Instruct` goes to our vLLM (any other model to OpenAI), `tts_provider = kokoro` to our Kokoro with OpenAI voice names | User's choice: no vendor LLM/TTS costs for load tests; quality first, then speed. Both speak OpenAI's API, so Pipecat's OpenAI services drive them (`base_url`); Pipecat's own Kokoro runs in the bot's process, which would put a model in every bot. Separate services so each switches and scales alone | L4 quality scores against v1's stack; L6 rooms per GPU |
 | 2026-10-02 | **Self-hosted LiveKit** (`livekit.tf`, `livekit_self_hosted`, off by default): `livekit-server` v1.12.0 on one c6i.large with a public IP; signalling `wss://livekit-staging.wwbp.org` through the load balancer's TLS; media straight to the machine (7881/TCP, 7882/UDP open; every join needs a signed token). meet, the runner and bots switch together; live tests follow the `livekit` output and skip the video scenarios | User's choice: test (and later serve) on our own media layer without using v1's LiveKit project quota. A private-only server would have forced the whole live suite into AWS; this is the standard LiveKit shape and grows into production by adding TURN and an egress server | Before it serves a study: TURN (strict firewalls), egress (video), more than one node |
 | 2026-10-02 | Load-test readiness L1: each bot's database pool is 2 connections, no overflow (`DB_POOL_SIZE`, `DB_MAX_OVERFLOW`); the bot pool's ceiling is `bot_pool_max` (default 2); per-task metrics are `container_insights` (default off) | Staging held at most ~6 sessions (2 machines), and 100 bots on SQLAlchemy's default pool (up to 15 each) would exhaust db.t4g.small's ~180 connections. Insights is billed per task, so it is on only for test runs | Load test results: pool size per bot, database size |
 | 2026-10-02 | Auto-record starts at the session (`/start`, in the runner), not when the first person joins (in the bot); the bot captures per-speaker audio from its start; the greeting and closing message are stored by the bot when spoken | v2's bot task called the runner's `start_recording_for_room` itself, but only the runner holds the egress key, so **auto-record recorded no video** on v2. And in v1 and v2 the greeting (1 s after someone joins) played before the room recording, the bot's own audio capture and the transcript caught it | — |

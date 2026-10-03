@@ -1,4 +1,5 @@
 import asyncio
+import json
 import os
 import re
 import sys
@@ -1002,7 +1003,9 @@ async def _bot(runner_args: LiveKitRunnerArguments):
                 )
                 await _set_root_utterance_if_needed(db, runner_args.session_id, utt_id)
         _last_bot_utt_id[0] = utt_id
-        logger.info(f"bot reply {utt_id} stored for session {runner_args.session_id} latency_ms={meta.get('latency_ms')}")
+        # Read back by load tests (load_plan.parse_reply): which stage slows down under load.
+        logger.info(f"bot reply {utt_id} stored for session {runner_args.session_id} "
+                    f"latency_ms={meta.get('latency_ms')} timing={json.dumps(timing, separators=(',', ':'))}")
 
     # --- transport hooks ---
 

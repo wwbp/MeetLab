@@ -1,0 +1,107 @@
+# Load testing v2 — how much can it carry, and how well
+
+A load test answers two questions: **how many meetings can staging hold at once**, and
+**what does a participant experience while it does**. We answer them the same way for
+every stack we might run (our own models, v1's paid vendors, anything later), so the
+answers can be compared side by side.
+
+## What a test does
+
+Each test room is a real meeting. The console creates it, a synthetic participant joins
+and talks, the console starts the bot, and the participant **listens**: a reply counts
+only when the bot's voice actually arrives in the room. The participant speaks one of
+five scripted conversations (24 recorded sentences, kept in
+`agent-runner/tests/fixtures/conversations/`), waits for the bot to finish, pauses like a
+person, and speaks again. The recordings never change, so every run hears the same audio.
+
+The synthetic participants run inside AWS (a "load generator" task), not on a laptop, so
+the numbers measure staging and not someone's home network.
+
+## The six standard tests ("shapes")
+
+| Shape | What it does | The question it answers |
+|---|---|---|
+| **smoke** | 1 room for 3 minutes | Does everything work at all? Run first, always. |
+| **load** | Climbs to the expected number of rooms in 5 steps, then holds it 15 minutes | Does it work well at the size we expect? |
+| **stress** | Steps from a quarter of the expected size to **double** it, 5 minutes per step | How does it degrade past our expectations? |
+| **spike** | All rooms start within 30 seconds, held 5 minutes | What happens when a whole study opens at once? |
+| **soak** | Climbs to the expected size and holds it for an **hour** | Does anything leak or wear out over time? |
+| **breakpoint** | Adds a fifth of the expected size every 5 minutes, up to triple, and **stops at the first failing step** | What is the capacity? |
+
+Every test ends with 2 minutes of no rooms, to check that every session closed by itself.
+
+## What "passing" means
+
+Every step of every test is judged by the same rules, whatever stack is under test:
+
+| Rule | Threshold | Why |
+|---|---|---|
+| **Reply rate** | at least 95% of turns answered | A bot that skips turns is broken, however fast it is |
+| **Response time (p95)** | at most 2 seconds from the end of a turn to the bot's first sound | Past 2 s a conversation feels broken (see `performance-tests.md`) |
+| **Start errors** | none | Every room asked for a bot gets one |
+| **Disconnects** | none | No participant is dropped |
+
+"p95" means 19 turns in 20 were at least this fast. We also report p50 (the typical
+turn), p99 (the worst 1 in 100), and how long bots took to join (join p95).
+
+The **capacity** of a stack is the largest step that passed. After the run, any session
+still marked running counts as a failure: something didn't close.
+
+If the load generator itself falls behind (its participants can't speak in real time), the
+result says **HARNESS OVERLOADED** and its numbers are not trusted. Rerun with more CPU.
+
+## Stack profiles
+
+A profile is the bot configuration every test room gets, in `agent-runner/load_profiles/`:
+
+| Profile | Language model | Voice |
+|---|---|---|
+| `ours` | Qwen2.5-7B-Instruct on our own GPU (vLLM) | Kokoro on our own GPU |
+| `v1` | gpt-5.4-nano (OpenAI) | ElevenLabs |
+| `stored` | whatever the console's global config says | |
+
+Speech-to-text is set for all of staging: Parakeet on our GPU when the NIM is on,
+Deepgram otherwise. A new stack to compare is a new profile file, nothing more.
+
+`v1` costs money per turn: run it small (smoke, load at a few rooms) as the reference
+point, and run the big shapes on `ours`.
+
+## Running one
+
+1. **Switch on what the profile needs.** For `ours`: `model_services = ["llm", "tts"]` and
+   `stt_nim_enabled = true` (see `v2-deployment.md`). Beyond about 6 rooms, also raise
+   `bot_pool_max` (each bot machine holds about 3 sessions; default 2 machines).
+2. **Start it** from GitHub → Actions → *Load test v2* → *Run workflow* on branch `v2`,
+   or from a terminal:
+   ```bash
+   gh workflow run loadtest-v2.yml --ref v2 -f profile=ours -f shape=smoke -f target=10
+   ```
+   `hold_s=60` shortens every step for a quick rehearsal.
+3. **Read it.** The run's summary page shows one row per step and the verdict; the full
+   result (JSON) is saved in the media bucket under `loadtests/`.
+4. **Switch things back off** with a PR. GPUs cost $0.805/hour each while on.
+
+The test presses **Prepare for study** for its largest step before starting and **Stop
+preparing** at the end, exactly as a researcher would, so bot machines are warm and the
+test measures the system under load, not machines booting. (A cold start is measured
+separately: the acceptance tests record how long a bot takes to join.)
+
+## Rehearsing locally
+
+The same driver runs against the local Docker stack:
+
+```bash
+docker compose -f .devcontainer/docker-compose.yml exec -T \
+  -e MEET_URL=http://meet:3000 -e CONSOLE_PASSWORD=... -e LIVEKIT_URL=ws://transport-server:7880 \
+  -e PROFILE=stored -e SHAPE=load -e TARGET=2 -e HOLD_S=45 -e PREPARE=0 \
+  agent-runner uv run python tests/load_run.py
+```
+
+## Where the code is
+
+| What | Where |
+|---|---|
+| Shapes, rules, measurements (pure, unit-tested) | `agent-runner/load_plan.py`, `tests/test_load_plan.py` |
+| The driver: rooms, participants, listening | `agent-runner/tests/load_run.py` |
+| Load generator in AWS | `infra/v2/staging/loadgen.tf` |
+| The workflow | `.github/workflows/loadtest-v2.yml` |

@@ -119,4 +119,32 @@ run "single_machine_services_replace_their_task_instead_of_rolling" {
     s.deployment_minimum_healthy_percent == 0 && s.deployment_maximum_percent == 100])
     error_message = "a one-machine service stops its old task before starting the new one"
   }
+  assert {
+    condition = alltrue([for s in concat(values(aws_ecs_service.model), aws_ecs_service.stt_nim, aws_ecs_service.livekit) :
+    one(s.deployment_circuit_breaker).enable && one(s.deployment_circuit_breaker).rollback])
+    error_message = "a deploy that cannot start ends and rolls back, instead of retrying every 30 min for ever"
+  }
+}
+
+# Stop-first makes every change a restart: the model must come back from the machine's
+# disk in minutes, not download (Qwen, ~15 GB) or rebuild (the NIM, ~20 min) again.
+# A Docker volume ECS creates on first use and keeps after the task stops, filled from the
+# image's own directory (ownership included, so the container's user can write it).
+run "models_restart_from_the_machines_disk" {
+  command = apply
+
+  variables {
+    model_services  = ["llm", "tts"]
+    stt_nim_enabled = true
+  }
+
+  assert {
+    condition = alltrue([for c in [
+      { td = aws_ecs_task_definition.model["llm"], path = "/root/.cache/huggingface" },
+      { td = aws_ecs_task_definition.stt_nim, path = "/opt/nim/.cache" },
+      ] : anytrue([for v in c.td.volume : v.name == one(jsondecode(c.td.container_definitions)[0].mountPoints).sourceVolume &&
+        one(v.docker_volume_configuration).scope == "shared" && one(v.docker_volume_configuration).autoprovision]) &&
+    one(jsondecode(c.td.container_definitions)[0].mountPoints).containerPath == c.path])
+    error_message = "Qwen's weights and the NIM's built model stay on the machine across restarts"
+  }
 }

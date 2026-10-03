@@ -19,6 +19,7 @@ locals {
       # 16-bit 7B near 20 tokens/s, and the bot waits for a whole first sentence (LEDGER).
       command = ["--model", "Qwen/Qwen2.5-7B-Instruct", "--quantization", "fp8", "--max-model-len", "8192", "--gpu-memory-utilization", "0.90"]
       memory  = 8192
+      cache   = "/root/.cache/huggingface" # the weights, kept across restarts (see the task definition)
     }
     tts = {
       image   = "ghcr.io/remsky/kokoro-fastapi-gpu:v0.9.0"
@@ -27,6 +28,7 @@ locals {
       health  = "/health"
       command = null
       memory  = 4096
+      cache   = null # the image carries the model
     }
   }
   running_models = { for k, m in local.models : k => m if contains(var.model_services, k) }
@@ -163,8 +165,23 @@ resource "aws_ecs_task_definition" "model" {
   network_mode             = "bridge"
   skip_destroy             = true # see tests/runner.tftest.hcl
   execution_role_arn       = aws_iam_role.execution.arn
+  # Deploys stop the old task first (the service below), so every change is a restart: the
+  # weights come back from this machine's disk, not a 15 GB download. A Docker volume ECS
+  # creates on first use and keeps after the task stops; a replaced machine starts cold.
+  dynamic "volume" {
+    for_each = each.value.cache == null ? [] : [each.key]
+    content {
+      name = "${each.key}-cache"
+      docker_volume_configuration {
+        scope         = "shared"
+        autoprovision = true
+        driver        = "local"
+      }
+    }
+  }
   container_definitions = jsonencode([{
     name                 = each.key
+    mountPoints          = each.value.cache == null ? [] : [{ sourceVolume = "${each.key}-cache", containerPath = each.value.cache }]
     image                = each.value.image
     essential            = true
     memoryReservation    = each.value.memory
@@ -227,8 +244,12 @@ resource "aws_ecs_service" "model" {
   # and the deploy waits forever (FP8, 2026-10-03).
   deployment_minimum_healthy_percent = 0
   deployment_maximum_percent         = 100
-  health_check_grace_period_seconds  = 1800  # cold start: image and weights download
-  wait_for_steady_state              = false # the live test waits for a ready model instead
+  deployment_circuit_breaker {
+    enable   = true # a deploy that cannot start ends and rolls back (3 failures)
+    rollback = true
+  }
+  health_check_grace_period_seconds = 1800  # cold start: image and weights download
+  wait_for_steady_state             = false # the live test waits for a ready model instead
   capacity_provider_strategy {
     capacity_provider = aws_ecs_capacity_provider.model[each.key].name
     weight            = 1

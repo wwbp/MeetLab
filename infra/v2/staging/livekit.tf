@@ -211,6 +211,10 @@ resource "aws_ecs_service" "livekit" {
   # One machine, host ports (max_size 1): stop the old task first (see models.tf).
   deployment_minimum_healthy_percent = 0
   deployment_maximum_percent         = 100
+  deployment_circuit_breaker {
+    enable   = true # a deploy that cannot start ends and rolls back (3 failures)
+    rollback = true
+  }
   capacity_provider_strategy {
     capacity_provider = aws_ecs_capacity_provider.livekit.name
     weight            = 1

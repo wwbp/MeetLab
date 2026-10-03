@@ -74,6 +74,18 @@ $7.1k in September, all lab projects). So this is priced from what runs:
 
 ## Measurements
 
+**First load test on our own stack, 2026-10-03** (`load`, target 5, profile `ours`: NIM + Qwen2.5-7B 16-bit on vLLM + Kokoro, self-hosted LiveKit; run 37090373932). The 15-minute hold at 5 rooms, 161 turns:
+
+| Measure | Value | Rule |
+|---|---|---|
+| Turns answered | 100% | ≥ 95% ✅ |
+| End of speech → first bot audio, p50 / p95 / p99 | 1,544 / 2,474 / 3,205 ms | p95 ≤ 2,000 ❌ |
+| Bot join p95; start errors; disconnects; sessions left open | 5 s; 0; 0; 0 | ✅ |
+| Peak CPU: bot machines / meet / runner / LiveKit / database | 32% / 7% / 5% / 7% / 6% (9 connections) | not the limit |
+| Bot stages p50 / p95: speech-to-text; Kokoro first audio; **waiting for Qwen's whole first sentence** | 347 / 351; 71 / 125; **653 / 1,262 ms** | |
+
+The LLM's generation speed is the whole problem: memory-bound at ~20 tokens/s for 16-bit 7B on an L4 (300 GB/s), and TTS waits for a full sentence. (Kokoro's time was logged as "LLM first token" until #141.)
+
 **Staging STT NIM cold start, 2026-10-02** (#117, on-demand `g6.xlarge`, NIM log timestamps):
 
 | Step | Time (UTC) | Elapsed |
@@ -135,6 +147,7 @@ next person knows what exists that no PR created. Never record secret values.
 
 | Date | Decision | Why | Revisit when |
 |---|---|---|---|
+| 2026-10-03 | **Qwen weights in 8 bits** (`--quantization fp8`, same L4) | First load test: the first sentence waited 653 ms p50 / 1,262 p95, making p95 2.47 s against a 2 s rule; generation is memory-bound, so halving the bytes per weight roughly doubles tokens/s at no extra cost (user's choice over a bigger GPU, clause-level TTS, or a smaller model) | L4 quality scores show a loss; or still too slow → g6e (L40S, $1.86/h) |
 | 2026-10-03 | **Load tests are standard shapes × stack profiles, judged by fixed SLOs** (`load_plan.py`, `tests/load_run.py`, `docs/load-testing.md`): smoke, load, stress (to 2×), spike, soak (1 h), breakpoint (to 3×, stops at the first failure = capacity); a profile is the bot config every room gets (`load_profiles/`). SLOs per step, for every profile: reply rate ≥ 95%, p95 end-of-turn → first bot audio ≤ 2 s, no start errors, no disconnects; afterwards no session left running. Runs from a Fargate task in AWS, started by the *Load test v2* workflow (dispatched on `v2`; `main` stays frozen) | User: "load/performance/stress tests in a standard way, transferable across our chosen config". The participant listens for the bot's audio (as `conversation_soak.py` taught us: a log line is not a reply); the 24 recorded turns are committed so every run hears the same speech; Prepare for study runs first so cold starts don't pollute load numbers; a lag monitor flags runs where the harness, not staging, was the bottleneck | After the first runs: server-side metrics in the result (CPU/memory per service, vLLM queue/KV cache, database connections); SLO thresholds against study needs |
 | 2026-10-02 | **Our own LLM and voice** (load-test readiness L3; `models.tf`, `model_services`, off by default): Qwen2.5-7B-Instruct on `vllm/vllm-openai:v0.30.0` and Kokoro on `ghcr.io/remsky/kokoro-fastapi-gpu:v0.9.0`, each its own GPU service behind an internal NLB. A room picks them in its config: `llm_model = Qwen/Qwen2.5-7B-Instruct` goes to our vLLM (any other model to OpenAI), `tts_provider = kokoro` to our Kokoro with OpenAI voice names | User's choice: no vendor LLM/TTS costs for load tests; quality first, then speed. Both speak OpenAI's API, so Pipecat's OpenAI services drive them (`base_url`); Pipecat's own Kokoro runs in the bot's process, which would put a model in every bot. Separate services so each switches and scales alone | L4 quality scores against v1's stack; L6 rooms per GPU |
 | 2026-10-02 | **Self-hosted LiveKit** (`livekit.tf`, `livekit_self_hosted`, off by default): `livekit-server` v1.12.0 on one c6i.large with a public IP; signalling `wss://livekit-staging.wwbp.org` through the load balancer's TLS; media straight to the machine (7881/TCP, 7882/UDP open; every join needs a signed token). meet, the runner and bots switch together; live tests follow the `livekit` output and skip the video scenarios | User's choice: test (and later serve) on our own media layer without using v1's LiveKit project quota. A private-only server would have forced the whole live suite into AWS; this is the standard LiveKit shape and grows into production by adding TURN and an egress server | Before it serves a study: TURN (strict firewalls), egress (video), more than one node |

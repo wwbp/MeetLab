@@ -46,6 +46,13 @@ run "switched_on_each_model_runs_on_its_own_gpu_behind_a_private_load_balancer" 
     error_message = "Qwen2.5-7B-Instruct on vLLM, Kokoro on Kokoro-FastAPI, both pinned"
   }
   assert {
+    condition = (
+      contains(jsondecode(aws_ecs_task_definition.model["llm"].container_definitions)[0].command, "--quantization") &&
+      contains(jsondecode(aws_ecs_task_definition.model["llm"].container_definitions)[0].command, "fp8")
+    )
+    error_message = "8-bit weights: an L4's 300 GB/s caps 16-bit Qwen-7B near 20 tokens/s, and the first sentence waited 653 ms p50 (load test 2026-10-03)"
+  }
+  assert {
     condition = alltrue([for k, td in aws_ecs_task_definition.model :
     jsondecode(td.container_definitions)[0].resourceRequirements == [{ type = "GPU", value = "1" }]])
     error_message = "each on its own GPU"

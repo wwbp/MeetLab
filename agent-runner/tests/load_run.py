@@ -46,6 +46,37 @@ MAX_LAG_MS = 500  # a worker's event loop late by more: its microphones were not
 
 
 CLIPS = Path("/tmp/load-clips")
+LIBRARY_DIR = Path("/tmp/load-library")  # the conversation library, fetched once (LIBRARY)
+
+
+def _library() -> list[dict] | None:
+    """The conversation library's dialogues if this run uses it (conversation_library.py)."""
+    manifest = LIBRARY_DIR / "library.json"
+    return json.loads(manifest.read_text())["dialogues"] if os.getenv("LIBRARY") and manifest.exists() else None
+
+
+def _fetch_library(where: str) -> None:
+    """LIBRARY: an s3://…/library.json or a local one; its audio sits beside it."""
+    import shutil
+    LIBRARY_DIR.mkdir(parents=True, exist_ok=True)
+    if not where.startswith("s3://"):
+        for f in Path(where).parent.iterdir():
+            shutil.copy(f, LIBRARY_DIR / f.name)
+        return
+    import boto3
+    bucket, key = where[5:].split("/", 1)
+    prefix, s3 = key.rsplit("/", 1)[0] + "/", boto3.client("s3")
+    for page in s3.get_paginator("list_objects_v2").paginate(Bucket=bucket, Prefix=prefix):
+        for o in page.get("Contents", []):
+            s3.download_file(bucket, o["Key"], str(LIBRARY_DIR / o["Key"].rsplit("/", 1)[-1]))
+
+
+def _wav(path: Path):
+    import wave
+
+    import numpy as np
+    with wave.open(str(path)) as w:
+        return np.frombuffer(w.readframes(w.getnframes()), dtype=np.int16)
 
 
 class ClipRecorder:
@@ -100,14 +131,18 @@ async def _sleep_until(t: float, abort) -> bool:
 async def run_room(i: int, run_id: str, steps, t0: float, profile: dict, console: Console, q, abort):
     from conversation_soak import BotListener, load_turn_audio
 
+    from conversation_library import participants_for, room_plan
     from quality import record_turn
 
+    library = _library()
+    people = participants_for(i) if library else 1  # 1-3 people, as in studies (library runs)
     window = room_window(i, steps, t0)
     if not window or not await _sleep_until(window[0], abort):
         return
     leave = window[1]
     name = f"load-{run_id}-{i:03d}"
-    room, listener, closing = rtc.Room(), BotListener(), {"intentional": False}
+    rooms, listener, closing = [rtc.Room() for _ in range(people)], BotListener(), {"intentional": False}
+    room = rooms[0]  # the first person also listens for the bot, for everyone
     recorder, recording = ClipRecorder(), None  # recording: where the current clip goes
 
     @room.on("track_subscribed")
@@ -116,20 +151,24 @@ async def run_room(i: int, run_id: str, steps, t0: float, profile: dict, console
             listener.watch(track)
             recorder.watch(track)
 
-    @room.on("disconnected")
     def _on_disconnected(*_):
         if not closing["intentional"]:
             q.put(("disconnect", time.time(), i, name))
+
+    for r in rooms:
+        r.on("disconnected", _on_disconnected)
 
     try:
         from _sim_common import token
         await asyncio.to_thread(console.call, "POST", "/api/concierge/rooms", {"name": name})
         if profile:
             await asyncio.to_thread(console.call, "PUT", "/api/console/config", {"scope": name, **profile})
-        await room.connect(os.environ["LIVEKIT_URL"], token(name, f"load_{i:03d}", ttl_minutes=24 * 60))
-        source = rtc.AudioSource(SAMPLE_RATE, 1, queue_size_ms=120)  # paces capture_frame to real time
-        mic = rtc.LocalAudioTrack.create_audio_track("mic", source)
-        await room.local_participant.publish_track(mic)
+        sources = []
+        for p, r in enumerate(rooms):
+            who = f"load_{i:03d}" if people == 1 else f"load_{i:03d}_{p}"
+            await r.connect(os.environ["LIVEKIT_URL"], token(name, who, ttl_minutes=24 * 60))
+            sources.append(rtc.AudioSource(SAMPLE_RATE, 1, queue_size_ms=120))  # paces capture_frame to real time
+            await r.local_participant.publish_track(rtc.LocalAudioTrack.create_audio_track("mic", sources[-1]))
         asked = time.time()
         started = await asyncio.to_thread(console.call, "POST", f"/api/concierge/rooms/{name}/bots", {})
         q.put(("session", asked, i, started["request"]["runnerSessionId"]))  # its stored turns, for quality
@@ -141,42 +180,49 @@ async def run_room(i: int, run_id: str, steps, t0: float, profile: dict, console
     except Exception as e:
         q.put(("start_error", time.time(), i, f"{name}: {e!r}"[:300]))
         closing["intentional"] = True
-        await room.disconnect()
+        for r in rooms:
+            await r.disconnect()
         return
 
     try:
         await asyncio.sleep(4)  # the greeting starts 1 s after someone joins
         await listener.wait_until_quiet()
         n = SAMPLE_RATE * FRAME_MS // 1000
-        for turn_no, turn in enumerate(t for _ in iter(int, 1) for t in conversation_for(i)):
+        # (who speaks, what, their audio, how long the bot has to answer, the pause after)
+        if library:
+            script = [(p, line["text"], LIBRARY_DIR / line["audio"], 8.0, 3.0) for p, line in room_plan(i, library)]
+        else:
+            script = [(0, t.text, None, t.expect_reply_within_s, t.pause_after_s) for t in conversation_for(i)]
+        for turn_no, (speaker, text, wav, expect_s, pause_s) in enumerate(t for _ in iter(int, 1) for t in script):
             if time.time() > leave or abort.is_set():
                 break
             await listener.wait_until_quiet()
             if recording:  # the sampled reply has finished
                 recorder.save(recording)
                 recording = None
-            audio = load_turn_audio(turn.text)
+            audio = _wav(wav) if wav else load_turn_audio(text)
             said_at = time.time()
-            q.put(("said", said_at, i, turn.text))  # quality.py: what the bot should have heard
+            q.put(("said", said_at, i, text))  # quality.py: what the bot should have heard
             for k in range(0, len(audio) - n, n):
-                await source.capture_frame(rtc.AudioFrame(audio[k:k + n].tobytes(), SAMPLE_RATE, 1, n))
+                await sources[speaker].capture_frame(rtc.AudioFrame(audio[k:k + n].tobytes(), SAMPLE_RATE, 1, n))
             ended = time.time()
             listener.arm()
             if record_turn(i, turn_no):
                 recorder.start()
                 recording = CLIPS / run_id / f"{i:03d}-{said_at:.3f}.wav"
-            while listener.first_audio_since_arm is None and time.time() - ended < turn.expect_reply_within_s:
+            while listener.first_audio_since_arm is None and time.time() - ended < expect_s:
                 await asyncio.sleep(0.05)
             heard = listener.first_audio_since_arm
             q.put(("turn", ended, i, None if heard is None else (heard - ended) * 1000))
-            await asyncio.sleep(turn.pause_after_s)
+            await asyncio.sleep(pause_s)
     finally:
         if recording:
             await listener.wait_until_quiet()
             recorder.save(recording)
         await listener.stop()
         closing["intentional"] = True
-        await room.disconnect()  # the bot leaves on its own after the rejoin grace (presence.py)
+        for r in rooms:
+            await r.disconnect()  # the bot leaves on its own after the rejoin grace (presence.py)
 
 
 async def _lag_monitor(worker: int, q, abort):
@@ -226,6 +272,9 @@ def main() -> int:
     steps = schedule(shape, int(os.getenv("TARGET", "50")), int(os.getenv("HOLD_S", "0")))
     peak = max(s.rooms for s in steps)
     run_id = uuid.uuid4().hex[:6]
+    if os.getenv("LIBRARY"):  # fetched once, before the workers start: they read it from disk
+        _fetch_library(os.environ["LIBRARY"])
+        print(f"conversation library: {len(_library())} dialogues", flush=True)
     console = Console(os.environ["MEET_URL"], os.environ["CONSOLE_PASSWORD"])
     print(f"load test {run_id}: {shape} on '{profile_name}' {profile}, peak {peak} rooms, "
           f"{sum(s.hold_s for s in steps) / 60:.0f} min", flush=True)

@@ -17,6 +17,29 @@ person, and speaks again. The recordings never change, so every run hears the sa
 The synthetic participants run inside AWS (a "load generator" task), not on a laptop, so
 the numbers measure staging and not someone's home network.
 
+## Realistic conversations: the library
+
+By default a load test speaks **the conversation library**: 100 everyday two-person
+dialogues (6–10 turns each), spread over 9 topics (work, health, school, travel, money,
+relationships…), from [DailyDialog](https://huggingface.co/datasets/ConvLab/dailydialog)
+(Li et al., 2017; CC BY-NC-SA 4.0, used for research). Rooms look like studies:
+
+| People in the room | Share of rooms | Who says what |
+|---|---|---|
+| 1 | 50% | one side of the dialogue; the bot answers in place of the other |
+| 2 | 30% | each person speaks one side |
+| 3 | 20% | they take the lines in turn |
+
+Each dialogue side has its own voice, one of 20 English voices (US and UK, women and men,
+Kokoro), so the bot hears different people. About 1 line in 8 has a natural 0.8-second pause
+in the middle (after a comma, between two sentences or before "and/but/so"), the kind of pause
+that split turns in the 2026 pilot. Every person is a separate microphone and so a separate
+speech-to-text stream, which is what makes a busy room expensive.
+
+The library is built once (`agent-runner/tests/build_conversation_library.py`) and kept in
+the media bucket (`loadtests/library/v1/`), not in the repository. The workflow's `library`
+input chooses it (`v1`, the default) or the original 5 scripts with one person (`none`).
+
 ## The six standard tests ("shapes")
 
 | Shape | What it does | The question it answers |
@@ -138,6 +161,8 @@ docker compose -f .devcontainer/docker-compose.yml exec -T \
 | Quality scores (pure, unit-tested) | `agent-runner/quality.py`, `tests/test_quality.py` |
 | The answer judge: rubric, sampling, parsing (unit-tested; the model call is one function) | `agent-runner/judge.py`, `tests/test_judge.py` |
 | Voice scores: which turns are recorded, matching clips to replies (unit-tested) | `agent-runner/quality.py` (`record_turn`, `reply_for`, `voice`) |
+| The conversation library: dialogue choice, people per room, voices, pauses (unit-tested) | `agent-runner/conversation_library.py`, `tests/test_conversation_library.py` |
+| Building the library's audio (once) | `agent-runner/tests/build_conversation_library.py` |
 | A conversation's turns as data | runner `GET /conversations/{id}/utterances`, console `/api/meetings/{id}/utterances` |
 | The report (both tables, quality, staging's side) | `agent-runner/tests/load_report.py` |
 | The driver: rooms, participants, listening | `agent-runner/tests/load_run.py` |

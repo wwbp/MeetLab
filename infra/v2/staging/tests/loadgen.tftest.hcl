@@ -49,4 +49,13 @@ run "a_fargate_task_running_the_load_driver_from_the_runner_image" {
     )
     error_message = "it may only add results under loadtests/"
   }
+  assert {
+    condition = anytrue([for st in jsondecode(aws_iam_role_policy.loadgen_results.policy).Statement :
+    st.Action == "s3:GetObject" && st.Resource == "${aws_s3_bucket.media.arn}/loadtests/library/*"])
+    error_message = "it reads the conversation library (agent-runner/conversation_library.py), and nothing else in the bucket"
+  }
+  assert {
+    condition     = anytrue([for st in jsondecode(aws_iam_role_policy.loadgen_results.policy).Statement : st.Action == "s3:ListBucket" && st.Condition.StringLike["s3:prefix"] == "loadtests/library/*"])
+    error_message = "it lists only the library's files"
+  }
 }

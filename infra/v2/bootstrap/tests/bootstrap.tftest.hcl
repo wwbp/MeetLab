@@ -394,6 +394,7 @@ run "acceptance_role_is_staging_only_and_least_privilege" {
       alltrue([for a in flatten([s.Action]) : contains([
         "ssm:GetParameter", "kms:Decrypt", "ecs:ListTasks", "ecs:DescribeTasks", "ecs:StopTask", "ecs:ExecuteCommand", "logs:FilterLogEvents",
         "iam:SimulatePrincipalPolicy", "s3:ListBucket", "ecs:DescribeServices",
+        "ecs:RunTask", "iam:PassRole", "ec2:DescribeSubnets", "ec2:DescribeSecurityGroups", "s3:GetObject",
     ], a)])])
     error_message = "only the actions the acceptance test performs"
   }
@@ -406,6 +407,37 @@ run "acceptance_role_is_staging_only_and_least_privilege" {
     condition = alltrue([for s in jsondecode(aws_iam_role_policy.acceptance.policy).Statement :
     length(try(s.Condition, {})) > 0 if contains(flatten([s.Resource]), "*")])
     error_message = "any statement on * must be narrowed by a condition"
+  }
+}
+
+# The "Load test v2" workflow uses the same role to start the load generator
+# (infra/v2/staging/loadgen.tf) and read its results; a soak outlasts an hour.
+run "acceptance_can_start_the_load_generator_and_nothing_else" {
+  command = plan
+
+  assert {
+    condition = anytrue([for s in jsondecode(aws_iam_role_policy.acceptance.policy).Statement :
+      flatten([s.Action]) == ["ecs:RunTask"] && flatten([s.Resource]) == ["arn:aws:ecs:us-east-1:123456789012:task-definition/meetlab-v2-staging-loadgen:*"] &&
+      s.Condition.ArnEquals["ecs:cluster"] == "arn:aws:ecs:us-east-1:123456789012:cluster/meetlab-v2-staging"
+    ])
+    error_message = "runs the load generator's task in the staging cluster, and no other task"
+  }
+  assert {
+    condition = anytrue([for s in jsondecode(aws_iam_role_policy.acceptance.policy).Statement :
+      flatten([s.Action]) == ["iam:PassRole"] &&
+      toset(flatten([s.Resource])) == toset(["arn:aws:iam::123456789012:role/meetlab-v2-staging-task-execution", "arn:aws:iam::123456789012:role/meetlab-v2-staging-loadgen"]) &&
+      s.Condition.StringEquals["iam:PassedToService"] == "ecs-tasks.amazonaws.com"
+    ])
+    error_message = "passes only the load generator's two roles, only to ECS tasks"
+  }
+  assert {
+    condition = anytrue([for s in jsondecode(aws_iam_role_policy.acceptance.policy).Statement :
+    flatten([s.Action]) == ["s3:GetObject"] && flatten([s.Resource]) == ["arn:aws:s3:::meetlab-v2-staging-media-123456789012/loadtests/*"]])
+    error_message = "reads load test results, never recordings"
+  }
+  assert {
+    condition     = aws_iam_role.acceptance.max_session_duration == 14400
+    error_message = "4 hours: the workflow waits on a soak (an hour at the target) with one credential"
   }
 }
 

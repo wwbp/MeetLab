@@ -1,0 +1,126 @@
+# Load test v2: run one standard load-test shape against staging, on one stack profile,
+# from inside AWS (infra/v2/staging/loadgen.tf). How to run and read it: docs/load-testing.md
+name: Load test v2
+
+on:
+  # Only a run started by hand tests anything. The push trigger exists because a
+  # workflow that isn't on main (frozen) can be dispatched only once GitHub has seen
+  # it run: start it with  gh workflow run loadtest-v2.yml --ref v2 -f shape=...
+  push:
+    branches: [v2]
+    paths: [.github/workflows/loadtest-v2.yml]
+  workflow_dispatch:
+    inputs:
+      profile:
+        description: "Stack profile (agent-runner/load_profiles): ours = our models, v1 = v1's vendors, stored = the console's config"
+        type: choice
+        options: [ours, v1, stored]
+        default: ours
+      shape:
+        description: "smoke | load | stress | spike | soak | breakpoint (agent-runner/load_plan.py)"
+        type: choice
+        options: [smoke, load, stress, spike, soak, breakpoint]
+        default: smoke
+      target:
+        description: "Expected concurrent rooms (stress goes to 2x, breakpoint to 3x)"
+        default: "10"
+      hold_s:
+        description: "Seconds per step; 0 = the shape's own (a rehearsal uses ~60)"
+        default: "0"
+      cpu:
+        description: "Load generator vCPUs x 1024 (a worker per vCPU; raise if it reports HARNESS OVERLOADED)"
+        type: choice
+        options: ["4096", "8192", "16384"]
+        default: "4096"
+
+concurrency:
+  group: loadtest-v2  # one run at a time: two would measure each other
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: us-east-1
+  CLUSTER: meetlab-v2-staging
+
+jobs:
+  run:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    environment: staging
+    timeout-minutes: 240
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.TF_ACCEPTANCE_ROLE_ARN }}
+          role-duration-seconds: 14400
+          aws-region: ${{ env.AWS_REGION }}
+      - name: Start the load generator
+        id: start
+        env:
+          PROFILE: ${{ inputs.profile }}
+          SHAPE: ${{ inputs.shape }}
+          TARGET: ${{ inputs.target }}
+          HOLD_S: ${{ inputs.hold_s }}
+          CPU: ${{ inputs.cpu }}
+        run: |
+          set -euo pipefail
+          account="$(aws sts get-caller-identity --query Account --output text)"
+          bucket="meetlab-v2-staging-media-$account"
+          key="loadtests/$(date -u +%Y%m%dT%H%M%SZ)-$SHAPE-$PROFILE-$TARGET.json"
+          subnets="$(aws ec2 describe-subnets --filters 'Name=tag:Name,Values=meetlab-v2-staging-private-*' --query 'Subnets[].SubnetId' --output json)"
+          sg="$(aws ec2 describe-security-groups --filters Name=group-name,Values=meetlab-v2-staging-loadgen --query 'SecurityGroups[].GroupId' --output json)"
+          overrides="$(jq -n --arg cpu "$CPU" --arg mem "$((CPU * 2))" \
+            --arg p "$PROFILE" --arg s "$SHAPE" --arg t "$TARGET" --arg h "$HOLD_S" \
+            --arg r "s3://$bucket/$key" --arg g "$GITHUB_SHA" --arg w "$((CPU / 1024))" \
+            '{cpu: $cpu, memory: $mem, containerOverrides: [{name: "loadgen", environment: [
+              {name: "PROFILE", value: $p}, {name: "SHAPE", value: $s}, {name: "TARGET", value: $t},
+              {name: "HOLD_S", value: $h}, {name: "RESULTS", value: $r}, {name: "GIT_SHA", value: $g},
+              {name: "WORKERS", value: $w}]}]}')"
+          network="$(jq -n --argjson s "$subnets" --argjson g "$sg" '{awsvpcConfiguration: {subnets: $s, securityGroups: $g, assignPublicIp: "DISABLED"}}')"
+          task="$(aws ecs run-task --cluster "$CLUSTER" --task-definition meetlab-v2-staging-loadgen \
+            --launch-type FARGATE --started-by loadtest --network-configuration "$network" \
+            --overrides "$overrides" --query 'tasks[0].taskArn' --output text)"
+          echo "task=$task" >> "$GITHUB_OUTPUT"
+          echo "result=s3://$bucket/$key" >> "$GITHUB_OUTPUT"
+          echo "load generator: $task"
+      - name: Follow the run
+        env:
+          TASK: ${{ steps.start.outputs.task }}
+        run: |
+          set -euo pipefail
+          stream="loadgen/loadgen/${TASK##*/}"
+          since=0
+          while :; do
+            status="$(aws ecs describe-tasks --cluster "$CLUSTER" --tasks "$TASK" --query 'tasks[0].lastStatus' --output text)"
+            aws logs filter-log-events --log-group-name /meetlab-v2/staging/loadgen --log-stream-names "$stream" \
+              --start-time "$since" --query 'events[].[timestamp,message]' --output text 2>/dev/null \
+              | while IFS=$'\t' read -r ts msg; do echo "$msg"; echo "$ts" > .since; done || true
+            [ -f .since ] && since=$(( $(cat .since) + 1 ))
+            [ "$status" = STOPPED ] && break
+            sleep 30
+          done
+          code="$(aws ecs describe-tasks --cluster "$CLUSTER" --tasks "$TASK" --query 'tasks[0].containers[0].exitCode' --output text)"
+          echo "exit code: $code ($(aws ecs describe-tasks --cluster "$CLUSTER" --tasks "$TASK" --query 'tasks[0].stoppedReason' --output text))"
+          echo "$code" > .code
+      - name: Result
+        if: always() && steps.start.outputs.result
+        env:
+          RESULT: ${{ steps.start.outputs.result }}
+        run: |
+          set -euo pipefail
+          aws s3 cp "$RESULT" result.json --quiet || { echo "no result written: see the run's log"; exit 1; }
+          {
+            echo "### Load test: $(jq -r '"\(.shape) on \(.profile), \(.config|tostring)"' result.json)"
+            echo
+            echo "| step | rooms | turns | reply | p50 ms | p95 ms | p99 ms | join p95 s | verdict |"
+            echo "|---|---|---|---|---|---|---|---|---|"
+            jq -r '.steps | to_entries[] | .value as $m |
+              "| \(.key) | \($m.rooms) | \($m.turns) | \(if $m.reply_rate then ($m.reply_rate*100|round|tostring)+"%" else "-" end) | \($m.p50_ms // "-"|tostring|.[0:6]) | \($m.p95_ms // "-"|tostring|.[0:6]) | \($m.p99_ms // "-"|tostring|.[0:6]) | \($m.join_p95_s // "-"|tostring|.[0:5]) | \(if $m.pass then "PASS" else "FAIL: "+($m.why|join("; ")) end) |"' result.json
+            echo
+            echo "**Capacity** (largest passing step): $(jq .capacity_rooms result.json) rooms. Sessions left running: $(jq '.sessions_left_running|length' result.json). Harness valid: $(jq .harness_valid result.json). **Verdict: $(jq -r 'if .pass then "PASS" else "FAIL" end' result.json)**"
+            echo
+            echo "Result: \`$RESULT\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+          [ "$(cat .code)" = 0 ]

@@ -95,3 +95,12 @@ def voice(clips: list[tuple[str, str, float | None]]) -> dict:
     mos = [m for _, _, m in clips if m is not None]
     return {"clips": len(clips), "words": n, "errors": errors, "wer": errors / n if n else None,
             "naturalness": round(sum(mos) / len(mos), 2) if mos else None}
+
+
+def clip_reply(rooms: list[dict], clip: dict, settle_s: float = 3.0) -> str | None:
+    """The reply a recorded clip holds: the one bot turn stored (when it finished) between the
+    clip's start and shortly after its end. None when it holds none or parts of several: the
+    bot answered half a paused sentence, and no single text says what the clip should be."""
+    r = next((x for x in rooms if x["room"] == clip["room"]), {"turns": []})
+    inside = [u["text"] for u in r["turns"] if u["bot"] and u["ts"] and clip["start"] < u["ts"] <= clip["end"] + settle_s]
+    return inside[0] if len(inside) == 1 else None

@@ -96,11 +96,12 @@ class ClipRecorder:
         self._task = asyncio.create_task(pump())
 
     def start(self) -> None:
-        self.on, self.pcm = True, bytearray()
+        self.on, self.pcm, self.started = True, bytearray(), time.time()
 
     def save(self, path: Path) -> None:
         import wave
         self.on = False
+        path = path.with_name(f"{path.stem}-{self.started:.3f}-{time.time():.3f}.wav")  # when it ran
         path.parent.mkdir(parents=True, exist_ok=True)
         with wave.open(str(path), "wb") as w:
             w.setnchannels(1), w.setsampwidth(2), w.setframerate(self.rate), w.writeframes(bytes(self.pcm))
@@ -207,7 +208,9 @@ async def run_room(i: int, run_id: str, steps, t0: float, profile: dict, console
                 await sources[speaker].capture_frame(rtc.AudioFrame(audio[k:k + n].tobytes(), SAMPLE_RATE, 1, n))
             ended = time.time()
             listener.arm()
-            if record_turn(i, turn_no):
+            # Only a clean clip: the bot was silent while this sentence was spoken, so the clip
+            # starts with its reply, not the tail of an answer to half the sentence.
+            if record_turn(i, turn_no) and listener.last_audio_at < said_at:
                 recorder.start()
                 recording = CLIPS / run_id / f"{i:03d}-{said_at:.3f}.wav"
             while listener.first_audio_since_arm is None and time.time() - ended < expect_s:
@@ -376,7 +379,7 @@ def _upload_clips(run_id: str) -> list[dict]:
     """The sampled replies' audio next to the result (s3://…/<result>-clips/), for load_report.py."""
     out, dest = [], os.getenv("RESULTS", "")
     for path in sorted((CLIPS / run_id).glob("*.wav")):
-        room, said_at = path.stem.split("-", 1)
+        room, said_at, start, end = path.stem.split("-")
         where = str(path)
         if dest.startswith("s3://"):
             import boto3
@@ -384,7 +387,7 @@ def _upload_clips(run_id: str) -> list[dict]:
             where = f"{key.removesuffix('.json')}-clips/{path.name}"
             boto3.client("s3").upload_file(str(path), bucket, where)
             where = f"s3://{bucket}/{where}"
-        out.append({"room": int(room), "said_at": float(said_at), "audio": where})
+        out.append({"room": int(room), "said_at": float(said_at), "start": float(start), "end": float(end), "audio": where})
     return out
 
 

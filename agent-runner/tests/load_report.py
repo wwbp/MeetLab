@@ -76,6 +76,13 @@ def _ms(v):
     return "-" if v is None else f"{v:.0f}"
 
 
+def _judged(a: dict | None) -> str:
+    if not a or not a["judged"]:
+        return "-"
+    f = lambda k: "-" if a[k] is None else f"{a[k]:.1f}"  # noqa: E731
+    return f"{f('answers')} / {f('context')} / {f('spoken')} / {f('overall')} (n={a['judged']})"
+
+
 def markdown(r: dict) -> str:
     lines = [f"### Load test {r['run']}: {r['shape']} on `{r['profile']}` {json.dumps(r['config'])}", "",
              "**What participants heard**", "",
@@ -100,8 +107,9 @@ def markdown(r: dict) -> str:
                          f"{g('llm_hosts_cpu')} / {g('tts_hosts_cpu')} / {g('stt-nim_hosts_cpu')} | {g('db_cpu')} / {g('db_connections')} |")
     if r.get("rooms"):
         lines += ["", "**Quality** (what the bot heard against what was said; how long it talked)", "",
-                  "| step | rooms | sentences | word error rate | fragmented | missed | replies | words p50 / p95 / max | over 40 words |",
-                  "|---|---|---|---|---|---|---|---|---|"]
+                  "| step | rooms | sentences | word error rate | fragmented | missed | replies | words p50 / p95 / max | over 40 words "
+                  "| answers / context / suits speech / overall (1-5, judged) |",
+                  "|---|---|---|---|---|---|---|---|---|---|"]
         for k, (a, b) in enumerate(r["bounds"][:len(r["steps"])]):
             q = score_rooms(r["rooms"], a, b)
             h, rep = q["hearing"], q["replies"]
@@ -109,7 +117,8 @@ def markdown(r: dict) -> str:
                 continue
             r["steps"][k]["quality"] = q
             lines.append(f"| {k} | {r['steps'][k]['rooms']} | {h['sentences']} | {h['wer']:.1%} | {h['fragmented']} | {h['missed']} | "
-                         f"{rep['replies']} | {rep['p50_words']} / {rep['p95_words']} / {rep['max_words']} | {rep['over_40_words']} |")
+                         f"{rep['replies']} | {rep['p50_words']} / {rep['p95_words']} / {rep['max_words']} | {rep['over_40_words']} | "
+                         f"{_judged(r['steps'][k].get('answers'))} |")
     lines += ["", f"**Capacity** (largest passing step): {r.get('capacity_rooms')} rooms. "
               f"Sessions left running: {len(r.get('sessions_left_running', []))}. "
               f"Harness valid: {r.get('harness_valid')}. **Verdict: {'PASS' if r.get('pass') else 'FAIL'}**"]

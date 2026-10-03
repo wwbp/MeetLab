@@ -35,6 +35,10 @@ run "a_fargate_task_running_the_load_driver_from_the_runner_image" {
     error_message = "the console password and the LiveKit key in use come from the parameters, never from Terraform"
   }
   assert {
+    condition     = contains([for s in jsondecode(aws_ecs_task_definition.loadgen.container_definitions)[0].secrets : s.name], "OPENAI_API_KEY")
+    error_message = "the answer judge (agent-runner/judge.py) runs at the end of each load test, with the stored OpenAI key"
+  }
+  assert {
     condition     = length(aws_security_group.loadgen.ingress) == 0 && aws_security_group.loadgen.name == "meetlab-v2-staging-loadgen"
     error_message = "nothing reaches the load generator, and it is not in the app group (no database); the workflow finds it by name"
   }

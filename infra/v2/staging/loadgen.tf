@@ -56,6 +56,7 @@ resource "aws_ecs_task_definition" "loadgen" {
     environment = concat(local.livekit_environment, [{ name = "MEET_URL", value = "https://meet-staging.wwbp.org" }])
     secrets = concat(local.livekit_secrets, [
       { name = "CONSOLE_PASSWORD", valueFrom = "${local.parameters}/CONSOLE_PASSWORD" },
+      { name = "OPENAI_API_KEY", valueFrom = "${local.parameters}/OPENAI_API_KEY" }, # the answer judge (judge.py)
     ])
     logConfiguration = {
       logDriver = "awslogs"

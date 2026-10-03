@@ -252,6 +252,13 @@ def main() -> int:
                 turns, _ = [], print(f"no turns for room {i}: {e}")
             result["rooms"].append({"room": i, "session": session, "turns": turns,
                                     "said": [[t, text] for kind, t, j, text in events if kind == "said" and j == i]})
+        # How good the answers were, per step (judge.py): a sample of replies, each with the
+        # conversation before it, scored by a fixed judge model. Skipped without a key.
+        if os.getenv("OPENAI_API_KEY"):
+            import judge
+            for m, (a, b) in zip(result["steps"], bounds):
+                if m["rooms"]:
+                    m["answers"] = judge.summarise([judge.ask(c) for c in judge.cases(result["rooms"], a, b, limit=20)])
         passed = [m["rooms"] for m in result["steps"] if m["pass"] and m["rooms"]]
         result["capacity_rooms"] = max(passed, default=0)
         result["harness_valid"] = all(m["harness_lag_ms"] == 0 for m in result["steps"])

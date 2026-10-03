@@ -740,6 +740,11 @@ class RunnerStartApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.text)
         self.assertEqual(response.json().get("stt_model"), "parakeet-unified-en-0.6b")
 
+    def test_config_put_accepts_our_kokoro_voice(self):
+        response = self.client.put("/config", json={"scope": f"kokoro-{uuid.uuid4().hex[:6]}", "tts_provider": "kokoro"})
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["tts_provider"], "kokoro")
+
     def test_config_put_invalid_tts_provider_returns_400(self):
         response = self.client.put(
             "/config",

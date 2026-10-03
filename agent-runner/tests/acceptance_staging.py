@@ -21,6 +21,8 @@ room-gone cleanup can never be what closes a session and hide a failure.
   refresh          the only human refreshes: the bot is still there after the grace
   chat             a malformed packet is ignored; a chat message becomes a turn   (F13)
   auto_record      with no Record press: the room's video, the bot's own audio and its greeting line
+  our_models       a room configured for our LLM (vLLM) and voice (Kokoro): the bot hears,
+                   answers and speaks on them (waits for cold models first)          (L3)
 
 A scenario that cannot reach its situation (e.g. the participant drops before the
 kill) is a FAIL, not a skip: an acceptance test that didn't test anything passed nothing.
@@ -301,18 +303,17 @@ async def scenario_video_recording():
         return f"{video_in_bucket()[0]} in s3://{MEDIA_BUCKET}"
 
 
-STT_NIM_SERVICE = "meetlab-v2-staging-stt-nim"
 SPEECH = os.path.join(os.path.dirname(__file__), "fixtures", "benchmark_prompt.wav")  # tracked; conversations/ is gitignored
 
 
-def _stt_nim_on():
-    """Staging's NIM runs only while stt_nim_enabled (infra/v2/staging/stt_nim.tf)."""
-    svc = ecs.describe_services(cluster=CLUSTER, services=[STT_NIM_SERVICE])["services"]
+def _service_on(name):
+    """A GPU service runs only while switched on (infra/v2/staging: stt_nim.tf, models.tf)."""
+    svc = ecs.describe_services(cluster=CLUSTER, services=[f"meetlab-v2-staging-{name}"])["services"]
     return bool(svc) and svc[0]["status"] == "ACTIVE" and svc[0]["desiredCount"] > 0
 
 
-def _stt_nim_ready():
-    deployments = ecs.describe_services(cluster=CLUSTER, services=[STT_NIM_SERVICE])["services"][0]["deployments"]
+def _service_ready(name):
+    deployments = ecs.describe_services(cluster=CLUSTER, services=[f"meetlab-v2-staging-{name}"])["services"][0]["deployments"]
     return [d.get("rolloutState") for d in deployments] == ["COMPLETED"]  # targets healthy behind the NLB
 
 
@@ -336,9 +337,9 @@ async def _play_wav(room: rtc.Room, path: str, seconds: float):
 async def scenario_transcript():
     """Someone speaks; the bot stores their turn. With the NIM on, the transcript comes
     from staging's own Parakeet NIM, not Deepgram, and the NIM returns no errors."""
-    nim = _stt_nim_on()
+    nim = _service_on("stt-nim")
     if nim:  # a cold NIM builds its model first (~20 min, v1 docs)
-        waited = await _until(_stt_nim_ready, 2700, "the STT NIM healthy behind its load balancer")
+        waited = await _until(lambda: _service_ready("stt-nim"), 2700, "the STT NIM healthy behind its load balancer")
     async with Meeting() as m:
         await asyncio.sleep(5)  # the greeting
         await _play_wav(m.human, SPEECH, 8)
@@ -452,16 +453,47 @@ async def scenario_auto_record():
         return "video, the bot's own audio and its greeting line, with no Record press"
 
 
+OUR_LLM = "Qwen/Qwen2.5-7B-Instruct"  # infra/v2/staging/models.tf
+
+
+async def scenario_our_models():
+    """L3: a room configured for our LLM and our voice. Someone speaks; the bot greets,
+    hears, answers and speaks the answer on our models (the reply's latency is measured
+    to its first audio, so a stored reply with a latency means Kokoro spoke it)."""
+    t0 = time.time()
+    for name in ("llm", "tts") + (("stt-nim",) if _service_on("stt-nim") else ()):
+        await _until(lambda: _service_ready(name), 2700, f"our {name} healthy behind its load balancer")
+    room = f"accept-{uuid.uuid4().hex[:6]}"
+    _post("/api/console/login", {"password": os.environ["CONSOLE_PASSWORD"]})
+    _post("/api/console/config", {"scope": room, "llm_model": OUR_LLM, "tts_provider": "kokoro", "tts_voice": "alloy"},
+          method="PUT")
+    async with Meeting(room=room) as m:
+        bot_log = lambda: _log_lines("/meetlab-v2/staging/bot", m.session, m.started)
+        await _until(lambda: any("bot line" in l for l in bot_log()), 60, "the greeting spoken and stored")
+        await _play_wav(m.human, SPEECH, 8)
+        await _until(lambda: any("bot reply" in l and "latency_ms=None" not in l for l in bot_log()),
+                     120, "the bot's spoken answer")
+        stream = f"bot/bot/{m.task.rsplit('/', 1)[-1]}"
+        lines = [e["message"] for e in logs.filter_log_events(
+            logGroupName="/meetlab-v2/staging/bot", logStreamNames=[stream], startTime=int(m.started * 1000))["events"]]
+        errors = [l for l in lines if ("OpenAILLMService" in l or "OpenAITTSService" in l) and "error" in l.lower()]
+        if errors:
+            raise Fail(f"our models returned errors: {errors[0][:200]}")
+        reply = next(l for l in bot_log() if "bot reply" in l)
+        stt = "the NIM" if any("STT: model=parakeet-" in l for l in lines) else "Deepgram"
+        return f"heard ({stt}), answered by {OUR_LLM}, spoken by Kokoro; {reply.rsplit(' ', 1)[-1]} (models ready after {m.started - t0:.0f} s)"
+
+
 SCENARIOS = {"start": scenario_start, "stoptask": scenario_stoptask, "removed": scenario_removed,
              "kill9": scenario_kill9, "stop_early": scenario_stop_early,
              "audio_recording": scenario_audio_recording, "video_recording": scenario_video_recording,
              "transcript": scenario_transcript, "two_humans": scenario_two_humans, "refresh": scenario_refresh,
-             "chat": scenario_chat, "auto_record": scenario_auto_record,
+             "chat": scenario_chat, "auto_record": scenario_auto_record, "our_models": scenario_our_models,
              "prewarm": scenario_prewarm}  # last: its Stop preparing cools the pool the run prepared
 
 
 SCENARIO_TIMEOUT = 600
-TIMEOUTS = {"transcript": 3300}  # may wait for a cold NIM first
+TIMEOUTS = {"transcript": 3300, "our_models": 3300}  # may wait for cold GPU services first
 
 
 async def _prepared():
@@ -516,4 +548,7 @@ if __name__ == "__main__":
         if skipped:
             print(f"not run (no video recording on this LiveKit): {', '.join(skipped)}", flush=True)
         names = [n for n in names if n not in skipped]
+    if "our_models" in names and not (_service_on("llm") and _service_on("tts")):  # model_services (models.tf)
+        print("not run (our models are off): our_models", flush=True)
+        names.remove("our_models")
     sys.exit(0 if asyncio.run(main(names)) else 1)

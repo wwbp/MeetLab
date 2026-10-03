@@ -21,7 +21,7 @@ locals {
     ] : [
     # NIM off: Deepgram, so a staging bot never needs a GPU running.
     { name = "STT_MODEL_OVERRIDE", value = "nova-3-general" },
-  ])
+  ], local.model_environment) # our LLM and voice, when running (models.tf)
   bot_secrets = concat(
     [for n in ["OPENAI_API_KEY", "ELEVENLABS_API_KEY", "DEEPGRAM_API_KEY", "BOT_RUNNER_SECRET", "CONSOLE_PASSWORD"] :
     { name = n, valueFrom = "${local.parameters}/${n}" }],

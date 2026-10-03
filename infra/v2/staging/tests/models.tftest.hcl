@@ -1,0 +1,93 @@
+# Offline: mock provider, no AWS. Our own models (load-test readiness L3): Qwen on vLLM and
+# Kokoro speech, each its own GPU service, switched on by model_services; off by default.
+
+mock_provider "aws" {
+  source = "./tests/mocks"
+}
+
+variables {
+  image_tag = "0123abc"
+}
+
+run "switched_off_bots_use_the_vendors" {
+  command = apply
+
+  assert {
+    condition     = length(aws_ecs_service.model) == 0 && length(aws_lb.model) == 0
+    error_message = "off by default: no GPU service, no load balancer"
+  }
+  assert {
+    condition     = length([for e in local.bot_environment : e if contains(["SELFHOSTED_LLM_URL", "SELFHOSTED_LLM_MODEL", "KOKORO_TTS_URL"], e.name)]) == 0
+    error_message = "with our models off, bots know only the vendors"
+  }
+  assert {
+    condition     = alltrue([for g in aws_autoscaling_group.model : g.min_size == 0 && g.max_size == 1])
+    error_message = "each GPU group is 0 machines unless its model runs, never more than one on staging"
+  }
+}
+
+run "switched_on_each_model_runs_on_its_own_gpu_behind_a_private_load_balancer" {
+  command = apply
+
+  variables {
+    model_services = ["llm", "tts"]
+  }
+
+  assert {
+    condition = (
+      jsondecode(aws_ecs_task_definition.model["llm"].container_definitions)[0].image == "vllm/vllm-openai:v0.30.0" &&
+      contains(jsondecode(aws_ecs_task_definition.model["llm"].container_definitions)[0].command, "Qwen/Qwen2.5-7B-Instruct") &&
+      jsondecode(aws_ecs_task_definition.model["tts"].container_definitions)[0].image == "ghcr.io/remsky/kokoro-fastapi-gpu:v0.9.0"
+    )
+    error_message = "Qwen2.5-7B-Instruct on vLLM, Kokoro on Kokoro-FastAPI, both pinned"
+  }
+  assert {
+    condition = alltrue([for k, td in aws_ecs_task_definition.model :
+    jsondecode(td.container_definitions)[0].resourceRequirements == [{ type = "GPU", value = "1" }]])
+    error_message = "each on its own GPU"
+  }
+  assert {
+    condition = alltrue([for k, lt in aws_launch_template.model :
+    lt.instance_type == "g6.xlarge" && lt.image_id == data.aws_ssm_parameter.ecs_gpu_ami.value])
+    error_message = "g6.xlarge (one L4, 24 GB: Qwen 7B in bf16 is ~15 GB) on the ECS GPU AMI"
+  }
+  assert {
+    condition = (
+      aws_lb.model["llm"].internal && aws_lb.model["llm"].load_balancer_type == "network" &&
+      aws_lb_listener.model["llm"].port == 8000 && aws_lb_listener.model["tts"].port == 8880
+    )
+    error_message = "internal network load balancers: a stable address for bot tasks, which can't use Service Connect"
+  }
+  assert {
+    condition = alltrue([for k, sg in aws_security_group.model_lb :
+      [for r in sg.ingress : [r.from_port, r.security_groups, try(length(r.cidr_blocks), 0)]] == [[local.models[k].port, toset([aws_security_group.app.id]), 0]] &&
+      [for r in aws_security_group.model[k].ingress : [r.from_port, r.security_groups, try(length(r.cidr_blocks), 0)]] == [[local.models[k].port, toset([sg.id]), 0]]
+    ])
+    error_message = "only our app tasks reach a load balancer, and only it reaches the model, on the model's port alone"
+  }
+  assert {
+    condition = (
+      contains(local.bot_environment, { name = "SELFHOSTED_LLM_URL", value = "http://${aws_lb.model["llm"].dns_name}:8000/v1" }) &&
+      contains(local.bot_environment, { name = "SELFHOSTED_LLM_MODEL", value = "Qwen/Qwen2.5-7B-Instruct" }) &&
+      contains(local.bot_environment, { name = "KOKORO_TTS_URL", value = "http://${aws_lb.model["tts"].dns_name}:8880/v1" })
+    )
+    error_message = "bots learn where our models are; a room's config chooses them (bot.py)"
+  }
+  assert {
+    condition     = alltrue([for k, s in aws_ecs_service.model : contains(aws_ecs_cluster_capacity_providers.this.capacity_providers, one(s.capacity_provider_strategy).capacity_provider)])
+    error_message = "each on its own capacity provider, registered with the cluster"
+  }
+}
+
+run "one_alone" {
+  command = apply
+
+  variables {
+    model_services = ["tts"]
+  }
+
+  assert {
+    condition     = keys(aws_ecs_service.model) == ["tts"] && length([for e in local.bot_environment : e if e.name == "SELFHOSTED_LLM_URL"]) == 0
+    error_message = "each switches on alone: Kokoro without paying for the LLM's GPU"
+  }
+}

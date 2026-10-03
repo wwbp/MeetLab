@@ -234,6 +234,7 @@ _LLM_CHOICES = [
     ("gpt-4.1-nano", "gpt-4.1-nano"),
     ("gpt-4.1-mini", "gpt-4.1-mini"),
     ("gpt-4o-mini", "gpt-4o-mini"),
+    ("Qwen/Qwen2.5-7B-Instruct", "Qwen2.5-7B-Instruct (ours)"),
 ]
 
 _STT_MODEL_CHOICES = [
@@ -277,7 +278,7 @@ class BotConfigAdmin(ModelView, model=BotConfig):
         "stt_model": {"choices": _STT_MODEL_CHOICES},
         "stt_vad_mode": {"choices": [("local", "local")]},
         "stt_delay": {"choices": [("", "— (none)")]},
-        "tts_provider": {"choices": [("elevenlabs", "elevenlabs"), ("openai", "openai")]},
+        "tts_provider": {"choices": [("elevenlabs", "elevenlabs"), ("openai", "openai"), ("kokoro", "kokoro (ours)")]},
         "tts_aggregation_mode": {"choices": [("sentence", "sentence (default)"), ("token", "token (lower latency)")]},
         # These two ADD together to form the turn-end window; 450+300=750ms is
         # calibrated against real pilot audio (tests/test_turn_calibration.py).
@@ -790,8 +791,8 @@ async def update_config(request: Request, _=Depends(verify_api_key)):
             return JSONResponse({"error": "tts_voice must be a non-empty string"}, status_code=400)
         fields["tts_voice"] = body["tts_voice"].strip()
     if "tts_provider" in body:
-        if body["tts_provider"] not in ("elevenlabs", "openai"):
-            return JSONResponse({"error": "tts_provider must be 'elevenlabs' or 'openai'"}, status_code=400)
+        if body["tts_provider"] not in ("elevenlabs", "openai", "kokoro"):
+            return JSONResponse({"error": "tts_provider must be 'elevenlabs', 'openai' or 'kokoro'"}, status_code=400)
         fields["tts_provider"] = body["tts_provider"]
     if "stt_model" in body:
         _valid_stt = {

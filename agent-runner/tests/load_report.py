@@ -22,7 +22,7 @@ import boto3
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from load_plan import parse_reply, stage_summary, step_of  # noqa: E402
-from quality import score_rooms  # noqa: E402
+from quality import reply_for, score_rooms, voice  # noqa: E402
 
 REGION, CLUSTER, DB = "us-east-1", "meetlab-v2-staging", "meetlab-v2-staging"
 SERVICES = ["meet", "agent-runner", "livekit"]          # ECS services with their own CPU/memory
@@ -72,6 +72,40 @@ def _stages(bounds) -> list[dict]:
     return [stage_summary(t) for t in per_step]
 
 
+def _voice(r: dict) -> dict | None:
+    """How the bot sounds, from the sampled replies' audio (load_run.py records them):
+    intelligibility, the word error rate of an independent listener (faster-whisper base.en)
+    against what the bot meant to say; naturalness, UTMOS22's predicted listener rating
+    (1-5). Both run here, on the report's machine: never in the bot's image."""
+    if not r.get("clips"):
+        return None
+    import tempfile
+
+    import numpy as np
+    import soundfile as sf
+    import torch
+    from faster_whisper import WhisperModel
+
+    listener = WhisperModel("base.en", device="cpu", compute_type="int8")
+    utmos = torch.hub.load("tarepan/SpeechMOS:v1.2.0", "utmos22_strong", trust_repo=True)
+    s3, scored = boto3.client("s3", region_name=REGION), []
+    with tempfile.TemporaryDirectory() as tmp:
+        for c in r["clips"]:
+            meant = reply_for(r["rooms"], c["room"], c["said_at"])
+            path = c["audio"]
+            if path.startswith("s3://"):
+                bucket, key = path[5:].split("/", 1)
+                path = os.path.join(tmp, os.path.basename(key))
+                s3.download_file(bucket, key, path)
+            audio, rate = sf.read(path, dtype="float32")
+            if not meant or len(audio) < rate // 2:
+                continue  # no stored reply, or (almost) no audio: nothing to compare
+            heard = " ".join(seg.text for seg in listener.transcribe(path, language="en")[0])
+            mos = float(utmos(torch.from_numpy(np.asarray(audio))[None], rate).item())
+            scored.append((meant, heard, round(mos, 2)))
+    return voice(scored)
+
+
 def _ms(v):
     return "-" if v is None else f"{v:.0f}"
 
@@ -119,6 +153,13 @@ def markdown(r: dict) -> str:
             lines.append(f"| {k} | {r['steps'][k]['rooms']} | {h['sentences']} | {h['wer']:.1%} | {h['fragmented']} | {h['missed']} | "
                          f"{rep['replies']} | {rep['p50_words']} / {rep['p95_words']} / {rep['max_words']} | {rep['over_40_words']} | "
                          f"{_judged(r['steps'][k].get('answers'))} |")
+    if r.get("voice"):
+        v = r["voice"]
+        wer = "-" if v["wer"] is None else f"{v['wer']:.1%}"
+        natural = "-" if v["naturalness"] is None else v["naturalness"]
+        lines += ["", "**How the bot sounds** (sampled replies across the run)", "",
+                  "| clips | intelligibility: word error rate heard back | naturalness (UTMOS, 1-5) |", "|---|---|---|",
+                  f"| {v['clips']} | {wer} | {natural} |"]
     lines += ["", f"**Capacity** (largest passing step): {r.get('capacity_rooms')} rooms. "
               f"Sessions left running: {len(r.get('sessions_left_running', []))}. "
               f"Harness valid: {r.get('harness_valid')}. **Verdict: {'PASS' if r.get('pass') else 'FAIL'}**"]
@@ -131,6 +172,7 @@ def main(path: str):
     if bounds:
         for m, stages, mx in zip(r["steps"], _stages(bounds), _metrics(bounds)):
             m["server"] = {"stages": stages, "max": mx}
+    r["voice"] = _voice(r)
     text = markdown(r)  # adds each step's quality scores to r
     open(path, "w").write(json.dumps(r, indent=2))
     print(text)

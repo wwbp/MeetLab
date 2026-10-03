@@ -70,3 +70,28 @@ def score_rooms(rooms: list[dict], start: float, end: float) -> dict:
         replies += [u["text"] for u in room["turns"] if u["bot"] and u["ts"] is not None and start <= u["ts"] < end and u["ts"] >= first]
     totals["wer"] = totals["errors"] / totals["words"] if totals["words"] else None
     return {"hearing": totals, "replies": reply_lengths(replies)}
+
+
+def record_turn(room: int, n: int) -> bool:
+    """Whether the participant records the bot's reply to its n-th turn (0-based): every
+    third turn of the first 10 rooms, 4 per room at most, so at most 40 clips a run."""
+    return room < 10 and n < 12 and n % 3 == 1
+
+
+def reply_for(rooms: list[dict], room: int, said_at: float) -> str | None:
+    """The text the bot meant to say in answer to the sentence spoken at said_at: its first
+    turn stored after it (a reply is stored when the bot finishes speaking)."""
+    r = next((x for x in rooms if x["room"] == room), None)
+    later = sorted((u for u in (r or {}).get("turns", []) if u["bot"] and u["ts"] and u["ts"] > said_at),
+                   key=lambda u: u["ts"])
+    return later[0]["text"] if later else None
+
+
+def voice(clips: list[tuple[str, str, float | None]]) -> dict:
+    """clips: (what the bot meant to say, what a reference transcriber heard in its audio,
+    predicted listener rating 1-5). Intelligibility is that word error rate."""
+    errors = sum(word_errors(meant, heard) for meant, heard, _ in clips)
+    n = sum(len(words(meant)) for meant, _, _ in clips)
+    mos = [m for _, _, m in clips if m is not None]
+    return {"clips": len(clips), "words": n, "errors": errors, "wer": errors / n if n else None,
+            "naturalness": round(sum(mos) / len(mos), 2) if mos else None}

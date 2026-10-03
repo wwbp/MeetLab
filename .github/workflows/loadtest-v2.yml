@@ -113,7 +113,11 @@ jobs:
         run: |
           set -euo pipefail
           aws s3 cp "$RESULT" result.json --quiet || { echo "no result written: see the run's log above"; exit 1; }
-          uv run --no-project --with boto3 python agent-runner/tests/load_report.py result.json | tee -a "$GITHUB_STEP_SUMMARY"
+          # The voice scores' listener (faster-whisper) and naturalness model (UTMOS) run here,
+          # never in the bot's image; CPU-only PyTorch wheels.
+          uv run --no-project --index https://download.pytorch.org/whl/cpu \
+            --with boto3 --with faster-whisper --with soundfile --with torch --with torchaudio --with numpy \
+            python agent-runner/tests/load_report.py result.json | tee -a "$GITHUB_STEP_SUMMARY"
           echo "Result: \`$RESULT\`" >> "$GITHUB_STEP_SUMMARY"
           [ "$(cat .code 2>/dev/null)" = 0 ]
       - uses: actions/upload-artifact@v4

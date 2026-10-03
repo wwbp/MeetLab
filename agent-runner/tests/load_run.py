@@ -45,6 +45,36 @@ GRACE_S = 15      # a step is judged this long after it ends: its last turns' re
 MAX_LAG_MS = 500  # a worker's event loop late by more: its microphones were not real time
 
 
+CLIPS = Path("/tmp/load-clips")
+
+
+class ClipRecorder:
+    """The bot's audio for a sampled reply (quality.record_turn), as a participant hears it,
+    saved as a WAV for the report's intelligibility and naturalness scores."""
+
+    def __init__(self):
+        self.on, self.pcm, self.rate = False, bytearray(), 48000
+        self._task = None
+
+    def watch(self, track: rtc.Track) -> None:
+        async def pump():
+            async for event in rtc.AudioStream(track, num_channels=1):
+                if self.on:
+                    self.rate = event.frame.sample_rate
+                    self.pcm += bytes(event.frame.data)
+        self._task = asyncio.create_task(pump())
+
+    def start(self) -> None:
+        self.on, self.pcm = True, bytearray()
+
+    def save(self, path: Path) -> None:
+        import wave
+        self.on = False
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with wave.open(str(path), "wb") as w:
+            w.setnchannels(1), w.setsampwidth(2), w.setframerate(self.rate), w.writeframes(bytes(self.pcm))
+
+
 class Console:
     """meet's console API, as a researcher's browser uses it."""
 
@@ -70,17 +100,21 @@ async def _sleep_until(t: float, abort) -> bool:
 async def run_room(i: int, run_id: str, steps, t0: float, profile: dict, console: Console, q, abort):
     from conversation_soak import BotListener, load_turn_audio
 
+    from quality import record_turn
+
     window = room_window(i, steps, t0)
     if not window or not await _sleep_until(window[0], abort):
         return
     leave = window[1]
     name = f"load-{run_id}-{i:03d}"
     room, listener, closing = rtc.Room(), BotListener(), {"intentional": False}
+    recorder, recording = ClipRecorder(), None  # recording: where the current clip goes
 
     @room.on("track_subscribed")
     def _on_track(track, publication, participant):
         if track.kind == rtc.TrackKind.KIND_AUDIO and participant.identity.startswith("bot_"):
             listener.watch(track)
+            recorder.watch(track)
 
     @room.on("disconnected")
     def _on_disconnected(*_):
@@ -114,22 +148,32 @@ async def run_room(i: int, run_id: str, steps, t0: float, profile: dict, console
         await asyncio.sleep(4)  # the greeting starts 1 s after someone joins
         await listener.wait_until_quiet()
         n = SAMPLE_RATE * FRAME_MS // 1000
-        for turn in (t for _ in iter(int, 1) for t in conversation_for(i)):
+        for turn_no, turn in enumerate(t for _ in iter(int, 1) for t in conversation_for(i)):
             if time.time() > leave or abort.is_set():
                 break
             await listener.wait_until_quiet()
+            if recording:  # the sampled reply has finished
+                recorder.save(recording)
+                recording = None
             audio = load_turn_audio(turn.text)
-            q.put(("said", time.time(), i, turn.text))  # quality.py: what the bot should have heard
+            said_at = time.time()
+            q.put(("said", said_at, i, turn.text))  # quality.py: what the bot should have heard
             for k in range(0, len(audio) - n, n):
                 await source.capture_frame(rtc.AudioFrame(audio[k:k + n].tobytes(), SAMPLE_RATE, 1, n))
             ended = time.time()
             listener.arm()
+            if record_turn(i, turn_no):
+                recorder.start()
+                recording = CLIPS / run_id / f"{i:03d}-{said_at:.3f}.wav"
             while listener.first_audio_since_arm is None and time.time() - ended < turn.expect_reply_within_s:
                 await asyncio.sleep(0.05)
             heard = listener.first_audio_since_arm
             q.put(("turn", ended, i, None if heard is None else (heard - ended) * 1000))
             await asyncio.sleep(turn.pause_after_s)
     finally:
+        if recording:
+            await listener.wait_until_quiet()
+            recorder.save(recording)
         await listener.stop()
         closing["intentional"] = True
         await room.disconnect()  # the bot leaves on its own after the rejoin grace (presence.py)
@@ -148,8 +192,11 @@ def _worker(worker: int, rooms: list[int], run_id, steps, t0, profile, q, abort)
     async def main():
         console = Console(os.environ["MEET_URL"], os.environ["CONSOLE_PASSWORD"])
         lag = asyncio.create_task(_lag_monitor(worker, q, abort))
-        await asyncio.gather(*(run_room(i, run_id, steps, t0, profile, console, q, abort) for i in rooms),
-                             return_exceptions=True)
+        for i, outcome in zip(rooms, await asyncio.gather(
+                *(run_room(i, run_id, steps, t0, profile, console, q, abort) for i in rooms), return_exceptions=True)):
+            if isinstance(outcome, BaseException):  # a harness fault must never pass silently
+                print(f"room {i}: harness error {outcome!r}", flush=True)
+                q.put(("start_error", time.time(), i, f"harness: {outcome!r}"[:300]))
         lag.cancel()
     try:
         asyncio.run(main())
@@ -259,6 +306,7 @@ def main() -> int:
             for m, (a, b) in zip(result["steps"], bounds):
                 if m["rooms"]:
                     m["answers"] = judge.summarise([judge.ask(c) for c in judge.cases(result["rooms"], a, b, limit=20)])
+        result["clips"] = _upload_clips(run_id)
         passed = [m["rooms"] for m in result["steps"] if m["pass"] and m["rooms"]]
         result["capacity_rooms"] = max(passed, default=0)
         result["harness_valid"] = all(m["harness_lag_ms"] == 0 for m in result["steps"])
@@ -273,6 +321,22 @@ def main() -> int:
             console.call("DELETE", "/api/concierge/capacity")  # never leave the pool warm
         _save(result)
     return 0 if result.get("pass") else 1
+
+
+def _upload_clips(run_id: str) -> list[dict]:
+    """The sampled replies' audio next to the result (s3://…/<result>-clips/), for load_report.py."""
+    out, dest = [], os.getenv("RESULTS", "")
+    for path in sorted((CLIPS / run_id).glob("*.wav")):
+        room, said_at = path.stem.split("-", 1)
+        where = str(path)
+        if dest.startswith("s3://"):
+            import boto3
+            bucket, key = dest[5:].split("/", 1)
+            where = f"{key.removesuffix('.json')}-clips/{path.name}"
+            boto3.client("s3").upload_file(str(path), bucket, where)
+            where = f"s3://{bucket}/{where}"
+        out.append({"room": int(room), "said_at": float(said_at), "audio": where})
+    return out
 
 
 def _save(result: dict):

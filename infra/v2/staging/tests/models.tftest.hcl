@@ -121,6 +121,11 @@ run "single_machine_services_replace_their_task_instead_of_rolling" {
   }
   assert {
     condition = alltrue([for s in concat(values(aws_ecs_service.model), aws_ecs_service.stt_nim, aws_ecs_service.livekit) :
+    s.availability_zone_rebalancing == "DISABLED"])
+    error_message = "no zone rebalancing: ECS refuses it with maximum 100% (#143's apply, 2026-10-03), it also starts before it stops, and one task has nothing to balance"
+  }
+  assert {
+    condition = alltrue([for s in concat(values(aws_ecs_service.model), aws_ecs_service.stt_nim, aws_ecs_service.livekit) :
     one(s.deployment_circuit_breaker).enable && one(s.deployment_circuit_breaker).rollback])
     error_message = "a deploy that cannot start ends and rolls back, instead of retrying every 30 min for ever"
   }

@@ -244,6 +244,7 @@ resource "aws_ecs_service" "model" {
   # and the deploy waits forever (FP8, 2026-10-03).
   deployment_minimum_healthy_percent = 0
   deployment_maximum_percent         = 100
+  availability_zone_rebalancing      = "DISABLED" # refused with maximum 100%; one task has nothing to balance
   deployment_circuit_breaker {
     enable   = true # a deploy that cannot start ends and rolls back (3 failures)
     rollback = true

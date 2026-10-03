@@ -14,8 +14,10 @@ locals {
       model  = "Qwen/Qwen2.5-7B-Instruct" # Apache-2.0, no token to download
       port   = 8000
       health = "/health"
-      # bf16 is ~15 GB of the L4's 24 GB; the rest is KV cache for concurrent rooms.
-      command = ["--model", "Qwen/Qwen2.5-7B-Instruct", "--max-model-len", "8192", "--gpu-memory-utilization", "0.90"]
+      # Weights quantised to 8 bits as they load (~8 GB of the L4's 24 GB; the rest is KV
+      # cache for concurrent rooms). Generation speed is memory-bound: an L4's 300 GB/s caps
+      # 16-bit 7B near 20 tokens/s, and the bot waits for a whole first sentence (LEDGER).
+      command = ["--model", "Qwen/Qwen2.5-7B-Instruct", "--quantization", "fp8", "--max-model-len", "8192", "--gpu-memory-utilization", "0.90"]
       memory  = 8192
     }
     tts = {

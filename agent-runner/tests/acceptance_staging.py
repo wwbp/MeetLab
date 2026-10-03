@@ -479,9 +479,9 @@ async def scenario_our_models():
         errors = [l for l in lines if ("OpenAILLMService" in l or "OpenAITTSService" in l) and "error" in l.lower()]
         if errors:
             raise Fail(f"our models returned errors: {errors[0][:200]}")
-        reply = next(l for l in bot_log() if "bot reply" in l)
+        reply = next(l for l in bot_log() if "bot reply" in l).split("latency_ms=")[1].split()[0]
         stt = "the NIM" if any("STT: model=parakeet-" in l for l in lines) else "Deepgram"
-        return f"heard ({stt}), answered by {OUR_LLM}, spoken by Kokoro; {reply.rsplit(' ', 1)[-1]} (models ready after {m.started - t0:.0f} s)"
+        return f"heard ({stt}), answered by {OUR_LLM}, spoken by Kokoro; latency_ms={reply} (models ready after {m.started - t0:.0f} s)"
 
 
 SCENARIOS = {"start": scenario_start, "stoptask": scenario_stoptask, "removed": scenario_removed,

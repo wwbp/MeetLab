@@ -106,3 +106,28 @@ def room_window(i: int, steps: list[Step], t0: float) -> tuple[float, float] | N
 
 def step_of(t: float, bounds: list[tuple[float, float]]) -> int | None:
     return next((k for k, (a, b) in enumerate(bounds) if a <= t < b), None)
+
+
+STAGES = ("latency_ms", "stt_ms", "llm_ttft_ms", "tts_ttfb_ms")
+
+
+def parse_reply(line: str) -> dict | None:
+    """The bot's own timings for one reply, from its "bot reply" log line (bot.py)."""
+    import json
+    import re
+
+    m = re.search(r"bot reply \S+ stored for session \S+ latency_ms=(\S+)(?: timing=(\{.*\}))?", line)
+    if not m:
+        return None
+    latency = None if m[1] == "None" else float(m[1])
+    return {"latency_ms": latency, **json.loads(m[2] or "{}")}
+
+
+def stage_summary(timings: list[dict]) -> dict:
+    """Per stage, p50 and p95 across a step's replies: which stage slows down under load."""
+    out = {"replies": len(timings)}
+    for stage in STAGES:
+        values = [t[stage] for t in timings if t.get(stage) is not None]
+        if values:
+            out[stage] = {"p50": _pct(values, 0.50), "p95": _pct(values, 0.95)}
+    return out

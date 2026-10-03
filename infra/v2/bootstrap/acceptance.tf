@@ -76,6 +76,13 @@ resource "aws_iam_role_policy" "acceptance" {
         Condition = { StringEquals = { "aws:RequestedRegion" = "us-east-1" } }
       },
       {
+        # load_report.py: what each part of staging did during each step
+        Effect    = "Allow"
+        Action    = "cloudwatch:GetMetricData"
+        Resource  = "*"
+        Condition = { StringEquals = { "aws:RequestedRegion" = "us-east-1" } }
+      },
+      {
         Effect   = "Allow"
         Action   = "s3:GetObject"
         Resource = "arn:aws:s3:::meetlab-v2-staging-media-${local.account}/loadtests/*"

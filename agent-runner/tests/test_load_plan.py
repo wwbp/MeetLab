@@ -1,7 +1,7 @@
 """Load-test plan: the standard shapes, per-step measures, and the SLO verdict (load_plan.py)."""
 import unittest
 
-from load_plan import SHAPES, Step, room_window, schedule, step_bounds, step_of, summarise_step, verdict
+from load_plan import SHAPES, Step, parse_reply, room_window, schedule, stage_summary, step_bounds, step_of, summarise_step, verdict
 
 
 class TestShapes(unittest.TestCase):
@@ -104,6 +104,28 @@ class TestTiming(unittest.TestCase):
     def test_a_measurement_belongs_to_the_step_it_happened_in(self):
         bounds = step_bounds(self.steps, t0=0)
         self.assertEqual([step_of(t, bounds) for t in (0, 99.9, 100, 319, 320)], [0, 0, 1, 2, None])
+
+
+class TestServerSide(unittest.TestCase):
+    line = ('2026-10-03 01:02:03.456 | INFO | bot:on_assistant_turn_stopped:1005 - bot reply u1 stored for session s1 '
+            'latency_ms=812.5 timing={"stt_ms":301.0,"llm_ttft_ms":420.2,"tts_ttfb_ms":150.0}')
+
+    def test_a_reply_line_gives_the_bots_own_stage_timings(self):
+        self.assertEqual(parse_reply(self.line), {"latency_ms": 812.5, "stt_ms": 301.0, "llm_ttft_ms": 420.2, "tts_ttfb_ms": 150.0})
+
+    def test_a_reply_without_audio_or_timing_still_counts(self):
+        self.assertEqual(parse_reply("bot reply u2 stored for session s1 latency_ms=None timing={}"), {"latency_ms": None})
+
+    def test_other_lines_are_not_replies(self):
+        self.assertIsNone(parse_reply("user utterance u3 stored for session s1"))
+
+    def test_which_stage_slows_down_under_load(self):
+        timings = [{"latency_ms": 800.0, "stt_ms": 300.0, "llm_ttft_ms": float(ms)} for ms in range(100, 2100, 100)]
+        s = stage_summary(timings)
+        self.assertEqual((s["llm_ttft_ms"]["p50"], s["llm_ttft_ms"]["p95"]), (1000.0, 1900.0))
+        self.assertEqual(s["stt_ms"]["p95"], 300.0)
+        self.assertEqual(s["replies"], 20)
+        self.assertNotIn("tts_ttfb_ms", s)
 
 
 if __name__ == "__main__":

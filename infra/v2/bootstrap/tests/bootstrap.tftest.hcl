@@ -394,7 +394,7 @@ run "acceptance_role_is_staging_only_and_least_privilege" {
       alltrue([for a in flatten([s.Action]) : contains([
         "ssm:GetParameter", "kms:Decrypt", "ecs:ListTasks", "ecs:DescribeTasks", "ecs:StopTask", "ecs:ExecuteCommand", "logs:FilterLogEvents",
         "iam:SimulatePrincipalPolicy", "s3:ListBucket", "ecs:DescribeServices",
-        "ecs:RunTask", "iam:PassRole", "ec2:DescribeSubnets", "ec2:DescribeSecurityGroups", "s3:GetObject",
+        "ecs:RunTask", "iam:PassRole", "ec2:DescribeSubnets", "ec2:DescribeSecurityGroups", "s3:GetObject", "cloudwatch:GetMetricData",
     ], a)])])
     error_message = "only the actions the acceptance test performs"
   }
@@ -434,6 +434,11 @@ run "acceptance_can_start_the_load_generator_and_nothing_else" {
     condition = anytrue([for s in jsondecode(aws_iam_role_policy.acceptance.policy).Statement :
     flatten([s.Action]) == ["s3:GetObject"] && flatten([s.Resource]) == ["arn:aws:s3:::meetlab-v2-staging-media-123456789012/loadtests/*"]])
     error_message = "reads load test results, never recordings"
+  }
+  assert {
+    condition = anytrue([for s in jsondecode(aws_iam_role_policy.acceptance.policy).Statement :
+    flatten([s.Action]) == ["cloudwatch:GetMetricData"] && s.Condition.StringEquals["aws:RequestedRegion"] == "us-east-1"])
+    error_message = "reads metrics (CPU, memory, database) for the run's report; GetMetricData has no resource-level permissions"
   }
   assert {
     condition     = aws_iam_role.acceptance.max_session_duration == 14400

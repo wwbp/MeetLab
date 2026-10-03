@@ -200,6 +200,7 @@ def main() -> int:
         workers = min(peak, int(os.getenv("WORKERS", "0")) or os.cpu_count() or 2)
         t0 = time.time() + 5
         bounds = step_bounds(steps, t0)
+        result["bounds"] = bounds  # load_report.py reads staging's side of each step by these
         ctx = mp.get_context("spawn")
         q, abort = ctx.Queue(), ctx.Event()
         procs = [ctx.Process(target=_worker, args=(w, list(range(w, peak, workers)), run_id, steps, t0, profile, q, abort),

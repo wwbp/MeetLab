@@ -117,7 +117,7 @@ resource "aws_autoscaling_group" "model" {
   for_each              = local.models
   name                  = "meetlab-v2-staging-${each.key}"
   min_size              = 0
-  max_size              = 1
+  max_size              = each.key == "tts" ? var.tts_replicas : 1 # one task per machine (fixed host port)
   vpc_zone_identifier   = [for s in aws_subnet.private : s.id]
   protect_from_scale_in = true
   launch_template {
@@ -239,7 +239,7 @@ resource "aws_ecs_service" "model" {
   name            = "meetlab-v2-staging-${each.key}"
   cluster         = aws_ecs_cluster.this.id
   task_definition = aws_ecs_task_definition.model[each.key].arn
-  desired_count   = 1
+  desired_count   = each.key == "tts" ? var.tts_replicas : 1
   # One machine (max_size 1): stop the old task first, or the new one can never be placed
   # and the deploy waits forever (FP8, 2026-10-03).
   deployment_minimum_healthy_percent = 0

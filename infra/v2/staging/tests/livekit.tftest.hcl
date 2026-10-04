@@ -35,7 +35,8 @@ run "switched_on_it_runs_our_livekit_server" {
   command = apply
 
   variables {
-    livekit_self_hosted = true
+    livekit_self_hosted   = true
+    livekit_instance_type = "c6i.large" # the size between test sessions (tests/scale.tftest.hcl)
   }
 
   assert {

@@ -46,7 +46,8 @@ resource "aws_db_instance" "this" {
   identifier                  = "meetlab-v2-staging"
   engine                      = "postgres"
   engine_version              = "17"
-  instance_class              = "db.t4g.small"
+  instance_class              = var.db_instance_class # db.t4g.small; raised for big load tests
+  apply_immediately           = true                  # a size change applies on merge, not next week (a few minutes' restart)
   allocated_storage           = 20
   storage_type                = "gp3"
   storage_encrypted           = true

@@ -21,6 +21,7 @@ room-gone cleanup can never be what closes a session and hide a failure.
   refresh          the only human refreshes: the bot is still there after the grace
   chat             a malformed packet is ignored; a chat message becomes a turn   (F13)
   auto_record      with no Record press: the room's video, the bot's own audio and its greeting line
+  record_auth      an outsider cannot start or stop a room's recording (F10): 401
   our_models       a room configured for our LLM (vLLM) and voice (Kokoro): the bot hears,
                    answers and speaks on them (waits for cold models first)          (L3)
 
@@ -469,6 +470,20 @@ async def scenario_auto_record():
         return "video, the bot's own audio and its greeting line, with no Record press"
 
 
+async def scenario_record_auth():
+    """F10: the recording endpoints act only for the console or someone admitted to the room.
+    An outsider (no console cookie, no room token) who knows a room's name gets 401."""
+    outsider = urllib.request.build_opener()  # no cookies
+    for action in ("start", "stop"):
+        try:
+            outsider.open(urllib.request.Request(f"{MEET}/api/record/{action}?roomName=accept-anything"), timeout=30)
+            raise Fail(f"an outsider could {action} a recording")
+        except urllib.error.HTTPError as e:
+            if e.code != 401:
+                raise Fail(f"{action}: expected 401, got {e.code}")
+    return "start and stop refuse an outsider (401)"
+
+
 OUR_LLM = "Qwen/Qwen2.5-7B-Instruct"  # infra/v2/staging/models.tf
 
 
@@ -504,7 +519,7 @@ SCENARIOS = {"start": scenario_start, "stoptask": scenario_stoptask, "removed": 
              "kill9": scenario_kill9, "stop_early": scenario_stop_early,
              "audio_recording": scenario_audio_recording, "video_recording": scenario_video_recording,
              "transcript": scenario_transcript, "two_humans": scenario_two_humans, "refresh": scenario_refresh,
-             "chat": scenario_chat, "auto_record": scenario_auto_record, "our_models": scenario_our_models,
+             "chat": scenario_chat, "auto_record": scenario_auto_record, "our_models": scenario_our_models, "record_auth": scenario_record_auth,
              "prewarm": scenario_prewarm}  # last: its Stop preparing cools the pool the run prepared
 
 

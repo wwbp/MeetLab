@@ -96,7 +96,7 @@ entries. Both would have broken something.
 
 | Thing | Note |
 |-------|------|
-| `/api/record/start`, `/api/record/stop` | Genuinely needed — a participant's browser calls them mid-call. But `GET /api/record/start?roomName=…` has **no auth at all** and burns a scarce egress slot. Needs a signed room token. |
+| `/api/record/start`, `/api/record/stop` | **Done (2026-10-04):** console sessions only (`lib/record-auth.ts`); the participant Record button is gone, studies use auto-record. Joining a room by its name alone is the remaining half of F10 (signed join links, in the plan). |
 | `pnpm lint` | Broken since the Next 16 upgrade (`next lint` removed). No linting has run in CI for some time. |
 
 ---
@@ -112,7 +112,7 @@ entries. Both would have broken something.
 3. **RC3** (interruption) and **RC4** (egress retry + visible failure).
 4. **Cut** the list above, in the order given — the STT paths last, after the dev
    NIM exists.
-5. **`/api/record/*` auth**, then delete `PATCH /media-files` once the webhook works.
+5. ~~**`/api/record/*` auth**~~ (done: console-only), then delete `PATCH /media-files` once the webhook works.
 
 Deliberately not first: the deletions. Cutting dead code is satisfying and low
 risk, but it fixes nothing a user noticed. The pilot's complaints all trace to

@@ -82,7 +82,8 @@ new page or admin API is **public until it is added there**. `meet/middleware.te
 enumerates the console shell from the filesystem and asserts every page and admin
 route is covered, so that mistake fails a test instead of shipping.
 
-One endpoint is knowingly public: `/api/record/*` is called from a participant's
-browser (the in-call record button in `lib/SettingsMenu.tsx`), so console auth would
-break it. It needs room-scoped authentication of its own — currently anyone who
-knows a room name can start or stop its recording.
+`/api/record/*` sits outside that list but checks for itself: only a logged-in console
+session may start or stop a recording (`lib/record-auth.ts`, F10, 2026-10-04). Participants
+have no Record button any more: anyone who names a room can join it, so "in the room" proves
+nothing, and a study's recording must not be stopped from inside it. Studies record with
+Bot Config's auto-record.

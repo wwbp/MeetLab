@@ -46,6 +46,12 @@ and the bot writes it onto the speaker row:
 speakers.meta = {"role": "participant", "display_name": "...", "prolific_id": "5f2a..."}
 ```
 
+The bot writes this for everyone, whether they joined before it or after. Until
+2026-10-04 it didn't for people already in the room when the bot arrived (the usual
+order in a study): they were learned only after their first sentence, and that path
+stored their name but **not their Prolific ID**. Sessions from before then may lack it
+for early joiners; their completion codes and the room's start time still match them.
+
 A malformed ID that somehow gets through (a stale or bypassed client) is stored
 under `prolific_id_invalid` rather than dropped. An unmatched session is a
 participant who did the work and cannot be paid, so it is worth keeping what

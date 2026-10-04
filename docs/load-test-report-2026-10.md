@@ -32,6 +32,19 @@ when a machine took its first bot after a deploy (it downloads the bot's softwar
 | Database connections | 101 of ~180 | ~100 rooms | A connection pooler or a larger database |
 | Bot machines | 61% CPU | not near | — |
 
+## A study launch, and past 60 rooms (2026-10-04)
+
+With extra headroom for the session (a bigger LiveKit machine and database, two voice GPUs):
+
+| Test | Rooms | Answered | Typical / slowest 1 in 20 | Notes |
+|---|---|---|---|---|
+| **Study launch:** every room starting within 30 seconds | 50 | 100% | 1.46 / 1.90 s | Passed. Bots took up to ~44 s to join (fresh machines download the bot first); **meet was busy (63% CPU)** for the burst |
+| **Climb:** +6 rooms every 3 minutes | **72 (~122 people)** | 100% | 1.52 / 1.97 s | The largest valid step. A second voice GPU kept the voice's start time at 176 ms |
+| Climb | 78 | 95% | 1.50 / 2.03 s | Not valid: **our load generator** could no longer keep up (its synthetic people stuttered), not staging |
+
+Staging's own limit is above 72 rooms. Measuring 100 needs the load generator split in
+two; meet's share of a launch burst is the next thing to watch.
+
 ## Our stack against v1's
 
 The same 3-room test, the same recorded speech, and the same speech-to-text (our Parakeet

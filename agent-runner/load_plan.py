@@ -131,3 +131,49 @@ def stage_summary(timings: list[dict]) -> dict:
         if values:
             out[stage] = {"p50": _pct(values, 0.50), "p95": _pct(values, 0.95)}
     return out
+
+
+def shard_rooms(peak: int, shard: int, of: int) -> list[int]:
+    """The rooms one of `of` load generators runs: every of-th room, starting at `shard`."""
+    return list(range(shard, peak, of))
+
+
+def judge_step(k: int, step: Step, events: list, bounds: list) -> dict:
+    """Step k from the raw events (kind, time, room, value) that fall inside it."""
+    mine = [e for e in events if step_of(e[1], bounds) == k]
+    m = summarise_step(step, turns=[e[3] for e in mine if e[0] == "turn"],
+                       joins_s=[e[3] for e in mine if e[0] == "join"],
+                       start_errors=sum(e[0] == "start_error" for e in mine),
+                       disconnects=sum(e[0] == "disconnect" for e in mine))
+    m["harness_lag_ms"] = max([e[3] for e in mine if e[0] == "lag"], default=0)
+    m["errors"] = [e[3] for e in mine if e[0] == "start_error"][:5]
+    m["pass"], m["why"] = verdict(m)
+    return m
+
+
+def merge_results(results: list[dict], steps: list[Step]) -> dict:
+    """One run's result from its generators' halves (same run, same clock): every step judged
+    over both halves' events, since percentiles of halves can't be averaged."""
+    events = [e for r in results for e in r["events"]]
+    bounds = results[0]["bounds"]
+    merged = {**{k: v for k, v in results[0].items() if k not in ("events", "steps")},
+              "generators": len(results), "events": events,
+              "steps": [judge_step(k, s, events, bounds) for k, s in enumerate(steps)],
+              "rooms": sorted((room for r in results for room in r.get("rooms", [])), key=lambda x: x["room"]),
+              "clips": [c for r in results for c in r.get("clips", [])],
+              "sessions_left_running": sorted(n for r in results for n in r.get("sessions_left_running", []))}
+    for k, m in enumerate(merged["steps"]):  # judged answers: each half judged its own sample
+        halves = [r["steps"][k]["answers"] for r in results if k < len(r.get("steps", [])) and r["steps"][k].get("answers")]
+        if halves:
+            judged = sum(h["judged"] for h in halves)
+            m["answers"] = {"rubric": halves[0]["rubric"], "judge": halves[0]["judge"], "judged": judged,
+                            "dropped": sum(h["dropped"] for h in halves)}
+            for c in ("answers", "spoken", "overall", "context"):
+                scored = [(h[c], h["judged"]) for h in halves if h.get(c) is not None]
+                weight = sum(n for _, n in scored)
+                m["answers"][c] = round(sum(v * n for v, n in scored) / weight, 2) if weight else None
+    passed = [m["rooms"] for m in merged["steps"] if m["pass"] and m["rooms"]]
+    merged["capacity_rooms"] = max(passed, default=0)
+    merged["harness_valid"] = all(m["harness_lag_ms"] == 0 for m in merged["steps"])
+    merged["pass"] = all(m["pass"] for m in merged["steps"]) and not merged["sessions_left_running"]
+    return merged

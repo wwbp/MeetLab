@@ -37,7 +37,7 @@ sys.path.insert(0, os.path.dirname(__file__))
 from livekit import rtc  # noqa: E402
 
 from conversation_script import conversation_for  # noqa: E402
-from load_plan import room_window, schedule, step_bounds, step_of, summarise_step, verdict  # noqa: E402
+from load_plan import judge_step, room_window, schedule, shard_rooms, step_bounds  # noqa: E402
 
 PROFILES = Path(__file__).parent.parent / "load_profiles"
 SAMPLE_RATE, FRAME_MS = 24000, 20
@@ -253,18 +253,6 @@ def _worker(worker: int, rooms: list[int], run_id, steps, t0, profile, q, abort)
         q.put(("done", time.time(), worker, None))
 
 
-def _judge(k, step, events, bounds) -> dict:
-    mine = [e for e in events if step_of(e[1], bounds) == k]
-    m = summarise_step(step, turns=[e[3] for e in mine if e[0] == "turn"],
-                       joins_s=[e[3] for e in mine if e[0] == "join"],
-                       start_errors=sum(e[0] == "start_error" for e in mine),
-                       disconnects=sum(e[0] == "disconnect" for e in mine))
-    m["harness_lag_ms"] = max([e[3] for e in mine if e[0] == "lag"], default=0)
-    m["errors"] = [e[3] for e in mine if e[0] == "start_error"][:5]
-    m["pass"], m["why"] = verdict(m)
-    return m
-
-
 def _fmt(v, f="{:.0f}"):
     return "-" if v is None else f.format(v)
 
@@ -274,7 +262,11 @@ def main() -> int:
     profile = json.loads((PROFILES / f"{profile_name}.json").read_text())
     steps = schedule(shape, int(os.getenv("TARGET", "50")), int(os.getenv("HOLD_S", "0")))
     peak = max(s.rooms for s in steps)
-    run_id = uuid.uuid4().hex[:6]
+    # Split runs (SHARD "i/n"): n generators share the run's id and start time (T0) and each runs
+    # every n-th room; one 16-vCPU generator tops out at ~75 rooms (2026-10-04).
+    shard, of = (int(x) for x in os.getenv("SHARD", "0/1").split("/"))
+    run_id = os.getenv("RUN_ID") or uuid.uuid4().hex[:6]
+    rooms = shard_rooms(peak, shard, of)
     if os.getenv("LIBRARY"):  # fetched once, before the workers start: they read it from disk
         _fetch_library(os.environ["LIBRARY"])
         print(f"conversation library: {len(_library())} dialogues", flush=True)
@@ -283,9 +275,10 @@ def main() -> int:
           f"{sum(s.hold_s for s in steps) / 60:.0f} min", flush=True)
 
     until = datetime.now(timezone.utc) + timedelta(seconds=sum(s.hold_s for s in steps) + 1800)
-    prepare = os.getenv("PREPARE", "1") == "1"  # 0 locally: no bot pool to prepare
+    prepare = os.getenv("PREPARE", "1") == "1" and shard == 0  # 0 locally: no pool; one generator prepares
     warm = console.call("POST", "/api/concierge/capacity", {"sessions": peak, "until": until.isoformat()}) if prepare else {}
     result = {"run": run_id, "profile": profile_name, "config": profile, "shape": shape, "steps": [],
+              "target": int(os.getenv("TARGET", "50")), "hold_s": int(os.getenv("HOLD_S", "0")), "shard": f"{shard}/{of}",
               "git_sha": os.getenv("GIT_SHA"), "started": datetime.now(timezone.utc).isoformat()}
     try:
         if warm.get("capped"):
@@ -298,13 +291,14 @@ def main() -> int:
         if prepare:
             print(f"bot machines ready: {s['ready_instances']} after {time.time() - t:.0f} s", flush=True)
 
-        workers = min(peak, int(os.getenv("WORKERS", "0")) or os.cpu_count() or 2)
-        t0 = time.time() + 5
+        workers = min(len(rooms), int(os.getenv("WORKERS", "0")) or os.cpu_count() or 2)
+        t0 = float(os.getenv("T0") or time.time() + 5)
+        time.sleep(max(0, t0 - 5 - time.time()))  # split runs start together
         bounds = step_bounds(steps, t0)
         result["bounds"] = bounds  # load_report.py reads staging's side of each step by these
         ctx = mp.get_context("spawn")
         q, abort = ctx.Queue(), ctx.Event()
-        procs = [ctx.Process(target=_worker, args=(w, list(range(w, peak, workers)), run_id, steps, t0, profile, q, abort),
+        procs = [ctx.Process(target=_worker, args=(w, rooms[w::workers], run_id, steps, t0, profile, q, abort),
                              daemon=True) for w in range(workers)]
         for p in procs:
             p.start()
@@ -320,13 +314,14 @@ def main() -> int:
             except Exception:
                 pass
             while k < len(steps) and time.time() > bounds[k][1] + GRACE_S:
-                m = _judge(k, steps[k], events, bounds)
+                m = judge_step(k, steps[k], events, bounds)
                 result["steps"].append(m)
                 print(f"{k:>4} {m['rooms']:>5} {m['turns']:>5} {_fmt(m['reply_rate'], '{:.0%}'):>6} {_fmt(m['p50_ms']):>6} "
                       f"{_fmt(m['p95_ms']):>6} {_fmt(m['p99_ms']):>6} {_fmt(m['join_p95_s']):>6}  "
                       f"{'PASS' if m['pass'] else 'FAIL ' + '; '.join(m['why'])}"
                       f"{'  (harness lagged ' + _fmt(m['harness_lag_ms']) + ' ms)' if m['harness_lag_ms'] else ''}", flush=True)
-                if not m["pass"] and steps[k].stop_on_failure and not abort.is_set():
+                # A split run can't stop early on one half's failure: the merged report judges it.
+                if not m["pass"] and steps[k].stop_on_failure and of == 1 and not abort.is_set():
                     abort.set()  # breakpoint: found it; every room leaves now
                 k += 1
         if abort.is_set():
@@ -334,7 +329,7 @@ def main() -> int:
         for p in procs:
             p.join(timeout=60)
         still = []
-        for i in range(peak):
+        for i in rooms:
             name = f"load-{run_id}-{i:03d}"
             try:
                 if console.call("GET", f"/api/concierge/rooms/{name}/bots").get("assignedBotIdentity"):
@@ -342,6 +337,7 @@ def main() -> int:
             except urllib.error.HTTPError:
                 pass  # the room is gone, and with it the bot
         result["sessions_left_running"] = still
+        result["events"] = events  # a split run's report merges the generators' events (load_plan.merge_results)
         # What each room's participant said, and what its conversation stored (quality.py).
         result["rooms"] = []
         for _, _, i, session in (e for e in events if e[0] == "session"):

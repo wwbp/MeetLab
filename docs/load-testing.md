@@ -73,6 +73,13 @@ still marked running counts as a failure: something didn't close.
 If the load generator itself falls behind (its participants can't speak in real time), the
 result says **HARNESS OVERLOADED** and its numbers are not trusted. Rerun with more CPU.
 
+One load generator (16 vCPU, the largest Fargate size) tops out at about **75 rooms**. Past
+that, run with **generators = 2**. Both tasks start at the same moment and each runs every
+other room (room 0, 2, 4… and room 1, 3, 5…). The report merges their halves into one
+result, judges each step on the union, and says "(2 load generators)" next to capacity.
+A generator's own log judges only its half, so it can say FAIL at a step whose rooms all
+belong to the other generator. Only the merged report counts.
+
 ## Quality: is it still good while it is fast?
 
 Speed alone can mislead: a faster model or a busier server can hear worse or answer worse.
@@ -152,6 +159,10 @@ docker compose -f .devcontainer/docker-compose.yml exec -T \
   -e PROFILE=stored -e SHAPE=load -e TARGET=2 -e HOLD_S=45 -e PREPARE=0 \
   agent-runner uv run python tests/load_run.py
 ```
+
+A split run locally: start two of these at once with the same `RUN_ID` and `T0` (a Unix
+time ~20 s ahead) and `SHARD=0/2` and `SHARD=1/2`. Then merge them with `load_report.py`.
+The report reads staging's CloudWatch, so locally you need AWS credentials.
 
 ## Where the code is
 

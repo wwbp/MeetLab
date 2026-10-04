@@ -86,3 +86,50 @@ run "switched_on_it_runs_our_livekit_server" {
     error_message = "the live tests learn which LiveKit to use, and that there is no video recording yet"
   }
 }
+
+# D1: participants behind strict firewalls (only web traffic allowed) reach LiveKit through
+# its built-in TURN server over TLS on 443, which looks like any HTTPS connection.
+run "turn_over_tls_on_443" {
+  command = apply
+
+  variables {
+    livekit_self_hosted = true
+  }
+
+  assert {
+    condition = alltrue([for line in ["turn:", "enabled: true", "domain: turn-staging.wwbp.org", "tls_port: 5349", "external_tls: true"] :
+    strcontains(join("", jsondecode(aws_ecs_task_definition.livekit.container_definitions)[0].command), line)])
+    error_message = "LiveKit's TURN server on, its TLS ended by the load balancer (external_tls)"
+  }
+  assert {
+    condition = (
+      aws_lb.turn[0].load_balancer_type == "network" && !aws_lb.turn[0].internal &&
+      aws_lb_listener.turn[0].port == 443 && aws_lb_listener.turn[0].protocol == "TLS" &&
+      aws_lb_listener.turn[0].certificate_arn == data.aws_acm_certificate.wildcard.arn &&
+      aws_lb_target_group.turn[0].port == 5349 && aws_lb_target_group.turn[0].protocol == "TCP"
+    )
+    error_message = "turn-staging.wwbp.org:443: TLS with the *.wwbp.org certificate, then plain TCP to LiveKit's TURN port"
+  }
+  assert {
+    condition = anytrue([for r in aws_security_group.livekit.ingress :
+    r.protocol == "tcp" && r.from_port == 5349 && contains(coalesce(r.security_groups, []), aws_security_group.turn_lb.id) && length(coalesce(r.cidr_blocks, [])) == 0])
+    error_message = "the TURN port only from the load balancer, never straight from the internet"
+  }
+  assert {
+    condition     = aws_route53_record.turn[0].name == "turn-staging.wwbp.org" && contains([for lb in aws_ecs_service.livekit[0].load_balancer : lb.container_port], 5349)
+    error_message = "the name points at the load balancer, which sends to the LiveKit task"
+  }
+}
+
+run "no_turn_without_our_livekit" {
+  command = apply
+
+  variables {
+    livekit_self_hosted = false
+  }
+
+  assert {
+    condition     = length(aws_lb.turn) == 0 && length(aws_route53_record.turn) == 0
+    error_message = "LiveKit Cloud has its own TURN: nothing of ours"
+  }
+}

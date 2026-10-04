@@ -27,6 +27,8 @@ room-gone cleanup can never be what closes a session and hide a failure.
   session_limit    a room's time limit: the bot speaks its closing message when time is up   (D2)
   our_models       a room configured for our LLM (vLLM) and voice (Kokoro): the bot hears,
                    answers and speaks on them (waits for cold models first)          (L3)
+  turn_relay       a participant whose network allows no direct path (relay-only) joins through
+                   TURN over TLS on 443 and hears the bot's greeting                 (D1)
 
 A scenario that cannot reach its situation (e.g. the participant drops before the
 kill) is a FAIL, not a skip: an acceptance test that didn't test anything passed nothing.
@@ -125,8 +127,10 @@ async def _until(check, timeout, what):
 class Meeting:
     """A room with a stand-in participant and a bot started through meet."""
 
-    def __init__(self, wait_for_bot=True, second_human=False, room=None):
+    def __init__(self, wait_for_bot=True, second_human=False, room=None, relay_only=False):
         self.wait_for_bot, self.second_human = wait_for_bot, second_human
+        self.options = rtc.RoomOptions(rtc_config=rtc.RtcConfiguration(
+            ice_transport_type=rtc.IceTransportType.TRANSPORT_RELAY)) if relay_only else rtc.RoomOptions()
         self.room = room or f"accept-{uuid.uuid4().hex[:6]}"
 
     async def __aenter__(self):
@@ -136,7 +140,7 @@ class Meeting:
         _post("/api/console/login", {"password": os.environ["CONSOLE_PASSWORD"]})
         _post("/api/concierge/rooms", {"name": self.room})
         self.human = rtc.Room()
-        await self.human.connect(os.environ["LIVEKIT_URL"], _token(self.room, "human_standin"))
+        await self.human.connect(os.environ["LIVEKIT_URL"], _token(self.room, "human_standin"), self.options)
         self.second = rtc.Room()
         if self.second_human:  # in the room before the bot, as in diagnosis F1
             await self.second.connect(os.environ["LIVEKIT_URL"], _token(self.room, "human_second"))
@@ -608,12 +612,37 @@ async def scenario_our_models():
         return f"heard ({stt}), answered by {OUR_LLM}, spoken by Kokoro; latency_ms={reply} (models ready after {m.started - t0:.0f} s)"
 
 
+async def scenario_turn_relay():
+    """D1: relay-only ICE leaves no direct path, so the bot's greeting can only arrive through
+    a TURN server: ours, over TLS on 443 (the only one LiveKit offers; no TURN over UDP)."""
+    async with Meeting(relay_only=True) as m:
+        heard = asyncio.Event()
+
+        async def listen(track):
+            async for event in rtc.AudioStream(track, num_channels=1):
+                if any(bytes(event.frame.data)):  # not silence: the greeting
+                    heard.set()
+                    return
+
+        bot = next(p for p in m.human.remote_participants.values() if p.identity.startswith("bot_"))
+        await _until(lambda: any(t.track for t in bot.track_publications.values()), 60, "the bot's audio track")
+        task = asyncio.create_task(listen(next(t.track for t in bot.track_publications.values() if t.track)))
+        try:
+            await asyncio.wait_for(heard.wait(), 90)
+        except asyncio.TimeoutError:
+            raise Fail("no audio from the bot through TURN within 90 s")
+        finally:
+            task.cancel()
+        return f"the bot's greeting heard through TURN/TLS 443 (relay-only), bot joined after {m.join_s:.0f}s"
+
+
 SCENARIOS = {"start": scenario_start, "stoptask": scenario_stoptask, "removed": scenario_removed,
              "kill9": scenario_kill9, "stop_early": scenario_stop_early,
              "audio_recording": scenario_audio_recording, "video_recording": scenario_video_recording,
              "transcript": scenario_transcript, "two_humans": scenario_two_humans, "refresh": scenario_refresh,
              "chat": scenario_chat, "auto_record": scenario_auto_record, "our_models": scenario_our_models, "record_auth": scenario_record_auth,
              "study_prolific": scenario_study_prolific, "session_limit": scenario_session_limit,
+             "turn_relay": scenario_turn_relay,
              "prewarm": scenario_prewarm}  # last: its Stop preparing cools the pool the run prepared
 
 

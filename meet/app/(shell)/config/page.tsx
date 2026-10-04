@@ -10,6 +10,7 @@ type BotConfig = {
   llm_model: string;
   tts_provider: string;
   tts_voice: string;
+  tts_aggregation_mode: string;
   stt_endpointing_ms: number;
   user_speech_timeout_ms: number;
   stt_vad_mode: string;
@@ -26,6 +27,7 @@ const EMPTY_CONFIG: Omit<BotConfig, 'scope'> = {
   llm_model: 'gpt-5.4-nano',
   tts_provider: 'elevenlabs',
   tts_voice: 'WhMcMcvXQ8T2QfmQmlYh',
+  tts_aggregation_mode: 'sentence',
   stt_endpointing_ms: 450,
   user_speech_timeout_ms: 300,
   stt_vad_mode: 'local',
@@ -85,6 +87,7 @@ export default function ConfigPage() {
         llm_model: LLM_MODELS.includes(loadedLlm) ? loadedLlm : LLM_MODELS[0],
         tts_provider: data.tts_provider ?? 'elevenlabs',
         tts_voice: data.tts_voice ?? '',
+        tts_aggregation_mode: data.tts_aggregation_mode ?? 'sentence',
         stt_endpointing_ms: data.stt_endpointing_ms ?? 450,
         user_speech_timeout_ms: data.user_speech_timeout_ms ?? 300,
         stt_vad_mode: data.stt_vad_mode ?? 'local',
@@ -283,6 +286,16 @@ export default function ConfigPage() {
                   placeholder={form.tts_provider === 'elevenlabs' ? 'WhMcMcvXQ8T2QfmQmlYh' : 'alloy'}
                   required
                 />
+              </Field>
+              <Field label="Start speaking">
+                <select
+                  value={form.tts_aggregation_mode}
+                  onChange={(e) => setForm((f) => ({ ...f, tts_aggregation_mode: e.target.value }))}
+                  className={sel}
+                >
+                  <option value="sentence">after the first full sentence (default)</option>
+                  <option value="token">as words arrive (sooner, may sound choppier)</option>
+                </select>
               </Field>
             </div>
           </Section>

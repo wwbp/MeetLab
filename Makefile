@@ -14,7 +14,7 @@ BENCHMARK_PARALLEL ?= 3
 
 MSG ?= migration
 
-.PHONY: up down start stop logs migrate migration test test-unit test-integration test-bot-longevity test-multi-speaker test-multi-speaker-audio test-session-lifecycle setup-livekit-cloud revert-livekit-local test-livekit-tooling test-infra scan scan-agent-runner scan-meet benchmark benchmark-audio benchmark-audio-long benchmark-audio-paused benchmark-full benchmark-exp2 benchmark-report simulate soak soak-sanity bench-stt-concurrency bench-idle-room
+.PHONY: test-config-parity up down start stop logs migrate migration test test-unit test-integration test-bot-longevity test-multi-speaker test-multi-speaker-audio test-session-lifecycle setup-livekit-cloud revert-livekit-local test-livekit-tooling test-infra scan scan-agent-runner scan-meet benchmark benchmark-audio benchmark-audio-long benchmark-audio-paused benchmark-full benchmark-exp2 benchmark-report simulate soak soak-sanity bench-stt-concurrency bench-idle-room
 
 up:
 	$(COMPOSE) up --build -d
@@ -56,6 +56,11 @@ test-unit:
 	-docker rm -f $$(docker ps -aq --filter label=meetlab.session) 2>/dev/null
 	$(COMPOSE) exec -T meet pnpm test
 	$(COMPOSE) exec -T meet pnpm lint
+
+# Every Bot Config field is in the database, the runner's API and the console form. The
+# services' own tests can't see each other, so this runs on the host from the repo root.
+test-config-parity:
+	python3 agent-runner/tests/config_parity_check.py
 
 # Offline: fmt, validate and `terraform test` (mock provider) for every infra/v2 stack.
 # No AWS credentials needed, so it runs in CI and before any plan.

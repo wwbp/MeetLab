@@ -35,8 +35,10 @@ def effective_turn_detection(turn_detection: str, stt_model: str) -> str:
 
 @dataclass
 class TurnVerdict:
-    """A person's latest smart-turn verdict, written by their gate, read by their collector."""
+    """A person's latest smart-turn verdict, written by their gate, read by their collector;
+    wait_secs is how long their unfinished turn stays open (Bot Config smart_turn_wait_ms)."""
     complete: bool = True
+    wait_secs: float = OPEN_TURN_SECS
 
 
 def turn_frames(transcript, complete: bool) -> list:

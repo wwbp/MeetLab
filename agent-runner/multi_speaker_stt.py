@@ -87,7 +87,7 @@ class _FrameCollector(FrameProcessor):
         self._closer = None
         if verdict is not None:
             from smart_turn import OPEN_TURN_SECS, TurnCloser
-            self._closer = TurnCloser(queue, open_turn_secs or OPEN_TURN_SECS)
+            self._closer = TurnCloser(queue, open_turn_secs or getattr(verdict, "wait_secs", OPEN_TURN_SECS))
         self._needs_vad_wrap = needs_vad_wrap
         self._sid = sid
         self._on_speech_onset = on_speech_onset

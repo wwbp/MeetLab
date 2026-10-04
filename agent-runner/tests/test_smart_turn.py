@@ -127,6 +127,14 @@ class TestCollector(unittest.IsolatedAsyncioTestCase):
         queue = await self.collect(TurnVerdict(complete=True))
         self.assertEqual(kinds(await self.drain(queue))[-1], "UserStoppedSpeakingFrame")
 
+    async def test_the_rooms_wait_decides_how_long_an_unfinished_turn_stays_open(self):
+        from multi_speaker_stt import _FrameCollector
+        queue = asyncio.Queue()
+        await _FrameCollector(queue, needs_vad_wrap=True, sid="ana", verdict=TurnVerdict(complete=False, wait_secs=0.05)).queue_frame(transcript())
+        await self.drain(queue)
+        await asyncio.sleep(0.1)
+        self.assertEqual(kinds(await self.drain(queue)), kinds(closing_frames()))
+
     async def test_unfinished_stays_open_then_closes_if_nothing_follows(self):
         queue = await self.collect(TurnVerdict(complete=False))
         self.assertNotIn("UserStoppedSpeakingFrame", kinds(await self.drain(queue)))

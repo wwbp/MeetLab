@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 
 from sqlalchemy import (
     BigInteger,
+    Integer,
     Boolean,
     DateTime,
     Float,
@@ -202,6 +203,8 @@ class BotConfig(Base):
     # How a person's turn is judged over (smart_turn.py): "silence" after a fixed pause, or
     # "smart_turn", each person's own Smart Turn v3 (segmented STT: Parakeet, Whisper).
     turn_detection: Mapped[str] = mapped_column(String(16), default="silence")
+    # How long smart turn keeps an unfinished speaker's turn open before replying anyway.
+    smart_turn_wait_ms: Mapped[int] = mapped_column(Integer, default=3000)
     stt_endpointing_ms: Mapped[int] = mapped_column(BigInteger, default=450, server_default="450")
     # Extra silence the turn aggregator waits after the VAD reports the speaker
     # stopped. ADDS to stt_endpointing_ms: a turn ends after roughly the sum of the

@@ -12,6 +12,7 @@ type BotConfig = {
   tts_voice: string;
   tts_aggregation_mode: string;
   turn_detection: string;
+  smart_turn_wait_ms: number;
   stt_endpointing_ms: number;
   user_speech_timeout_ms: number;
   stt_vad_mode: string;
@@ -30,6 +31,7 @@ const EMPTY_CONFIG: Omit<BotConfig, 'scope'> = {
   tts_voice: 'WhMcMcvXQ8T2QfmQmlYh',
   tts_aggregation_mode: 'sentence',
   turn_detection: 'silence',
+  smart_turn_wait_ms: 3000,
   stt_endpointing_ms: 450,
   user_speech_timeout_ms: 300,
   stt_vad_mode: 'local',
@@ -96,6 +98,7 @@ export default function ConfigPage() {
         tts_voice: data.tts_voice ?? '',
         tts_aggregation_mode: data.tts_aggregation_mode ?? 'sentence',
         turn_detection: data.turn_detection ?? 'silence',
+        smart_turn_wait_ms: data.smart_turn_wait_ms ?? 3000,
         stt_endpointing_ms: data.stt_endpointing_ms ?? 450,
         user_speech_timeout_ms: data.user_speech_timeout_ms ?? 300,
         stt_vad_mode: data.stt_vad_mode ?? 'local',
@@ -179,7 +182,7 @@ export default function ConfigPage() {
 
           {/* ── Content ── */}
           <Section label="Conversation">
-            <Field label="System Prompt">
+            <Field label="System Prompt" help="Who the bot is and how it should talk; sent to the language model with every turn.">
               <textarea
                 value={form.system_prompt}
                 onChange={(e) => setForm((f) => ({ ...f, system_prompt: e.target.value }))}
@@ -188,7 +191,7 @@ export default function ConfigPage() {
                 required
               />
             </Field>
-            <Field label="Greeting">
+            <Field label="Greeting" help="What the bot says when the first person joins.">
               <textarea
                 value={form.greeting}
                 onChange={(e) => setForm((f) => ({ ...f, greeting: e.target.value }))}
@@ -202,7 +205,7 @@ export default function ConfigPage() {
           {/* ── STT: the model and the settings only it uses ── */}
           <Section label="Speech-to-Text (model)">
             <div className="grid gap-4 sm:grid-cols-2">
-              <Field label="STT Model">
+              <Field label="STT Model" help="The speech-to-text model that turns what people say into text.">
                 <select
                   value={form.stt_model}
                   onChange={(e) => setForm((f) => ({ ...f, stt_model: e.target.value }))}
@@ -215,7 +218,7 @@ export default function ConfigPage() {
               </Field>
               {isOpenAiStt(form.stt_model) && (
                 <>
-                  <Field label="Transcription delay (OpenAI only)">
+                  <Field label="Transcription delay (OpenAI only)" help="How long OpenAI waits for more words before finalising: longer is more accurate, slower.">
                     <select
                       value={form.stt_delay ?? ''}
                       onChange={(e) => setForm((f) => ({ ...f, stt_delay: e.target.value || null }))}
@@ -227,7 +230,7 @@ export default function ConfigPage() {
                       ))}
                     </select>
                   </Field>
-                  <Field label="Voice detection (OpenAI only)">
+                  <Field label="Voice detection (OpenAI only)" help="Who decides when someone is speaking: always the bot\u2019s own per-speaker detector.">
                     <select value={form.stt_vad_mode} className={sel} disabled>
                       <option value="local">local: the bot&apos;s own per-speaker detector</option>
                     </select>
@@ -240,18 +243,39 @@ export default function ConfigPage() {
           {/* ── Turn-taking: when a person has finished, for every STT model ── */}
           <Section label="Turn-taking (all models)">
             <div className="grid gap-4 sm:grid-cols-2">
-              <Field label="End of turn">
-                <select
-                  value={form.turn_detection}
-                  onChange={(e) => setForm((f) => ({ ...f, turn_detection: e.target.value }))}
-                  className={sel}
+              <label className="flex items-start gap-3 sm:col-span-2">
+                <input
+                  type="checkbox"
+                  checked={form.turn_detection === 'smart_turn'}
+                  disabled={!isSegmentedStt(form.stt_model)}
+                  onChange={(e) => setForm((f) => ({ ...f, turn_detection: e.target.checked ? 'smart_turn' : 'silence' }))}
+                  className="mt-0.5 h-4 w-4"
+                />
+                <span className="text-sm">
+                  Smart turn{!isSegmentedStt(form.stt_model) && ' (Parakeet or Whisper only)'}
+                  <span className="text-muted-foreground block text-xs">
+                    Each speaker&apos;s own model hears when they sound finished, so a mid-sentence pause doesn&apos;t
+                    end their turn (held 73% of such pauses on the pilot&apos;s real speech). Off: a turn ends after a silence.
+                  </span>
+                </span>
+              </label>
+              {form.turn_detection === 'smart_turn' && (
+                <Field
+                  label="Wait for an unfinished speaker (ms)"
+                  help="How long a turn that sounds unfinished stays open before the bot replies anyway: longer cuts fewer people off, shorter keeps fewer waiting."
                 >
-                  <option value="silence">after a silence (default)</option>
-                  <option value="smart_turn" disabled={!isSegmentedStt(form.stt_model)}>
-                    when the speaker sounds finished (smart turn{isSegmentedStt(form.stt_model) ? '' : ': Parakeet or Whisper only'})
-                  </option>
-                </select>
-              </Field>
+                  <input
+                    type="number"
+                    step="250"
+                    min="500"
+                    max="5000"
+                    value={form.smart_turn_wait_ms}
+                    onChange={(e) => setForm((f) => ({ ...f, smart_turn_wait_ms: parseInt(e.target.value, 10) }))}
+                    className={inp}
+                    required
+                  />
+                </Field>
+              )}
               {/* These two ADD together to form the turn-end window: the bot
                   commits a turn after roughly stt_endpointing_ms +
                   user_speech_timeout_ms of silence. 450+300=750ms is calibrated
@@ -259,7 +283,7 @@ export default function ConfigPage() {
                   either field alone. Too low cuts people off mid-thought; too
                   high merges two separate points into one answer. With smart
                   turn, a speaker who sounds unfinished is waited for up to 3s. */}
-              <Field label="Pause that counts as stopping (ms)">
+              <Field label="Pause that counts as stopping (ms)" help="How long someone must be silent before they count as having stopped speaking.">
                 <input
                   type="number"
                   step="50"
@@ -273,7 +297,7 @@ export default function ConfigPage() {
                   required
                 />
               </Field>
-              <Field label="Extra wait before replying (ms)">
+              <Field label="Extra wait before replying (ms)" help="After someone stops, how long the bot waits for them to go on before it answers.">
                 <input
                   type="number"
                   step="50"
@@ -298,7 +322,7 @@ export default function ConfigPage() {
 
           {/* ── LLM ── */}
           <Section label="Language Model">
-            <Field label="LLM Model">
+            <Field label="LLM Model" help="The language model that writes the bot\u2019s replies.">
               <select
                 value={form.llm_model}
                 onChange={(e) => setForm((f) => ({ ...f, llm_model: e.target.value }))}
@@ -314,7 +338,7 @@ export default function ConfigPage() {
           {/* ── TTS ── */}
           <Section label="Voice (Text-to-Speech)">
             <div className="grid gap-4 sm:grid-cols-2">
-              <Field label="TTS Provider">
+              <Field label="TTS Provider" help="The service that speaks the bot\u2019s replies aloud.">
                 <select
                   value={form.tts_provider}
                   onChange={(e) => setForm((f) => ({ ...f, tts_provider: e.target.value }))}
@@ -325,7 +349,10 @@ export default function ConfigPage() {
                   ))}
                 </select>
               </Field>
-              <Field label={form.tts_provider === 'elevenlabs' ? 'Voice ID' : 'Voice Name'}>
+              <Field
+                label={form.tts_provider === 'elevenlabs' ? 'Voice ID' : 'Voice Name'}
+                help="Which voice the provider uses: an ElevenLabs voice ID, or a voice name (alloy) for OpenAI and Kokoro."
+              >
                 <input
                   type="text"
                   value={form.tts_voice}
@@ -335,7 +362,7 @@ export default function ConfigPage() {
                   required
                 />
               </Field>
-              <Field label="Start speaking">
+              <Field label="Start speaking" help="Whether the voice waits for a whole first sentence or starts as words arrive.">
                 <select
                   value={form.tts_aggregation_mode}
                   onChange={(e) => setForm((f) => ({ ...f, tts_aggregation_mode: e.target.value }))}
@@ -369,7 +396,7 @@ export default function ConfigPage() {
 
           {/* ── Session limit ── */}
           <Section label="Session Limit">
-            <Field label="Minutes (0 = unlimited)">
+            <Field label="Minutes (0 = unlimited)" help="Session length; the browser counts down and the bot says the closing message at the end.">
               <input
                 type="number"
                 step="1"
@@ -395,7 +422,7 @@ export default function ConfigPage() {
               warning three quarters of the way through, and a final reminder near the end. The
               limit is advisory — nobody is disconnected.
             </p>
-            <Field label="Closing message">
+            <Field label="Closing message" help="What the bot says when time is up, e.g. where to paste the completion code.">
               <textarea
                 value={form.closing_message}
                 onChange={(e) => setForm((f) => ({ ...f, closing_message: e.target.value }))}
@@ -437,11 +464,12 @@ function Section({ label, children }: { label: string; children: React.ReactNode
   );
 }
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
+function Field({ label, help, children }: { label: string; help?: string; children: React.ReactNode }) {
   return (
     <div className="space-y-1">
       <label className="text-muted-foreground font-mono text-xs uppercase">{label}</label>
       {children}
+      {help && <p className="text-muted-foreground text-xs">{help}</p>}
     </div>
   );
 }

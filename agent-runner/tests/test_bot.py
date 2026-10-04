@@ -450,7 +450,8 @@ class TestSmartTurnChain(unittest.TestCase):
     def chain(self, turn_detection):
         from types import SimpleNamespace
         from bot import _build_parakeet_chain
-        cfg = SimpleNamespace(stt_model="parakeet-tdt-0.6b-v2", turn_detection=turn_detection, stt_vad_mode="local")
+        cfg = SimpleNamespace(stt_model="parakeet-tdt-0.6b-v2", turn_detection=turn_detection, stt_vad_mode="local",
+                              smart_turn_wait_ms=1500)
         with mock.patch.dict(os.environ, {"NEMOTRON_STT_URL": "http://nim.internal:9000"}):
             return _build_parakeet_chain(cfg)
 
@@ -465,6 +466,7 @@ class TestSmartTurnChain(unittest.TestCase):
         self.assertIs(head._next._next, tail)
         self.assertIsInstance(verdict, TurnVerdict)
         self.assertIs(head._next._listener.verdict, verdict)
+        self.assertEqual(verdict.wait_secs, 1.5)  # the room's smart_turn_wait_ms
 
 
 class TestLongConversations(unittest.TestCase):

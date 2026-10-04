@@ -57,8 +57,15 @@ under `prolific_id_invalid` rather than dropped. An unmatched session is a
 participant who did the work and cannot be paid, so it is worth keeping what
 they typed.
 
-To pull the IDs for a finished study, join `utterances` → `speakers` and read
-`meta->>'prolific_id'`.
+To pull the IDs for a finished study, ask the console for each session's people:
+`GET /api/meetings/<conversation id>/speakers` (logged in) lists everyone who spoke, in the
+order they first spoke, with `prolific_id` (or `prolific_id_invalid`). In SQL it is a join
+of `utterances` → `speakers` reading `meta->>'prolific_id'`.
+
+The whole flow is checked live after every deploy: a participant joins with a Prolific ID
+before the bot, their completion code must equal HMAC(room:ID) and their ID must be stored
+(`study_prolific`); and a room limited to one minute must hear its closing message
+(`session_limit`). `agent-runner/tests/acceptance_staging.py`.
 
 ## 2. The closing message and the completion code
 

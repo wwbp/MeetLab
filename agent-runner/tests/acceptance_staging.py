@@ -22,6 +22,9 @@ room-gone cleanup can never be what closes a session and hide a failure.
   chat             a malformed packet is ignored; a chat message becomes a turn   (F13)
   auto_record      with no Record press: the room's video, the bot's own audio and its greeting line
   record_auth      an outsider cannot start or stop a room's recording (F10): 401
+  study_prolific   a participant joins as a study sends them (Prolific ID, before the bot): the completion
+                   code is HMAC(room:ID) and their speaker record keeps the ID          (D2)
+  session_limit    a room's time limit: the bot speaks its closing message when time is up   (D2)
   our_models       a room configured for our LLM (vLLM) and voice (Kokoro): the bot hears,
                    answers and speaks on them (waits for cold models first)          (L3)
 
@@ -42,6 +45,7 @@ import subprocess
 import sys
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 import uuid
 from datetime import timedelta
@@ -65,6 +69,16 @@ def _post(path, body, method="POST"):
     req = urllib.request.Request(MEET + path, json.dumps(body).encode(),
                                  {"Content-Type": "application/json"}, method=method)
     return json.loads(_web.open(req, timeout=30).read())
+
+
+def completion_code(room: str, participant_id: str, secret: str) -> str:
+    """meet/lib/completion-code.ts in Python: the code a participant pastes into the survey,
+    HMAC-SHA256(secret, "<room>:<id>"), 8 characters with no 0/O or 1/I."""
+    import hashlib
+    import hmac
+    alphabet = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ"
+    digest = hmac.new(secret.encode(), f"{room}:{participant_id}".encode(), hashlib.sha256).digest()
+    return "".join(alphabet[b % len(alphabet)] for b in digest[:8])
 
 
 def _console_stop(room, bot_identity):
@@ -503,6 +517,66 @@ async def scenario_record_auth():
     return "start and stop refuse an outsider (401)"
 
 
+def _join_as_participant(room: str, name: str, prolific: str = ""):
+    """What a participant's browser gets from the pre-join screen: /api/connection-details."""
+    q = urllib.parse.urlencode({"roomName": room, "participantName": name, "metadata": prolific})
+    return json.loads(_web.open(f"{MEET}/api/connection-details?{q}", timeout=30).read())
+
+
+def _meeting_get(session: str, what: str) -> list:
+    return json.loads(_web.open(f"{MEET}/api/meetings/{session}/{what}", timeout=30).read())[what]
+
+
+async def scenario_study_prolific():
+    """D2: a participant joins with their Prolific ID before the bot, as studies run. Their
+    completion code is HMAC(room:ID) (docs/study-support.md) and their speaker record keeps the
+    ID a paid study is matched on (lost for early joiners until #163)."""
+    room, pid = f"accept-{uuid.uuid4().hex[:6]}", uuid.uuid4().hex[:24]
+    _post("/api/console/login", {"password": os.environ["CONSOLE_PASSWORD"]})
+    _post("/api/concierge/rooms", {"name": room})
+    details = _join_as_participant(room, "Ana", pid)
+    expected = completion_code(room, pid, os.environ["LIVEKIT_API_SECRET"])
+    if details["completionCode"] != expected:
+        raise Fail(f"completion code {details['completionCode']} is not HMAC(room:ID) {expected}")
+    person = rtc.Room()
+    await person.connect(os.environ["LIVEKIT_URL"], details["participantToken"])
+    try:
+        started = _post(f"/api/concierge/rooms/{room}/bots", {})["request"]
+        session = started["runnerSessionId"]
+        await _until(lambda: any(p.identity.startswith("bot_") for p in person.remote_participants.values()), 420, "bot in the room")
+        await asyncio.sleep(5)  # the greeting
+        await _play_wav(person, SPEECH, 8)
+        await _until(lambda: any(s.get("display_name") == "Ana" for s in _meeting_get(session, "speakers")), 120, "Ana's speaker record")
+        ana = next(s for s in _meeting_get(session, "speakers") if s["display_name"] == "Ana")
+        if ana["prolific_id"] != pid:
+            raise Fail(f"stored Prolific ID {ana['prolific_id']!r}, expected {pid}")
+        return f"completion code {expected} = HMAC(room:ID); Prolific ID stored for a participant who joined before the bot"
+    finally:
+        await person.disconnect()
+
+
+async def scenario_session_limit():
+    """D2: a room limited to 1 minute: the bot speaks the room's closing message when time is up."""
+    room, closing = f"accept-{uuid.uuid4().hex[:6]}", f"Time is up, thank you. Code check {uuid.uuid4().hex[:4]}."
+    _post("/api/console/login", {"password": os.environ["CONSOLE_PASSWORD"]})
+    _post("/api/console/config", {"scope": room, "session_limit_minutes": 1, "closing_message": closing}, method="PUT")
+    _post("/api/concierge/rooms", {"name": room})
+    details = _join_as_participant(room, "Ana", uuid.uuid4().hex[:24])
+    if details.get("sessionLimitSeconds") != 60:
+        raise Fail(f"the browser was told {details.get('sessionLimitSeconds')} s, expected 60")
+    person = rtc.Room()
+    await person.connect(os.environ["LIVEKIT_URL"], details["participantToken"])
+    try:
+        session = _post(f"/api/concierge/rooms/{room}/bots", {})["request"]["runnerSessionId"]
+        await _until(lambda: any(p.identity.startswith("bot_") for p in person.remote_participants.values()), 420, "bot in the room")
+        joined = time.time()
+        await _until(lambda: any(u["bot"] and u["text"] == closing for u in _meeting_get(session, "utterances")),
+                              180, "the bot's closing message")
+        return f"closing message spoken {time.time() - joined:.0f} s after the bot joined (limit 60 s; browser told 60 s)"
+    finally:
+        await person.disconnect()
+
+
 OUR_LLM = "Qwen/Qwen2.5-7B-Instruct"  # infra/v2/staging/models.tf
 
 
@@ -539,6 +613,7 @@ SCENARIOS = {"start": scenario_start, "stoptask": scenario_stoptask, "removed": 
              "audio_recording": scenario_audio_recording, "video_recording": scenario_video_recording,
              "transcript": scenario_transcript, "two_humans": scenario_two_humans, "refresh": scenario_refresh,
              "chat": scenario_chat, "auto_record": scenario_auto_record, "our_models": scenario_our_models, "record_auth": scenario_record_auth,
+             "study_prolific": scenario_study_prolific, "session_limit": scenario_session_limit,
              "prewarm": scenario_prewarm}  # last: its Stop preparing cools the pool the run prepared
 
 

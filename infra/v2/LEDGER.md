@@ -97,6 +97,17 @@ $7.1k in September, all lab projects). So this is priced from what runs:
 
 ## Measurements
 
+**L6 breakpoint, 2026-10-04** (`breakpoint`, target 20: 4 → 60 rooms, +4 every 5 min; profile `ours-short`: NIM + Qwen2.5-7B FP8 + Kokoro + the short-replies line; the conversation library, rooms of 1–3 people, ~1.7 per room; run 37163560523). **Every step passed up to the test's ceiling: capacity ≥ 60 rooms (~100 people)**, 100% answered, no disconnects, every session closed. An earlier run (37156351181) "failed" at 24 rooms: long conversations ran out of LLM context and went silent (fixed, #155), not load.
+
+| Rooms | Turns | p50 / p95 | Qwen first token p95 | Kokoro first audio p95 | LiveKit CPU | Bot machines CPU | DB connections | Judged overall | Word error rate |
+|---|---|---|---|---|---|---|---|---|---|
+| 4 | 103 | 1.27 / 1.62 s | — | — | — | — | — | — | — |
+| 24 | 731 | 1.42 / 1.77 s | 141 ms | 116 ms | 30% | 46% | 35 | 4.0 | 2.8% |
+| 40 | 1,220 | 1.48 / 1.88 s | 161 ms | 167 ms | 43% | 46% | 62 | 4.2 | 2.7% |
+| 60 | 1,823 | 1.54 / **1.99 s** | 176 ms | 260 ms | **57%** | 61% | **101** | 4.0 | 2.6% |
+
+Next limits, by the trend: p95 crosses 2 s just past 60 rooms (Kokoro queueing is the steepest stage); LiveKit's c6i.large nears saturation around 100 rooms; database connections (~1.7 per room) near db.t4g.small's ~180 around 100 rooms. Quality held under load. ~19% of sentences were stored as 2+ turns (fragmentation), and the bot answers fragments: a target. Bot joins: 5–8 s, ~40 s when a machine takes its first bot (image pull).
+
 **First ours-vs-v1 comparison, 2026-10-03** (`load`, target 3, `hold_s=180`; same speech, same STT: our NIM; runs 37142384043, 37143343566; reports scored with #150):
 
 | | ours (Qwen2.5-7B FP8 + Kokoro) | v1 (gpt-5.4-nano + ElevenLabs) |

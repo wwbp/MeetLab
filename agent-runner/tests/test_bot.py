@@ -444,6 +444,24 @@ class TestSpokenText(unittest.TestCase):
         self.assertEqual(_spoken_text("Dr. A+B: Hello.", {"Dr. A+B", None}), "Hello.")
 
 
+class TestLongConversations(unittest.TestCase):
+    """A conversation must outlive the LLM's context: the L6 breakpoint run (2026-10-03) went
+    silent in rooms ~40 min old, because the history passed Qwen's 8,192 tokens, vLLM answered
+    400, and Pipecat marked the LLM unusable while the bot stayed in the room, mute."""
+
+    def test_old_turns_are_summarised_well_before_the_models_limit(self):
+        from bot import _assistant_params
+        p = _assistant_params()
+        self.assertTrue(p.enable_auto_context_summarization)
+        # room for the system prompt's growth and a reply under vLLM's --max-model-len 8192
+        self.assertLessEqual(p.auto_context_summarization_config.max_context_tokens, 6000)
+
+    def test_a_bot_whose_llm_can_no_longer_work_ends_its_session_instead_of_sitting_silent(self):
+        from pipecat.pipeline.worker import ProcessorUnusablePolicy
+        from bot import UNUSABLE_POLICY
+        self.assertIs(UNUSABLE_POLICY, ProcessorUnusablePolicy.END)
+
+
 class TestStageOfMetric(unittest.TestCase):
     """Which stage a time-to-first-byte belongs to, by the processor that reported it."""
 

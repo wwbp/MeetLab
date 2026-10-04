@@ -67,6 +67,7 @@ $7.1k in September, all lab projects). So this is priced from what runs:
 
 | Found | Item | Where | Why it matters |
 |---|---|---|---|
+| 2026-10-03 | ~~Long conversations went silent~~ (fixed, context-summary PR): the context grew without bound; past Qwen's 8,192 tokens (rooms ~40 min old) vLLM answered 400, Pipecat marked the LLM unusable and, by its default policy, kept the bot in the room **mute**. Now Pipecat's own summariser compresses older turns (at 6,000 tokens or 20 messages; verified locally: 17 messages → one summary in 1.7 s) and a bot whose LLM breaks ends its session (`ProcessorUnusablePolicy.END`) | `bot.py` context aggregator, `PipelineWorker` | It confounded the first L6 capacity number (20 rooms) and would have silenced long study sessions on our stack (v1's larger-context model only delays it) |
 | 2026-10-03 | ~~People's stored words began with their speaker label~~ (fixed, L4 PR: `_spoken_text`): `SpeakerLabelInjector` prefixes "Name: " for the LLM, and the bot stored that labelled text. Researchers' transcripts read "**load_000**: load_000: Why…", and the hearing score counted the label as misheard words | `multi_speaker_stt.py` → `bot.py` user turn | Every v1 and v2 transcript with a labelled turn carries it; the speaker is its own column |
 | 2026-10-03 | A room's **first** user turn reaches the LLM without a speaker label: the bot learns the participant after their first sentence ("Recovered identity … (connect callback missed it)"), so the labeller had no name for it yet | `on_participant_connected` race, `SpeakerLabelInjector` | In a multi-person room the LLM can't tell who spoke first; fix by learning the roster before the first transcript |
 | 2026-10-03 | Replies run long: 83–105 words typical in the local rehearsal (stored config); spoken, that's 30–40 s per answer | the bot's system prompt / model | Long answers feel slow and invite interruption; the quality table now reports it per profile |
@@ -95,6 +96,17 @@ $7.1k in September, all lab projects). So this is priced from what runs:
 | 2026-09-30 | Harness logs `KeyError` on LiveKit reconnect | `livekit.rtc` `local_track_published` after a signal resume | Noise, but hides real errors in sanity output |
 
 ## Measurements
+
+**L6 breakpoint, 2026-10-04** (`breakpoint`, target 20: 4 → 60 rooms, +4 every 5 min; profile `ours-short`: NIM + Qwen2.5-7B FP8 + Kokoro + the short-replies line; the conversation library, rooms of 1–3 people, ~1.7 per room; run 37163560523). **Every step passed up to the test's ceiling: capacity ≥ 60 rooms (~100 people)**, 100% answered, no disconnects, every session closed. An earlier run (37156351181) "failed" at 24 rooms: long conversations ran out of LLM context and went silent (fixed, #155), not load.
+
+| Rooms | Turns | p50 / p95 | Qwen first token p95 | Kokoro first audio p95 | LiveKit CPU | Bot machines CPU | DB connections | Judged overall | Word error rate |
+|---|---|---|---|---|---|---|---|---|---|
+| 4 | 103 | 1.27 / 1.62 s | — | — | — | — | — | — | — |
+| 24 | 731 | 1.42 / 1.77 s | 141 ms | 116 ms | 30% | 46% | 35 | 4.0 | 2.8% |
+| 40 | 1,220 | 1.48 / 1.88 s | 161 ms | 167 ms | 43% | 46% | 62 | 4.2 | 2.7% |
+| 60 | 1,823 | 1.54 / **1.99 s** | 176 ms | 260 ms | **57%** | 61% | **101** | 4.0 | 2.6% |
+
+Next limits, by the trend: p95 crosses 2 s just past 60 rooms (Kokoro queueing is the steepest stage); LiveKit's c6i.large nears saturation around 100 rooms; database connections (~1.7 per room) near db.t4g.small's ~180 around 100 rooms. Quality held under load. ~19% of sentences were stored as 2+ turns (fragmentation), and the bot answers fragments: a target. Bot joins: 5–8 s, ~40 s when a machine takes its first bot (image pull).
 
 **First ours-vs-v1 comparison, 2026-10-03** (`load`, target 3, `hold_s=180`; same speech, same STT: our NIM; runs 37142384043, 37143343566; reports scored with #150):
 

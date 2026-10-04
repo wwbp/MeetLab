@@ -31,13 +31,15 @@ from pipecat.observers.base_observer import BaseObserver, FramePushed
 from pipecat.observers.loggers.metrics_log_observer import MetricsLogObserver
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.pipeline.pipeline import Pipeline
-from pipecat.pipeline.worker import PipelineParams, PipelineWorker
+from pipecat.pipeline.worker import PipelineParams, PipelineWorker, ProcessorUnusablePolicy
 from pipecat.workers.runner import WorkerRunner
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import (
+    LLMAssistantAggregatorParams,
     LLMContextAggregatorPair,
     LLMUserAggregatorParams,
 )
+from pipecat.utils.context.llm_context_summarization import LLMAutoContextSummarizationConfig
 from pipecat.services.elevenlabs.tts import ElevenLabsTTSService
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.services.tts_service import TextAggregationMode
@@ -623,6 +625,7 @@ async def _bot(runner_args: LiveKitRunnerArguments):
     context_aggregator = LLMContextAggregatorPair(
         context,
         user_params=build_user_aggregator_params(bot_config),
+        assistant_params=_assistant_params(),
     )
 
     # Per-turn timing — stt_done/tts_first anchors for E2E (stt_done → tts_first).
@@ -788,6 +791,7 @@ async def _bot(runner_args: LiveKitRunnerArguments):
             enable_usage_metrics=True,
         ),
         observers=[MetricsLogObserver(), _MetricsObserver(), _InterruptionObserver()],
+        processor_unusable_policy=UNUSABLE_POLICY,
         enable_tracing=env_config.enable_tracing,
         enable_turn_tracking=env_config.enable_tracing,
         conversation_id=runner_args.session_id,
@@ -1327,6 +1331,21 @@ def _spoken_text(content: str, names) -> str:
     for name in filter(None, names):
         content = re.sub(rf"(^|\s){re.escape(name)}: ", r"\1", content)
     return content.strip()
+
+
+# A bot whose LLM can no longer work ends its session (recorded, visible in the console)
+# rather than stay in the room mute: Pipecat's default keeps running (L6 run, 2026-10-03).
+UNUSABLE_POLICY = ProcessorUnusablePolicy.END
+
+
+def _assistant_params() -> LLMAssistantAggregatorParams:
+    """Older turns are summarised once the context nears 6,000 tokens, keeping the last 20
+    messages: a conversation outlives the model's context (Qwen on vLLM: 8,192; L6 run, rooms
+    ~40 min old went silent on vLLM's 400). Pipecat's own summariser, using the same LLM."""
+    return LLMAssistantAggregatorParams(
+        enable_auto_context_summarization=True,
+        auto_context_summarization_config=LLMAutoContextSummarizationConfig(
+            max_context_tokens=6000, max_unsummarized_messages=20))
 
 
 def _ttfb_stage(processor: str) -> str | None:

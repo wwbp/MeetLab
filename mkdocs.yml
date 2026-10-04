@@ -25,6 +25,8 @@ nav:
       - Events and errors: event-log.md
   - Testing and operations:
       - Performance tests: performance-tests.md
+      - Load and quality testing (v2): load-testing.md
+      - "Load test report, October 2026": load-test-report-2026-10.md
       - Meeting simulations: meeting-simulations.md
       - Parakeet soak tests: test-plan-parakeet-soak.md
       - Deploying v2 (first time): v2-deployment.md

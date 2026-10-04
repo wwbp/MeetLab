@@ -22,7 +22,7 @@ import boto3
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from load_plan import parse_reply, stage_summary, step_of  # noqa: E402
-from quality import reply_for, score_rooms, voice  # noqa: E402
+from quality import clip_reply, reply_for, score_rooms, voice  # noqa: E402
 
 REGION, CLUSTER, DB = "us-east-1", "meetlab-v2-staging", "meetlab-v2-staging"
 SERVICES = ["meet", "agent-runner", "livekit"]          # ECS services with their own CPU/memory
@@ -89,10 +89,14 @@ def _voice(r: dict) -> dict | None:
 
     listener = WhisperModel("base.en", device="cpu", compute_type="int8")
     utmos = torch.hub.load("tarepan/SpeechMOS:v1.2.0", "utmos22_strong", trust_repo=True)
-    s3, scored = boto3.client("s3", region_name=REGION), []
+    s3, scored, skipped = boto3.client("s3", region_name=REGION), [], 0
     with tempfile.TemporaryDirectory() as tmp:
         for c in r["clips"]:
-            meant = reply_for(r["rooms"], c["room"], c["said_at"])
+            # The one reply the clip holds; older results have no clip times (reply_for).
+            meant = clip_reply(r["rooms"], c) if "start" in c else reply_for(r["rooms"], c["room"], c["said_at"])
+            if meant is None:
+                skipped += 1  # parts of several replies: no single text to compare with
+                continue
             path = c["audio"]
             if path.startswith("s3://"):
                 bucket, key = path[5:].split("/", 1)
@@ -108,7 +112,7 @@ def _voice(r: dict) -> dict | None:
             heard = " ".join(seg.text for seg in listener.transcribe(at_16k, language="en")[0])
             mos = float(utmos(wave[None], rate).item())
             scored.append((meant, heard, round(mos, 2)))
-    return voice(scored)
+    return {**voice(scored), "skipped": skipped}
 
 
 def _ms(v):
@@ -163,8 +167,9 @@ def markdown(r: dict) -> str:
         wer = "-" if v["wer"] is None else f"{v['wer']:.1%}"
         natural = "-" if v["naturalness"] is None else v["naturalness"]
         lines += ["", "**How the bot sounds** (sampled replies across the run)", "",
-                  "| clips | intelligibility: word error rate heard back | naturalness (UTMOS, 1-5) |", "|---|---|---|",
-                  f"| {v['clips']} | {wer} | {natural} |"]
+                  "| clips scored | skipped (held parts of several replies) | intelligibility: word error rate heard back | naturalness (UTMOS, 1-5) |",
+                  "|---|---|---|---|",
+                  f"| {v['clips']} | {v.get('skipped', 0)} | {wer} | {natural} |"]
     lines += ["", f"**Capacity** (largest passing step): {r.get('capacity_rooms')} rooms. "
               f"Sessions left running: {len(r.get('sessions_left_running', []))}. "
               f"Harness valid: {r.get('harness_valid')}. **Verdict: {'PASS' if r.get('pass') else 'FAIL'}**"]

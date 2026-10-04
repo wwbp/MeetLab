@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getServerConfig } from '@/lib/config/server';
 import { noStoreHeaders } from '@/lib/concierge/http-utils';
 import { noteRouteError } from '@/lib/concierge/event-log';
+import { mayControlRecording } from '@/lib/record-auth';
 
 export async function GET(req: NextRequest) {
   const roomName = req.nextUrl.searchParams.get('roomName');
@@ -9,7 +10,11 @@ export async function GET(req: NextRequest) {
     return new NextResponse('Missing roomName parameter', { status: 400, headers: noStoreHeaders() });
   }
 
-  const { botRunnerUrl, botRunnerSecret } = getServerConfig();
+  const { botRunnerUrl, botRunnerSecret, livekitApiSecret } = getServerConfig();
+  // F10: only a logged-in console session (lib/record-auth.ts).
+  if (!livekitApiSecret || !(await mayControlRecording(req, livekitApiSecret))) {
+    return new NextResponse('Unauthorized', { status: 401, headers: noStoreHeaders() });
+  }
   if (!botRunnerUrl) {
     return new NextResponse('BOT_RUNNER_URL is not configured', { status: 500, headers: noStoreHeaders() });
   }

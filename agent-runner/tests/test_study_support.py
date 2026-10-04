@@ -20,7 +20,7 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
-from study_support import closing_due, prolific_id
+from study_support import closing_due, prolific_id, speaker_meta
 
 
 class TestClosingDue(unittest.TestCase):
@@ -80,3 +80,20 @@ class TestProlificId(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestSpeakerMeta(unittest.TestCase):
+    """What a person's speaker record holds, built one way for everyone: whether they joined
+    before the bot or after (people already in the room were never registered at join, so
+    their Prolific ID was never stored, 2026-10-04)."""
+
+    def test_name_and_prolific_id(self):
+        self.assertEqual(speaker_meta("Ana", "5f2a91b3c4d5e6f708192a3b"),
+                         {"role": "participant", "display_name": "Ana", "prolific_id": "5f2a91b3c4d5e6f708192a3b"})
+
+    def test_an_invalid_id_is_kept_so_the_session_can_still_be_matched_by_hand(self):
+        self.assertEqual(speaker_meta("Ana", "not-an-id")["prolific_id_invalid"], "not-an-id")
+
+    def test_no_metadata_no_id(self):
+        self.assertEqual(speaker_meta("Ana", ""), {"role": "participant", "display_name": "Ana"})
+        self.assertEqual(speaker_meta("Ana", None), {"role": "participant", "display_name": "Ana"})

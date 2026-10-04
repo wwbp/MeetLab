@@ -14,6 +14,7 @@ one meeting through the code before exploring individual modules.
 | 4 | What persists after a meeting | [Data](architecture.md#data) |
 | 5 | Why the architecture has these constraints | [Design choices](architecture.md#design-choices) |
 | 6 | How to investigate behavior | [Events](event-log.md) and [performance tests](performance-tests.md) |
+| 7 | How much v2 can carry, and how well | [Load test report, October 2026](load-test-report-2026-10.md) and [how load tests work](load-testing.md) |
 
 The architecture guide describes the checked-out implementation reviewed on
 2026-09-29. Historical investigations preserve earlier findings and proposals;

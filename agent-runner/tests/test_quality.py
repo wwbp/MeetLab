@@ -124,3 +124,25 @@ class TestVoice(unittest.TestCase):
         # A few per room, from the first rooms only: enough to score, little to upload.
         self.assertEqual([n for n in range(12) if record_turn(room=0, n=n)], [1, 4, 7, 10])
         self.assertFalse(record_turn(room=10, n=1))
+
+
+class TestCleanClips(unittest.TestCase):
+    """A clip is scored against the one reply it holds; a clip holding parts of several (the bot
+    answered half a paused sentence) is skipped, not scored as unintelligible (L6 run 2026-10-03)."""
+
+    rooms = [{"room": 0, "said": [], "turns": [
+        {"bot": True, "ts": 100.0, "text": "Earlier reply."},
+        {"bot": True, "ts": 112.0, "text": "The reply in the clip."},
+        {"bot": True, "ts": 130.0, "text": "A later reply."}]}]
+
+    def test_the_one_reply_that_finished_inside_the_clip(self):
+        from quality import clip_reply
+        self.assertEqual(clip_reply(self.rooms, {"room": 0, "start": 105.0, "end": 111.0}), "The reply in the clip.")
+
+    def test_a_clip_holding_two_replies_is_not_scored(self):
+        from quality import clip_reply
+        self.assertIsNone(clip_reply(self.rooms, {"room": 0, "start": 99.0, "end": 111.0}))
+
+    def test_a_clip_with_no_finished_reply_is_not_scored(self):
+        from quality import clip_reply
+        self.assertIsNone(clip_reply(self.rooms, {"room": 0, "start": 113.0, "end": 120.0}))

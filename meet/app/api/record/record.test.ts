@@ -31,9 +31,11 @@ beforeAll(async () => {
   roomToken = await new SignJWT({ video: { room: 'my-room', roomJoin: true } }).setProtectedHeader({ alg: 'HS256' }).setExpirationTime(exp).sign(key);
 });
 
-const as = (who: 'console' | 'participant' | 'nobody') =>
-  who === 'console' ? { headers: { cookie: `console-session=${consoleSession}` } }
-    : who === 'participant' ? { headers: { authorization: `Bearer ${roomToken}` } } : {};
+const as = (who: 'console' | 'participant' | 'nobody'): { headers: Record<string, string> } => ({
+  headers:
+    who === 'console' ? { cookie: `console-session=${consoleSession}` }
+      : who === 'participant' ? { authorization: `Bearer ${roomToken}` } : {},
+});
 
 function makeOk(status = 200): Response {
   return new Response(null, { status });

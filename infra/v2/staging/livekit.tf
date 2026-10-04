@@ -3,11 +3,16 @@
 # balancer's TLS (wss://livekit-staging.wwbp.org); media goes straight to the machine,
 # the standard LiveKit shape. Off unless livekit_self_hosted; LiveKit Cloud otherwise.
 #
-# ponytail: no TURN (participants behind strict firewalls can't connect) and no egress
-# server (no video recording): fine for load tests. Add both before it serves a study.
+# TURN (D1): participants whose network allows only web traffic reach LiveKit's built-in
+# TURN server at turn-staging.wwbp.org:443; the network load balancer ends TLS with the
+# *.wwbp.org certificate and passes plain TCP to the machine (external_tls).
+#
+# ponytail: no egress server (no video recording): fine for load tests; add before a study
+# needs video. TURN over UDP (3478) not offered: 443/TLS covers the strict networks.
 
 locals {
   livekit_host = "livekit-staging.wwbp.org"
+  turn_host    = "turn-staging.wwbp.org"
   # What meet, the runner and the bots connect with: ours when switched on, LiveKit Cloud otherwise.
   livekit_environment = var.livekit_self_hosted ? [{ name = "LIVEKIT_URL", value = "wss://${local.livekit_host}" }] : []
   livekit_secrets = var.livekit_self_hosted ? [
@@ -41,6 +46,12 @@ resource "aws_security_group" "livekit" {
     to_port     = 7881
     protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
+  }
+  ingress {
+    from_port       = 5349
+    to_port         = 5349
+    protocol        = "tcp"
+    security_groups = [aws_security_group.turn_lb.id]
   }
   ingress {
     from_port   = 7882
@@ -149,6 +160,7 @@ resource "aws_ecs_task_definition" "livekit" {
       { containerPort = 7880, hostPort = 7880, protocol = "tcp" },
       { containerPort = 7881, hostPort = 7881, protocol = "tcp" },
       { containerPort = 7882, hostPort = 7882, protocol = "udp" },
+      { containerPort = 5349, hostPort = 5349, protocol = "tcp" },
     ]
     secrets = [
       { name = "KEY", valueFrom = "${local.parameters}/SELFHOSTED_LIVEKIT_API_KEY" },
@@ -159,6 +171,7 @@ resource "aws_ecs_task_definition" "livekit" {
     entryPoint = ["sh", "-c"]
     command = [join("", [
       "export LIVEKIT_CONFIG=\"$(printf 'port: 7880\\nrtc:\\n  tcp_port: 7881\\n  udp_port: 7882\\n  use_external_ip: true\\n",
+      "turn:\\n  enabled: true\\n  domain: ${local.turn_host}\\n  tls_port: 5349\\n  external_tls: true\\n",
       "keys:\\n  %s: %s\\nwebhook:\\n  api_key: %s\\n  urls: [%s]\\n' \"$KEY\" \"$SECRET\" \"$KEY\" \"$WEBHOOK\")\"; ",
       "exec /livekit-server",
     ])]
@@ -235,5 +248,72 @@ resource "aws_ecs_service" "livekit" {
     container_name   = "livekit"
     container_port   = 7880
   }
-  depends_on = [aws_ecs_cluster_capacity_providers.this, aws_lb_listener_rule.livekit]
+  load_balancer {
+    target_group_arn = aws_lb_target_group.turn[0].arn
+    container_name   = "livekit"
+    container_port   = 5349
+  }
+  depends_on = [aws_ecs_cluster_capacity_providers.this, aws_lb_listener_rule.livekit, aws_lb_listener.turn]
+}
+
+resource "aws_security_group" "turn_lb" {
+  name        = "meetlab-v2-staging-turn-lb"
+  description = "TURN over TLS on 443 from anywhere (every relay needs LiveKit's credentials)"
+  vpc_id      = aws_vpc.this.id
+  ingress {
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+  egress {
+    from_port   = 5349
+    to_port     = 5349
+    protocol    = "tcp"
+    cidr_blocks = [aws_vpc.this.cidr_block]
+  }
+}
+
+resource "aws_lb" "turn" {
+  count              = var.livekit_self_hosted ? 1 : 0
+  name               = "meetlab-v2-staging-turn"
+  internal           = false
+  load_balancer_type = "network"
+  subnets            = [for s in aws_subnet.public : s.id]
+  security_groups    = [aws_security_group.turn_lb.id]
+}
+
+resource "aws_lb_target_group" "turn" {
+  count              = var.livekit_self_hosted ? 1 : 0
+  name               = "meetlab-v2-staging-turn"
+  port               = 5349
+  protocol           = "TCP"
+  target_type        = "instance"
+  vpc_id             = aws_vpc.this.id
+  preserve_client_ip = false # LiveKit's security group trusts the load balancer's
+}
+
+resource "aws_lb_listener" "turn" {
+  count             = var.livekit_self_hosted ? 1 : 0
+  load_balancer_arn = aws_lb.turn[0].arn
+  port              = 443
+  protocol          = "TLS"
+  ssl_policy        = "ELBSecurityPolicy-TLS13-1-2-2021-06"
+  certificate_arn   = data.aws_acm_certificate.wildcard.arn
+  default_action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.turn[0].arn
+  }
+}
+
+resource "aws_route53_record" "turn" {
+  count   = var.livekit_self_hosted ? 1 : 0
+  zone_id = data.aws_route53_zone.wwbp.zone_id
+  name    = local.turn_host
+  type    = "A"
+  alias {
+    name                   = aws_lb.turn[0].dns_name
+    zone_id                = aws_lb.turn[0].zone_id
+    evaluate_target_health = true
+  }
 }

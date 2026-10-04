@@ -331,14 +331,14 @@ run "ci_can_run_the_stt_nim_on_spot_behind_its_own_nlb" {
   }
 }
 
-run "ci_may_change_exactly_our_two_dns_names" {
+run "ci_may_change_exactly_our_three_dns_names" {
   command = plan
 
   assert {
     condition = toset(flatten([for s in flatten([for p in aws_iam_role_policy.apply : jsondecode(p.policy).Statement]) :
       try(s.Condition["ForAllValues:StringEquals"]["route53:ChangeResourceRecordSetsNormalizedRecordNames"], [])
-    ])) == toset(["meet-staging.wwbp.org", "livekit-staging.wwbp.org"])
-    error_message = "the shared wwbp.org zone: meet-staging, and our self-hosted LiveKit's signalling name, nothing else"
+    ])) == toset(["meet-staging.wwbp.org", "livekit-staging.wwbp.org", "turn-staging.wwbp.org"])
+    error_message = "the shared wwbp.org zone: meet-staging, our self-hosted LiveKit's signalling name and its TURN name, nothing else"
   }
 }
 

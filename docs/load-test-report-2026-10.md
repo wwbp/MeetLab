@@ -1,8 +1,8 @@
 # MeetLab v2 load and quality report — October 2026
 
-**v2 staging held at least 60 concurrent rooms (about 100 people) with every turn answered,
-replies under 2 seconds for 19 turns in 20, and no loss of quality.** That was the test's
-ceiling, not v2's limit. Our own model stack matches v1's paid vendors on quality and is
+**v2 staging held 84 concurrent rooms (about 140 people) inside every rule, and answered every
+person up to 102 rooms (about 170 people) with no loss of quality.** Past 84 rooms the slowest
+1 in 20 replies took just over 2 seconds (2.01–2.05 s). Our own model stack matches v1's paid vendors on quality and is
 faster, and one prompt line raised judged quality from 3.4–3.9 to 4.5 out of 5.
 
 Runs of 2026-10-03 and 04 on staging. How the tests work and what each number means:
@@ -42,8 +42,31 @@ With extra headroom for the session (a bigger LiveKit machine and database, two 
 | **Climb:** +6 rooms every 3 minutes | **72 (~122 people)** | 100% | 1.52 / 1.97 s | The largest valid step. A second voice GPU kept the voice's start time at 176 ms |
 | Climb | 78 | 95% | 1.50 / 2.03 s | Not valid: **our load generator** could no longer keep up (its synthetic people stuttered), not staging |
 
-Staging's own limit is above 72 rooms. Measuring 100 needs the load generator split in
-two; meet's share of a launch burst is the next thing to watch.
+### 100 rooms, from two load generators (2026-10-04, run 37236394995)
+
+The same climb, now from two load generators (each runs half the rooms) so the test itself
+can't be the bottleneck:
+
+| Rooms | Answered | Typical / slowest 1 in 20 | Verdict |
+|---|---|---|---|
+| 60 | 100% | 1.51 / 1.93 s | PASS |
+| 72 | 99% | 1.54 / 1.96 s | PASS |
+| **84 (~140 people)** | 100% | 1.55 / **2.00 s** | **PASS: the capacity** |
+| 90 | 100% | 1.56 / 2.02 s | over the 2 s rule |
+| 102 (~170 people) | 99% | 1.57 / 2.05 s | over the 2 s rule |
+
+- **What slows down:** the models' queues, not a machine running out. From 6 to 102 rooms
+  the LLM's first word went 117 → 198 ms and the voice's first sound 108 → 220 ms; speech to
+  text stayed at ~367 ms. The GPUs themselves stayed under 15% CPU.
+- **Quality held all the way:** word error rate 2.3–2.9%, judged overall 3.9–4.2 out of 5,
+  replies ~9 words. The voice: 4.5% heard back wrong, naturalness 4.35.
+- **meet hit 106% CPU** at 102 rooms (it shares a small machine with the runner): the next
+  thing to give for bigger studies.
+- The test was valid at every step (neither load generator fell behind), and every session
+  closed afterwards.
+
+To go past ~85 rooms inside the 2 s rule: a third voice GPU or a faster LLM GPU (the
+latency work, B4), and a bigger machine for meet.
 
 ## Our stack against v1's
 

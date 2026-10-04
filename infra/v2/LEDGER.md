@@ -25,7 +25,7 @@ transfer. Budget rule (2026-09-30): staging may cost up to v1 production's avera
 ## Plan after L6 (2026-10-04, user's order)
 
 1. **A1** recording endpoints get room-scoped auth (F10; exposed now the repo is public). Done as **console-only** (user's choice): a room token proves nothing while anyone who names a room can get one.
-1b. **Signed join links** (F10's other half: today anyone who names a room can join it and get its token); added 2026-10-04.
+1b. 📌 **Signed join links** (F10's other half: today anyone who names a room can join it and get its token). Pinned by the user: today's start links (one participant, one bot) need rethinking first.
 2. **B2** spike: a study launching at once. 3. **B3** target 100 rooms.
 4. **C2** every bot setting (STT, TTS, LLM, VAD or smart turn, prompts) chosen in Bot Config, piped through and tested; **C3** the first speaker's name (people already in the room when the bot joins are never "connected" to it).
 5. **D1** TURN server. 6. **D2** study-flow live tests. 7. **D3** record the infra configuration with its capacity and latency numbers.
@@ -106,6 +106,16 @@ $7.1k in September, all lab projects). So this is priced from what runs:
 | 2026-09-30 | Harness logs `KeyError` on LiveKit reconnect | `livekit.rtc` `local_track_published` after a signal resume | Noise, but hides real errors in sanity output |
 
 ## Measurements
+
+**B2 spike and B3 climb, 2026-10-04** (profile `ours-short`, conversation library; session headroom: LiveKit c6i.xlarge, database db.t4g.medium, 2 voice GPUs; runs 37173343495, 37173982533):
+
+| Test | Rooms | Answered | p50 / p95 | Notes |
+|---|---|---|---|---|
+| **Spike** (all start within 30 s) | 50 | 100% | 1.46 / 1.90 s | **PASS.** Bot join p95 44 s (17 fresh machines pulling the image at once); **meet at 63% CPU** at the burst (t3.medium shared with the runner): a candidate limit for bigger launches. Voice 1.0% heard back, naturalness 4.32 |
+| Climb, +6 every 3 min | 72 | 100% | 1.52 / 1.97 s | **Largest valid step.** LiveKit ~40%, database 120 connections, voice first audio p95 176 ms (2 GPUs; one GPU gave 260 ms at 60) |
+| Climb | 78 | 95% | 1.50 / 2.03 s | **Not valid: the load generator lagged 729 ms** (one 16-vCPU Fargate task tops out at ~75 rooms, ~128 people); its stuttering microphones show as speech-to-text 9.9% wrong, 26 sentences missed |
+
+Staging's limit is above 72 rooms; measuring 100 needs two load generators (half the rooms each).
 
 **L6 breakpoint, 2026-10-04** (`breakpoint`, target 20: 4 → 60 rooms, +4 every 5 min; profile `ours-short`: NIM + Qwen2.5-7B FP8 + Kokoro + the short-replies line; the conversation library, rooms of 1–3 people, ~1.7 per room; run 37163560523). **Every step passed up to the test's ceiling: capacity ≥ 60 rooms (~100 people)**, 100% answered, no disconnects, every session closed. An earlier run (37156351181) "failed" at 24 rooms: long conversations ran out of LLM context and went silent (fixed, #155), not load.
 

@@ -31,6 +31,7 @@ class EffectiveBotConfig:
     user_speech_timeout_ms: int = 300
     # Spoken when the session limit elapses. Only used when a limit is set.
     closing_message: str = CLOSING_MESSAGE
+    turn_detection: str = "silence"  # "silence" | "smart_turn" (smart_turn.py)
 
 
 async def load_bot_config(room_name: str | None = None) -> EffectiveBotConfig:
@@ -66,6 +67,7 @@ async def load_bot_config(room_name: str | None = None) -> EffectiveBotConfig:
                 stt_delay=None,
                 tts_provider="elevenlabs",
                 tts_aggregation_mode="sentence",
+                turn_detection="silence",
                 # Must track the bot_config column defaults. This said 100 —
                 # the pilot value RC2 fixed — so an empty table silently
                 # reinstated the behaviour that cut participants off.
@@ -86,6 +88,7 @@ async def load_bot_config(room_name: str | None = None) -> EffectiveBotConfig:
             stt_delay=getattr(row, "stt_delay", None),
             tts_provider=getattr(row, "tts_provider", "elevenlabs"),
             tts_aggregation_mode=getattr(row, "tts_aggregation_mode", "sentence"),
+            turn_detection=getattr(row, "turn_detection", None) or "silence",
             stt_endpointing_ms=getattr(row, "stt_endpointing_ms", 450),
             user_speech_timeout_ms=int(getattr(row, "user_speech_timeout_ms", 300) or 300),
             auto_record=bool(getattr(row, "auto_record", False)),

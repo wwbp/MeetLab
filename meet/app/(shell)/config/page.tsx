@@ -11,6 +11,7 @@ type BotConfig = {
   tts_provider: string;
   tts_voice: string;
   tts_aggregation_mode: string;
+  turn_detection: string;
   stt_endpointing_ms: number;
   user_speech_timeout_ms: number;
   stt_vad_mode: string;
@@ -28,6 +29,7 @@ const EMPTY_CONFIG: Omit<BotConfig, 'scope'> = {
   tts_provider: 'elevenlabs',
   tts_voice: 'WhMcMcvXQ8T2QfmQmlYh',
   tts_aggregation_mode: 'sentence',
+  turn_detection: 'silence',
   stt_endpointing_ms: 450,
   user_speech_timeout_ms: 300,
   stt_vad_mode: 'local',
@@ -45,6 +47,11 @@ const STT_MODELS = [
   { value: 'gpt-4o-transcribe',      label: 'gpt-4o-transcribe (OpenAI)' },
   { value: 'gpt-4o-mini-transcribe', label: 'gpt-4o-mini-transcribe (OpenAI)' },
 ];
+
+// Settings that only some speech-to-text models use (agent-runner/bot.py _build_stt).
+const isOpenAiStt = (model: string) => model.startsWith('gpt-');
+// Smart turn needs a per-speaker segmenting recogniser (smart_turn.py): Parakeet or Whisper.
+const isSegmentedStt = (model: string) => model.startsWith('parakeet-') || model.startsWith('whisper-');
 
 const LLM_MODELS = [
   'gpt-5.4-nano',
@@ -88,6 +95,7 @@ export default function ConfigPage() {
         tts_provider: data.tts_provider ?? 'elevenlabs',
         tts_voice: data.tts_voice ?? '',
         tts_aggregation_mode: data.tts_aggregation_mode ?? 'sentence',
+        turn_detection: data.turn_detection ?? 'silence',
         stt_endpointing_ms: data.stt_endpointing_ms ?? 450,
         user_speech_timeout_ms: data.user_speech_timeout_ms ?? 300,
         stt_vad_mode: data.stt_vad_mode ?? 'local',
@@ -170,7 +178,7 @@ export default function ConfigPage() {
         <form onSubmit={handleSubmit} className="space-y-5">
 
           {/* ── Content ── */}
-          <Section label="Content">
+          <Section label="Conversation">
             <Field label="System Prompt">
               <textarea
                 value={form.system_prompt}
@@ -191,8 +199,8 @@ export default function ConfigPage() {
             </Field>
           </Section>
 
-          {/* ── STT ── */}
-          <Section label="Speech-to-Text">
+          {/* ── STT: the model and the settings only it uses ── */}
+          <Section label="Speech-to-Text (model)">
             <div className="grid gap-4 sm:grid-cols-2">
               <Field label="STT Model">
                 <select
@@ -205,13 +213,53 @@ export default function ConfigPage() {
                   ))}
                 </select>
               </Field>
+              {isOpenAiStt(form.stt_model) && (
+                <>
+                  <Field label="Transcription delay (OpenAI only)">
+                    <select
+                      value={form.stt_delay ?? ''}
+                      onChange={(e) => setForm((f) => ({ ...f, stt_delay: e.target.value || null }))}
+                      className={sel}
+                    >
+                      <option value="">default</option>
+                      {['minimal', 'low', 'medium', 'high', 'xhigh'].map((d) => (
+                        <option key={d} value={d}>{d}</option>
+                      ))}
+                    </select>
+                  </Field>
+                  <Field label="Voice detection (OpenAI only)">
+                    <select value={form.stt_vad_mode} className={sel} disabled>
+                      <option value="local">local: the bot&apos;s own per-speaker detector</option>
+                    </select>
+                  </Field>
+                </>
+              )}
+            </div>
+          </Section>
+
+          {/* ── Turn-taking: when a person has finished, for every STT model ── */}
+          <Section label="Turn-taking (all models)">
+            <div className="grid gap-4 sm:grid-cols-2">
+              <Field label="End of turn">
+                <select
+                  value={form.turn_detection}
+                  onChange={(e) => setForm((f) => ({ ...f, turn_detection: e.target.value }))}
+                  className={sel}
+                >
+                  <option value="silence">after a silence (default)</option>
+                  <option value="smart_turn" disabled={!isSegmentedStt(form.stt_model)}>
+                    when the speaker sounds finished (smart turn{isSegmentedStt(form.stt_model) ? '' : ': Parakeet or Whisper only'})
+                  </option>
+                </select>
+              </Field>
               {/* These two ADD together to form the turn-end window: the bot
                   commits a turn after roughly stt_endpointing_ms +
                   user_speech_timeout_ms of silence. 450+300=750ms is calibrated
                   against real pilot audio — judge any change by the sum, not
                   either field alone. Too low cuts people off mid-thought; too
-                  high merges two separate points into one answer. */}
-              <Field label="Endpointing (ms)">
+                  high merges two separate points into one answer. With smart
+                  turn, a speaker who sounds unfinished is waited for up to 3s. */}
+              <Field label="Pause that counts as stopping (ms)">
                 <input
                   type="number"
                   step="50"
@@ -225,7 +273,7 @@ export default function ConfigPage() {
                   required
                 />
               </Field>
-              <Field label="Turn-end wait (ms)">
+              <Field label="Extra wait before replying (ms)">
                 <input
                   type="number"
                   step="50"
@@ -242,7 +290,7 @@ export default function ConfigPage() {
               <Field label={`Turn ends after ${form.stt_endpointing_ms + form.user_speech_timeout_ms}ms of silence`}>
                 <p className="text-xs opacity-70">
                   Sum of the two fields above. 750ms is the calibrated default; the
-                  Jul/Aug pilot effectively ran at ~5100ms.
+                  Jul/Aug pilot effectively ran at ~5100ms.{form.turn_detection === 'smart_turn' && ' With smart turn, someone who sounds unfinished is waited for up to 3s.'}
                 </p>
               </Field>
             </div>
@@ -264,7 +312,7 @@ export default function ConfigPage() {
           </Section>
 
           {/* ── TTS ── */}
-          <Section label="Text-to-Speech">
+          <Section label="Voice (Text-to-Speech)">
             <div className="grid gap-4 sm:grid-cols-2">
               <Field label="TTS Provider">
                 <select

@@ -77,9 +77,17 @@ class _FrameCollector(FrameProcessor):
 
     def __init__(self, queue: asyncio.Queue, *, needs_vad_wrap: bool = False,
                  sid: str | None = None, on_speech_onset: Callable[[str], None] | None = None,
-                 on_speech_offset: Callable[[str], None] | None = None):
+                 on_speech_offset: Callable[[str], None] | None = None,
+                 verdict=None, open_turn_secs: float | None = None):
         super().__init__()
         self._queue = queue
+        # Smart turn (smart_turn.py): this person's latest verdict, None when the room ends
+        # turns on silence; and the closer for a turn they left unfinished.
+        self._verdict = verdict
+        self._closer = None
+        if verdict is not None:
+            from smart_turn import OPEN_TURN_SECS, TurnCloser
+            self._closer = TurnCloser(queue, open_turn_secs or OPEN_TURN_SECS)
         self._needs_vad_wrap = needs_vad_wrap
         self._sid = sid
         self._on_speech_onset = on_speech_onset
@@ -133,11 +141,14 @@ class _FrameCollector(FrameProcessor):
             # Placing VADUserStoppedSpeakingFrame here ensures UserBotLatencyObserver
             # has _user_stopped_time set before BotStartedSpeakingFrame fires.
             # stop_secs=0.0: clock starts now (post-endpointing), so e2e_ms ≈ LLM+TTS.
-            await self._queue.put(VADUserStartedSpeakingFrame())
-            await self._queue.put(VADUserStoppedSpeakingFrame(stop_secs=0.0))
-            await self._queue.put(UserStartedSpeakingFrame())
-            await self._queue.put(frame)
-            await self._queue.put(UserStoppedSpeakingFrame())
+            from smart_turn import turn_frames
+            complete = self._verdict is None or self._verdict.complete
+            if self._closer:
+                self._closer.cancel()  # they spoke again: the open turn continues
+            for f in turn_frames(frame, complete):
+                await self._queue.put(f)
+            if not complete:
+                self._closer.open()
         else:
             await self._queue.put(frame)
 
@@ -286,12 +297,13 @@ class MultiSpeakerSTT(FrameProcessor):
         # Admitted and new: build the chain. The membership guard that used to wrap
         # this is now the fast path above.
         chain = self._stt_factory(sid)
-        head, tail = chain if isinstance(chain, tuple) else (chain, chain)
+        # (head, tail), or (head, tail, verdict) when this person's turns end by smart turn.
+        head, tail, verdict = (chain + (None,))[:3] if isinstance(chain, tuple) else (chain, chain, None)
         needs_vad_wrap = not _stt_emits_vad_frames(tail)
         collector = _FrameCollector(
             self._output_queue, needs_vad_wrap=needs_vad_wrap,
             sid=sid, on_speech_onset=self._on_speech_onset,
-            on_speech_offset=self._on_speech_offset,
+            on_speech_offset=self._on_speech_offset, verdict=verdict,
         )
         tail.link(collector)
         if self._setup_params is not None:

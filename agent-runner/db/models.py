@@ -199,6 +199,9 @@ class BotConfig(Base):
     stt_delay: Mapped[str | None] = mapped_column(String(32), nullable=True)
     tts_provider: Mapped[str] = mapped_column(String(32), default="elevenlabs")
     tts_aggregation_mode: Mapped[str] = mapped_column(String(16), default="sentence")
+    # How a person's turn is judged over (smart_turn.py): "silence" after a fixed pause, or
+    # "smart_turn", each person's own Smart Turn v3 (segmented STT: Parakeet, Whisper).
+    turn_detection: Mapped[str] = mapped_column(String(16), default="silence")
     stt_endpointing_ms: Mapped[int] = mapped_column(BigInteger, default=450, server_default="450")
     # Extra silence the turn aggregator waits after the VAD reports the speaker
     # stopped. ADDS to stt_endpointing_ms: a turn ends after roughly the sum of the

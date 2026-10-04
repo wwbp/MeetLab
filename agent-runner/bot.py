@@ -347,8 +347,7 @@ def _build_whisper_chain(bot_config, vad_handlers=None):
     model_name = bot_config.stt_model[len("whisper-"):]
     vad = _build_vad_processor(bot_config, vad_handlers)
     stt = WhisperSTTService(settings=WhisperSTTService.Settings(model=model_name))
-    vad.link(stt)
-    return (vad, stt)
+    return _link_chain(bot_config, vad, stt)
 
 
 def _build_parakeet_chain(bot_config, vad_handlers=None):
@@ -361,8 +360,22 @@ def _build_parakeet_chain(bot_config, vad_handlers=None):
 
     vad = _build_vad_processor(bot_config, vad_handlers)
     stt = NemotronHTTPSTTService(base_url=nemotron_stt_url(), model=bot_config.stt_model)
-    vad.link(stt)
-    return (vad, stt)
+    return _link_chain(bot_config, vad, stt)
+
+
+def _link_chain(bot_config, vad, stt):
+    """A person's segmented chain: VAD → STT, or VAD → their smart-turn gate → STT when the
+    room ends turns by smart turn (smart_turn.py); the gate's verdict goes to their collector."""
+    from smart_turn import effective_turn_detection
+    if effective_turn_detection(getattr(bot_config, "turn_detection", "silence"), bot_config.stt_model) != "smart_turn":
+        vad.link(stt)
+        return (vad, stt)
+    from smart_turn import SmartTurnGate, TurnVerdict
+    verdict = TurnVerdict()
+    gate = SmartTurnGate(verdict)
+    vad.link(gate)
+    gate.link(stt)
+    return (vad, stt, verdict)
 
 
 def _apply_stt_model_override(bot_config):
@@ -586,6 +599,11 @@ async def _bot(runner_args: LiveKitRunnerArguments):
     logger.info(
         f"STT: model={bot_config.stt_model} mode=per-participant delay={bot_config.stt_delay}"
     )
+    from smart_turn import effective_turn_detection
+    _turn = effective_turn_detection(getattr(bot_config, "turn_detection", "silence"), bot_config.stt_model)
+    if _turn != getattr(bot_config, "turn_detection", "silence"):
+        logger.warning(f"turn_detection=smart_turn needs Parakeet or Whisper; {bot_config.stt_model} ends turns on silence")
+    logger.info(f"Turn detection: {_turn}")
 
     # Per-speaker audio capture. The sink buffers each participant's PCM and writes
     # one WAV per speaker on flush; it stays disabled until recording is requested

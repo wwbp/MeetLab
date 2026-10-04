@@ -260,6 +260,7 @@ class BotConfigAdmin(ModelView, model=BotConfig):
         BotConfig.tts_voice,
         BotConfig.stt_endpointing_ms,
         BotConfig.user_speech_timeout_ms,
+        BotConfig.turn_detection,
         BotConfig.session_limit_minutes,
         BotConfig.updated_at,
     ]
@@ -270,6 +271,7 @@ class BotConfigAdmin(ModelView, model=BotConfig):
         "stt_delay": _NullableSelectField,
         "tts_provider": SelectField,
         "tts_aggregation_mode": SelectField,
+        "turn_detection": SelectField,
         "stt_endpointing_ms": SelectField,
         "user_speech_timeout_ms": SelectField,
     }
@@ -280,6 +282,7 @@ class BotConfigAdmin(ModelView, model=BotConfig):
         "stt_delay": {"choices": [("", "— (none)")]},
         "tts_provider": {"choices": [("elevenlabs", "elevenlabs"), ("openai", "openai"), ("kokoro", "kokoro (ours)")]},
         "tts_aggregation_mode": {"choices": [("sentence", "sentence (default)"), ("token", "token (lower latency)")]},
+        "turn_detection": {"choices": [("silence", "after a silence (default)"), ("smart_turn", "when the speaker sounds finished (smart turn)")]},
         # These two ADD together to form the turn-end window; 450+300=750ms is
         # calibrated against real pilot audio (tests/test_turn_calibration.py).
         # Judge any change by the sum. Choices are kept inside the range PUT
@@ -748,6 +751,7 @@ async def get_config(room: str | None = None, _=Depends(verify_api_key)):
         "tts_voice": cfg.tts_voice,
         "tts_provider": cfg.tts_provider,
         "tts_aggregation_mode": cfg.tts_aggregation_mode,
+        "turn_detection": cfg.turn_detection,
         "stt_model": cfg.stt_model,
         "stt_vad_mode": cfg.stt_vad_mode,
         "stt_delay": cfg.stt_delay,
@@ -816,6 +820,10 @@ async def update_config(request: Request, _=Depends(verify_api_key)):
         if v is not None and v not in ("minimal", "low", "medium", "high", "xhigh"):
             return JSONResponse({"error": "stt_delay must be one of: minimal, low, medium, high, xhigh, or null"}, status_code=400)
         fields["stt_delay"] = v
+    if "turn_detection" in body:
+        if body["turn_detection"] not in ("silence", "smart_turn"):
+            return JSONResponse({"error": "turn_detection must be 'silence' or 'smart_turn'"}, status_code=400)
+        fields["turn_detection"] = body["turn_detection"]
     if "tts_aggregation_mode" in body:
         if body["tts_aggregation_mode"] not in ("sentence", "token"):
             return JSONResponse({"error": "tts_aggregation_mode must be 'sentence' or 'token'"}, status_code=400)
@@ -885,6 +893,7 @@ async def update_config(request: Request, _=Depends(verify_api_key)):
         "tts_voice": cfg.tts_voice,
         "tts_provider": cfg.tts_provider,
         "tts_aggregation_mode": cfg.tts_aggregation_mode,
+        "turn_detection": cfg.turn_detection,
         "stt_model": cfg.stt_model,
         "stt_vad_mode": cfg.stt_vad_mode,
         "stt_delay": cfg.stt_delay,

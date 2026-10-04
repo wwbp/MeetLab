@@ -444,6 +444,29 @@ class TestSpokenText(unittest.TestCase):
         self.assertEqual(_spoken_text("Dr. A+B: Hello.", {"Dr. A+B", None}), "Hello.")
 
 
+class TestSmartTurnChain(unittest.TestCase):
+    """turn_detection picks the end-of-turn rule per room; smart turn sits in each person's chain."""
+
+    def chain(self, turn_detection):
+        from types import SimpleNamespace
+        from bot import _build_parakeet_chain
+        cfg = SimpleNamespace(stt_model="parakeet-tdt-0.6b-v2", turn_detection=turn_detection, stt_vad_mode="local")
+        with mock.patch.dict(os.environ, {"NEMOTRON_STT_URL": "http://nim.internal:9000"}):
+            return _build_parakeet_chain(cfg)
+
+    def test_silence_keeps_the_chain_as_it_was(self):
+        head, tail = self.chain("silence")
+        self.assertIs(head._next, tail)  # VAD straight into STT
+
+    def test_smart_turn_puts_a_gate_between_the_persons_vad_and_stt_and_hands_over_its_verdict(self):
+        from smart_turn import SmartTurnGate, TurnVerdict
+        head, tail, verdict = self.chain("smart_turn")
+        self.assertIsInstance(head._next, SmartTurnGate)
+        self.assertIs(head._next._next, tail)
+        self.assertIsInstance(verdict, TurnVerdict)
+        self.assertIs(head._next._listener.verdict, verdict)
+
+
 class TestLongConversations(unittest.TestCase):
     """A conversation must outlive the LLM's context: the L6 breakpoint run (2026-10-03) went
     silent in rooms ~40 min old, because the history passed Qwen's 8,192 tokens, vLLM answered

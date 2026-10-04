@@ -327,6 +327,25 @@ def deploy_state(service: dict) -> tuple[str, str]:
     return ("failed", stuck[0]) if stuck else ("waiting", "")
 
 
+APP_SERVICES = ["livekit", "meet", "agent-runner"]  # the GPU models have their own, longer waits
+
+
+def still_deploying(services: list[dict]) -> list[str]:
+    """The switched-on services whose deploy has not finished. A LiveKit machine swap
+    (stop-first, minutes down) once made every scenario fail with a 500 (2026-10-04)."""
+    waiting = []
+    for svc in services:
+        if svc["status"] != "ACTIVE" or svc["desiredCount"] == 0:
+            continue
+        name = svc["serviceName"].removeprefix("meetlab-v2-staging-")
+        state, why = deploy_state(svc)
+        if state == "failed":
+            raise Fail(f"{name}'s deploy will not finish: {why}")
+        if state == "waiting":
+            waiting.append(name)
+    return waiting
+
+
 def _service_ready(name):
     state, why = deploy_state(ecs.describe_services(cluster=CLUSTER, services=[f"meetlab-v2-staging-{name}"])["services"][0])
     if state == "failed":
@@ -540,6 +559,12 @@ async def _prepared():
 
 
 async def main(names):
+    def app_ready():
+        services = ecs.describe_services(cluster=CLUSTER, services=[f"meetlab-v2-staging-{n}" for n in APP_SERVICES])["services"]
+        return not still_deploying(services)
+    waited = await _until(app_ready, 900, "LiveKit, meet and the runner done deploying")
+    if waited > 5:
+        print(f"waited {waited:.0f} s for the app's services to finish deploying", flush=True)
     await _prepared()
     try:
         return await _run(names)

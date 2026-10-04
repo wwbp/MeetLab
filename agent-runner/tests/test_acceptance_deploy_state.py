@@ -6,7 +6,7 @@ import unittest
 from datetime import datetime, timedelta, timezone
 
 sys.path.insert(0, os.path.dirname(__file__))
-from acceptance_staging import deploy_state  # noqa: E402
+from acceptance_staging import deploy_state, still_deploying  # noqa: E402
 
 T0 = datetime(2026, 10, 3, 3, 45, tzinfo=timezone.utc)
 
@@ -41,6 +41,31 @@ class TestDeployState(unittest.TestCase):
         state, why = deploy_state(service("FAILED", reason="ECS deployment circuit breaker: tasks failed to start."))
         self.assertEqual(state, "failed")
         self.assertIn("circuit breaker", why)
+
+
+class TestStillDeploying(unittest.TestCase):
+    """Scenarios start only once the app's services have finished deploying: a LiveKit machine
+    swap (stop-first, minutes down) made every scenario fail with a 500 (2026-10-04)."""
+
+    def named(self, name, **kw):
+        return {**service(**kw), "serviceName": f"meetlab-v2-staging-{name}", "status": "ACTIVE", "desiredCount": 1}
+
+    def test_names_the_services_still_coming_up(self):
+        services = [self.named("livekit"), self.named("meet", rollout="COMPLETED"), self.named("agent-runner", rollout="COMPLETED")]
+        self.assertEqual(still_deploying(services), ["livekit"])
+
+    def test_none_when_all_are_up(self):
+        self.assertEqual(still_deploying([self.named("meet", rollout="COMPLETED")]), [])
+
+    def test_a_deploy_that_will_never_finish_fails_at_once(self):
+        stuck = self.named("livekit", events=[(1, "(service x) was unable to place a task. Reason: RESOURCE:CPU")])
+        with self.assertRaises(Exception) as e:
+            still_deploying([stuck])
+        self.assertIn("livekit", str(e.exception))
+
+    def test_a_switched_off_service_is_not_waited_for(self):
+        off = {**self.named("livekit"), "desiredCount": 0}
+        self.assertEqual(still_deploying([off]), [])
 
 
 if __name__ == "__main__":

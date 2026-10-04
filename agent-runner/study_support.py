@@ -40,3 +40,19 @@ def prolific_id(raw: str | None) -> str | None:
         return None
     candidate = raw.strip().lower()
     return candidate if _PROLIFIC_ID.match(candidate) else None
+
+
+def speaker_meta(display_name: str, raw_metadata: str | None) -> dict:
+    """A person's speaker record: their name and the Prolific ID their token carries (set by
+    /api/connection-details from the pre-join form), the identifier a paid study is matched
+    and paid on. Built one way whether they joined before the bot or after."""
+    meta = {"role": "participant", "display_name": display_name}
+    raw = (raw_metadata or "").strip()
+    pid = prolific_id(raw)
+    if pid:
+        meta["prolific_id"] = pid
+    elif raw:
+        # The form validates before joining, so this is a bypassed or stale client. Keep it:
+        # an unmatched session is a participant who worked and cannot be paid.
+        meta["prolific_id_invalid"] = raw[:200]
+    return meta

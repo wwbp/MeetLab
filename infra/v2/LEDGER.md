@@ -134,6 +134,17 @@ On our synthetic Kokoro speech it held only 2 of 9 mid-sentence pauses: syntheti
 
 Staging's limit is above 72 rooms; measuring 100 needs two load generators (half the rooms each).
 
+**B3 to 102 rooms, 2026-10-04** (breakpoint, target 34: 6 → 102 rooms, +6 every 3 min; profile `ours-short`; **2 load generators** (#169); session headroom as B2 but database **db.t3.medium** (#171); run 37236394995). **Capacity 84 rooms (~140 people)**; harness valid at every step; 0 sessions left.
+
+| Rooms | Answered | p50 / p95 | LLM first token p95 | TTS first audio p95 | STT p95 | LiveKit CPU | meet CPU | DB connections |
+|---|---|---|---|---|---|---|---|---|
+| 60 | 100% | 1.51 / 1.93 s | 169 ms | 146 ms | 366 ms | 37% | 19% | 101 |
+| 84 | 100% | 1.55 / 2.00 s | 188 | 181 | 367 | ~46% | 17% | 142 |
+| 90 | 100% | 1.56 / 2.02 s (FAIL) | 191 | 210 | 368 | 48% | 19% | 151 |
+| 102 | 99% | 1.57 / 2.05 s (FAIL) | 198 | 220 | 367 | 49% | **106%** | 165 |
+
+Quality flat across the climb: WER 2.3–2.9%, judged overall 3.9–4.2, replies p50 ~9 words; voice 4.5% heard back, UTMOS 4.35; fragmented ~19% of sentences (silence turn-taking), missed ≤ 11 of 1,870 at 102. The 2 s rule breaks on queueing in the LLM and voice (first audio doubles), not on CPU; meet saturates at 102 rooms (t3.medium shared with the runner).
+
 **L6 breakpoint, 2026-10-04** (`breakpoint`, target 20: 4 → 60 rooms, +4 every 5 min; profile `ours-short`: NIM + Qwen2.5-7B FP8 + Kokoro + the short-replies line; the conversation library, rooms of 1–3 people, ~1.7 per room; run 37163560523). **Every step passed up to the test's ceiling: capacity ≥ 60 rooms (~100 people)**, 100% answered, no disconnects, every session closed. An earlier run (37156351181) "failed" at 24 rooms: long conversations ran out of LLM context and went silent (fixed, #155), not load.
 
 | Rooms | Turns | p50 / p95 | Qwen first token p95 | Kokoro first audio p95 | LiveKit CPU | Bot machines CPU | DB connections | Judged overall | Word error rate |

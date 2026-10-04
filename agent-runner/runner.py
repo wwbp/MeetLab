@@ -261,6 +261,7 @@ class BotConfigAdmin(ModelView, model=BotConfig):
         BotConfig.stt_endpointing_ms,
         BotConfig.user_speech_timeout_ms,
         BotConfig.turn_detection,
+        BotConfig.smart_turn_wait_ms,
         BotConfig.session_limit_minutes,
         BotConfig.updated_at,
     ]
@@ -752,6 +753,7 @@ async def get_config(room: str | None = None, _=Depends(verify_api_key)):
         "tts_provider": cfg.tts_provider,
         "tts_aggregation_mode": cfg.tts_aggregation_mode,
         "turn_detection": cfg.turn_detection,
+        "smart_turn_wait_ms": cfg.smart_turn_wait_ms,
         "stt_model": cfg.stt_model,
         "stt_vad_mode": cfg.stt_vad_mode,
         "stt_delay": cfg.stt_delay,
@@ -820,6 +822,11 @@ async def update_config(request: Request, _=Depends(verify_api_key)):
         if v is not None and v not in ("minimal", "low", "medium", "high", "xhigh"):
             return JSONResponse({"error": "stt_delay must be one of: minimal, low, medium, high, xhigh, or null"}, status_code=400)
         fields["stt_delay"] = v
+    if "smart_turn_wait_ms" in body:
+        v = body["smart_turn_wait_ms"]
+        if not isinstance(v, int) or isinstance(v, bool) or not 500 <= v <= 5000:
+            return JSONResponse({"error": "smart_turn_wait_ms must be a whole number from 500 to 5000"}, status_code=400)
+        fields["smart_turn_wait_ms"] = v
     if "turn_detection" in body:
         if body["turn_detection"] not in ("silence", "smart_turn"):
             return JSONResponse({"error": "turn_detection must be 'silence' or 'smart_turn'"}, status_code=400)
@@ -894,6 +901,7 @@ async def update_config(request: Request, _=Depends(verify_api_key)):
         "tts_provider": cfg.tts_provider,
         "tts_aggregation_mode": cfg.tts_aggregation_mode,
         "turn_detection": cfg.turn_detection,
+        "smart_turn_wait_ms": cfg.smart_turn_wait_ms,
         "stt_model": cfg.stt_model,
         "stt_vad_mode": cfg.stt_vad_mode,
         "stt_delay": cfg.stt_delay,

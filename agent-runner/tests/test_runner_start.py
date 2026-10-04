@@ -740,6 +740,14 @@ class RunnerStartApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.text)
         self.assertEqual(response.json().get("stt_model"), "parakeet-unified-en-0.6b")
 
+    def test_config_put_smart_turn_wait_within_half_a_second_to_five(self):
+        scope = f"wait-{uuid.uuid4().hex[:6]}"
+        ok = self.client.put("/config", json={"scope": scope, "smart_turn_wait_ms": 1500})
+        self.assertEqual(ok.status_code, 200, ok.text)
+        self.assertEqual(ok.json()["smart_turn_wait_ms"], 1500)
+        for bad in (100, 9000, "soon"):
+            self.assertEqual(self.client.put("/config", json={"scope": scope, "smart_turn_wait_ms": bad}).status_code, 400, bad)
+
     def test_config_put_accepts_smart_turn_and_refuses_anything_else(self):
         scope = f"turn-{uuid.uuid4().hex[:6]}"
         ok = self.client.put("/config", json={"scope": scope, "turn_detection": "smart_turn"})

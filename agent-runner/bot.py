@@ -371,7 +371,7 @@ def _link_chain(bot_config, vad, stt):
         vad.link(stt)
         return (vad, stt)
     from smart_turn import SmartTurnGate, TurnVerdict
-    verdict = TurnVerdict()
+    verdict = TurnVerdict(wait_secs=(getattr(bot_config, "smart_turn_wait_ms", 3000) or 3000) / 1000)
     gate = SmartTurnGate(verdict)
     vad.link(gate)
     gate.link(stt)

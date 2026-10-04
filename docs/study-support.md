@@ -109,6 +109,15 @@ There is deliberately **no completion gate**. The session ends when the timer
 runs out; participants who left early or never spoke are filtered out of the
 data afterwards, which is both easier and more honest than blocking the exit.
 
+### Is the code unique?
+
+Per participant per room, yes: it is 8 characters from a 32-letter alphabet (about 1.1
+trillion codes), so two participants practically never share one. It is also *repeatable*:
+the same person in the same room always gets the same code, even after reconnecting, which
+is what lets you recompute and check it. One exception: someone who joins **without** a
+Prolific ID gets a code from their display name, so two people both called "Ana" in one room,
+neither with an ID, would share a code. Studies require the ID on the pre-join screen.
+
 ## Verifying a code
 
 ```bash

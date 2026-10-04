@@ -22,6 +22,16 @@ transfer. Budget rule (2026-09-30): staging may cost up to v1 production's avera
 3. Follow-ups found today (table below): first-turn speaker-label race; fragmentation of paused sentences.
 4. L6: ramp to 50–100 rooms (raise `bot_pool_max`), the report.
 
+## Plan after L6 (2026-10-04, user's order)
+
+1. **A1** recording endpoints get room-scoped auth (F10; exposed now the repo is public). Done as **console-only** (user's choice): a room token proves nothing while anyone who names a room can get one.
+1b. **Signed join links** (F10's other half: today anyone who names a room can join it and get its token); added 2026-10-04.
+2. **B2** spike: a study launching at once. 3. **B3** target 100 rooms.
+4. **C2** every bot setting (STT, TTS, LLM, VAD or smart turn, prompts) chosen in Bot Config, piped through and tested; **C3** the first speaker's name (people already in the room when the bot joins are never "connected" to it).
+5. **D1** TURN server. 6. **D2** study-flow live tests. 7. **D3** record the infra configuration with its capacity and latency numbers.
+
+Not now: **B1** soak (sessions last 5–20 min, the breakpoint run already kept rooms busy for over an hour). Pinned for the end: **A2** back to a private repo; **B4** bot join latency and other latency tweaks. The user's: **C1** the short-replies prompt line, per study; **C4** a human-rated sample of the quality scores.
+
 ## Cost
 
 **v1 production, estimated:** about **$1,110/month**. v1 resources have no cost tags, and

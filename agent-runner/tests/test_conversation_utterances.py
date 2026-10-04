@@ -38,6 +38,49 @@ async def _seed(conv_id: str):
     await engine.dispose()
 
 
+async def _seed_people(conv_id: str):
+    from sqlalchemy.ext.asyncio import create_async_engine
+    from sqlalchemy.dialects.postgresql import insert
+
+    from db.models import Conversation, Speaker, Utterance
+    from db.url import database_url
+
+    engine = create_async_engine(database_url(os.environ))
+    ana, ben, bot = f"Ana__{conv_id[:6]}", f"Ben__{conv_id[:6]}", f"bot_{conv_id[:6]}"
+    async with engine.begin() as db:
+        await db.execute(insert(Conversation).values(id=conv_id, room_name=f"ppl-{conv_id[:6]}",
+                                                     started_at=datetime.now(timezone.utc), status="completed"))
+        await db.execute(insert(Speaker).values([
+            {"id": ana, "meta": {"role": "participant", "display_name": "Ana", "prolific_id": "5f2a91b3c4d5e6f708192a3b"}},
+            {"id": ben, "meta": {"role": "participant", "display_name": "Ben", "prolific_id_invalid": "oops"}},
+            {"id": bot, "meta": {"role": "bot"}}]))
+        await db.execute(insert(Utterance).values([
+            {"id": uuid.uuid4().hex, "speaker_id": ana, "conv_id": conv_id, "ts": 1.0, "text": "Hi."},
+            {"id": uuid.uuid4().hex, "speaker_id": ana, "conv_id": conv_id, "ts": 3.0, "text": "Again."},
+            {"id": uuid.uuid4().hex, "speaker_id": ben, "conv_id": conv_id, "ts": 2.0, "text": "Hello."},
+            {"id": uuid.uuid4().hex, "speaker_id": bot, "conv_id": conv_id, "ts": 2.5, "text": "Welcome."}]))
+    await engine.dispose()
+    return ana, ben
+
+
+class TestConversationSpeakers(unittest.TestCase):
+    """GET /conversations/{id}/speakers: who took part, with the Prolific ID a paid study is
+    matched on (the payment export researchers wrote SQL for). People only, not the bot."""
+
+    def test_each_person_once_with_their_prolific_id(self):
+        conv_id = str(uuid.uuid4())
+        ana, ben = asyncio.run(_seed_people(conv_id))
+        r = requests.get(f"{BASE}/conversations/{conv_id}/speakers", headers=AUTH, timeout=10)
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertEqual(r.json()["speakers"], [
+            {"speaker": ana, "display_name": "Ana", "prolific_id": "5f2a91b3c4d5e6f708192a3b", "prolific_id_invalid": None},
+            {"speaker": ben, "display_name": "Ben", "prolific_id": None, "prolific_id_invalid": "oops"},
+        ])
+
+    def test_an_unknown_conversation_is_404(self):
+        self.assertEqual(requests.get(f"{BASE}/conversations/{uuid.uuid4()}/speakers", headers=AUTH, timeout=10).status_code, 404)
+
+
 class TestConversationUtterances(unittest.TestCase):
     def test_turns_in_order_with_times_and_who_spoke(self):
         conv_id = str(uuid.uuid4())

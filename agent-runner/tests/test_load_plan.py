@@ -1,7 +1,8 @@
 """Load-test plan: the standard shapes, per-step measures, and the SLO verdict (load_plan.py)."""
 import unittest
 
-from load_plan import SHAPES, Step, parse_reply, room_window, schedule, stage_summary, step_bounds, step_of, summarise_step, verdict
+from load_plan import (SHAPES, Step, judge_step, merge_results, parse_reply, room_window, schedule, shard_rooms,
+                       stage_summary, step_bounds, step_of, summarise_step, verdict)
 
 
 class TestShapes(unittest.TestCase):
@@ -126,6 +127,47 @@ class TestServerSide(unittest.TestCase):
         self.assertEqual(s["stt_ms"]["p95"], 300.0)
         self.assertEqual(s["replies"], 20)
         self.assertNotIn("tts_ttfb_ms", s)
+
+
+class TestShards(unittest.TestCase):
+    """Two load generators, half the rooms each (one 16-vCPU generator tops out at ~75 rooms)."""
+
+    def test_each_generator_gets_every_other_room(self):
+        self.assertEqual(shard_rooms(peak=7, shard=0, of=2), [0, 2, 4, 6])
+        self.assertEqual(shard_rooms(peak=7, shard=1, of=2), [1, 3, 5])
+        self.assertEqual(shard_rooms(peak=3, shard=0, of=1), [0, 1, 2])
+
+    def test_a_step_is_judged_from_its_events(self):
+        steps, bounds = [Step(2, 100), Step(0, 120)], [(0, 100), (100, 220)]
+        events = [["turn", 10, 0, 1000.0], ["turn", 20, 1, None], ["join", 5, 0, 30.0], ["lag", 50, 0, 700.0]]
+        m = judge_step(0, steps[0], events, bounds)
+        self.assertEqual((m["turns"], m["replied"], m["harness_lag_ms"]), (2, 1, 700.0))
+        self.assertFalse(m["pass"])  # reply rate 50%
+
+    def test_merging_halves_judges_the_steps_over_both(self):
+        steps = [Step(2, 100), Step(0, 120)]
+        base = {"run": "r1", "profile": "ours", "config": {}, "shape": "load", "bounds": [(0, 100), (100, 220)]}
+        a = {**base, "events": [["turn", 10, 0, 1000.0], ["turn", 20, 0, 1200.0]], "rooms": [{"room": 0}],
+             "clips": [], "sessions_left_running": []}
+        b = {**base, "events": [["turn", 15, 1, 3000.0], ["turn", 30, 1, 1100.0]], "rooms": [{"room": 1}],
+             "clips": [], "sessions_left_running": ["load-r1-001"]}
+        m = merge_results([a, b], steps)
+        self.assertEqual(m["steps"][0]["turns"], 4)
+        self.assertEqual(m["steps"][0]["p95_ms"], 3000.0)      # the slowest of both halves
+        self.assertEqual([r["room"] for r in m["rooms"]], [0, 1])
+        self.assertEqual(m["sessions_left_running"], ["load-r1-001"])
+        self.assertFalse(m["pass"])                             # p95 3 s, and a session left open
+        self.assertEqual(m["generators"], 2)
+
+    def test_judged_answers_combine_weighted_by_how_many_each_half_judged(self):
+        steps = [Step(2, 100), Step(0, 120)]
+        base = {"run": "r1", "bounds": [(0, 100), (100, 220)], "rooms": [], "clips": [], "sessions_left_running": [], "events": []}
+        a = {**base, "steps": [{"answers": {"judged": 3, "dropped": 0, "answers": 4.0, "spoken": 5.0, "overall": 4.0, "context": None,
+                                            "rubric": "x", "judge": "j"}}, {}]}
+        b = {**base, "steps": [{"answers": {"judged": 1, "dropped": 1, "answers": 2.0, "spoken": 5.0, "overall": 2.0, "context": 3.0,
+                                            "rubric": "x", "judge": "j"}}, {}]}
+        ans = merge_results([a, b], steps)["steps"][0]["answers"]
+        self.assertEqual((ans["judged"], ans["dropped"], ans["answers"], ans["overall"], ans["context"]), (4, 1, 3.5, 3.5, 3.0))
 
 
 if __name__ == "__main__":

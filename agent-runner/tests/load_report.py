@@ -11,7 +11,7 @@ of each service, CPU of each machine group, database CPU and connections).
 Run by the Load test v2 workflow after the load generator stops, with the acceptance
 role; prints Markdown for the run's summary and writes the enriched result back.
 
-    uv run --no-project --with boto3 python agent-runner/tests/load_report.py result.json
+    uv run --no-project --with boto3 python agent-runner/tests/load_report.py result.json [half-2.json …]
 """
 import json
 import os
@@ -170,14 +170,22 @@ def markdown(r: dict) -> str:
                   "| clips scored | skipped (held parts of several replies) | intelligibility: word error rate heard back | naturalness (UTMOS, 1-5) |",
                   "|---|---|---|---|",
                   f"| {v['clips']} | {v.get('skipped', 0)} | {wer} | {natural} |"]
-    lines += ["", f"**Capacity** (largest passing step): {r.get('capacity_rooms')} rooms. "
+    generators = r.get("generators", 1)
+    split = f" ({generators} load generators)" if generators > 1 else ""
+    lines += ["", f"**Capacity** (largest passing step): {r.get('capacity_rooms')} rooms{split}. "
               f"Sessions left running: {len(r.get('sessions_left_running', []))}. "
               f"Harness valid: {r.get('harness_valid')}. **Verdict: {'PASS' if r.get('pass') else 'FAIL'}**"]
     return "\n".join(lines)
 
 
-def main(path: str):
+def main(path: str, *halves: str):
+    """path: the result (written back); more paths: the other generators' halves of a split
+    run, merged into one result first (load_plan.merge_results)."""
     r = json.loads(open(path).read())
+    if halves:
+        from load_plan import merge_results, schedule
+        results = [r] + [json.loads(open(h).read()) for h in halves]
+        r = merge_results(results, schedule(r["shape"], r["target"], r["hold_s"]))
     bounds = [tuple(b) for b in r.get("bounds", [])][:len(r["steps"])]
     if bounds:
         for m, stages, mx in zip(r["steps"], _stages(bounds), _metrics(bounds)):
@@ -189,4 +197,4 @@ def main(path: str):
 
 
 if __name__ == "__main__":
-    main(sys.argv[1])
+    main(*sys.argv[1:])

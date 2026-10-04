@@ -32,6 +32,11 @@ on:
         type: choice
         options: [v1, none]
         default: v1
+      generators:
+        description: "Load generators sharing the rooms (one tops out at ~75 rooms); 2 for 100+ rooms"
+        type: choice
+        options: ["1", "2"]
+        default: "1"
       cpu:
         description: "Load generator vCPUs x 1024 (a worker per vCPU; raise if it reports HARNESS OVERLOADED)"
         type: choice
@@ -63,7 +68,7 @@ jobs:
           role-to-assume: ${{ vars.TF_ACCEPTANCE_ROLE_ARN }}
           role-duration-seconds: 14400
           aws-region: ${{ env.AWS_REGION }}
-      - name: Start the load generator
+      - name: Start the load generators
         id: start
         env:
           PROFILE: ${{ inputs.profile }}
@@ -72,63 +77,81 @@ jobs:
           HOLD_S: ${{ inputs.hold_s }}
           CPU: ${{ inputs.cpu }}
           LIBRARY_VERSION: ${{ inputs.library }}
+          GENERATORS: ${{ inputs.generators }}
         run: |
           set -euo pipefail
           account="$(aws sts get-caller-identity --query Account --output text)"
           bucket="meetlab-v2-staging-media-$account"
-          key="loadtests/$(date -u +%Y%m%dT%H%M%SZ)-$SHAPE-$PROFILE-$TARGET.json"
+          base="loadtests/$(date -u +%Y%m%dT%H%M%SZ)-$SHAPE-$PROFILE-$TARGET"
           subnets="$(aws ec2 describe-subnets --filters 'Name=tag:Name,Values=meetlab-v2-staging-private-*' --query 'Subnets[].SubnetId' --output json)"
           sg="$(aws ec2 describe-security-groups --filters Name=group-name,Values=meetlab-v2-staging-loadgen --query 'SecurityGroups[].GroupId' --output json)"
-          overrides="$(jq -n --arg cpu "$CPU" --arg mem "$((CPU * 2))" \
-            --arg p "$PROFILE" --arg s "$SHAPE" --arg t "$TARGET" --arg h "$HOLD_S" \
-            --arg r "s3://$bucket/$key" --arg g "$GITHUB_SHA" --arg w "$((CPU / 1024))" \
-            --arg l "$([ "$LIBRARY_VERSION" = none ] || echo "s3://$bucket/loadtests/library/$LIBRARY_VERSION/library.json")" \
-            '{cpu: $cpu, memory: $mem, containerOverrides: [{name: "loadgen", environment: [
-              {name: "PROFILE", value: $p}, {name: "SHAPE", value: $s}, {name: "TARGET", value: $t},
-              {name: "HOLD_S", value: $h}, {name: "RESULTS", value: $r}, {name: "GIT_SHA", value: $g},
-              {name: "WORKERS", value: $w}, {name: "LIBRARY", value: $l}]}]}')"
           network="$(jq -n --argjson s "$subnets" --argjson g "$sg" '{awsvpcConfiguration: {subnets: $s, securityGroups: $g, assignPublicIp: "DISABLED"}}')"
-          task="$(aws ecs run-task --cluster "$CLUSTER" --task-definition meetlab-v2-staging-loadgen \
-            --launch-type FARGATE --started-by loadtest --network-configuration "$network" \
-            --overrides "$overrides" --query 'tasks[0].taskArn' --output text)"
-          echo "task=$task" >> "$GITHUB_OUTPUT"
-          echo "result=s3://$bucket/$key" >> "$GITHUB_OUTPUT"
-          echo "load generator: $task"
+          library="$([ "$LIBRARY_VERSION" = none ] || echo "s3://$bucket/loadtests/library/$LIBRARY_VERSION/library.json")"
+          # A split run: one run id and one start time (10 min ahead: Fargate start + Prepare
+          # for study) for every generator, each running every n-th room (load_plan.shard_rooms).
+          run_id="$(openssl rand -hex 3)"
+          t0="$([ "$GENERATORS" = 1 ] || echo $(( $(date +%s) + 600 )))"
+          tasks="" results=""
+          for i in $(seq 0 $((GENERATORS - 1))); do
+            key="$base$([ "$GENERATORS" = 1 ] || echo "-gen$i").json"
+            overrides="$(jq -n --arg cpu "$CPU" --arg mem "$((CPU * 2))" \
+              --arg p "$PROFILE" --arg s "$SHAPE" --arg t "$TARGET" --arg h "$HOLD_S" \
+              --arg r "s3://$bucket/$key" --arg g "$GITHUB_SHA" --arg w "$((CPU / 1024))" --arg l "$library" \
+              --arg sh "$i/$GENERATORS" --arg t0 "$t0" --arg id "$run_id" \
+              '{cpu: $cpu, memory: $mem, containerOverrides: [{name: "loadgen", environment: [
+                {name: "PROFILE", value: $p}, {name: "SHAPE", value: $s}, {name: "TARGET", value: $t},
+                {name: "HOLD_S", value: $h}, {name: "RESULTS", value: $r}, {name: "GIT_SHA", value: $g},
+                {name: "WORKERS", value: $w}, {name: "LIBRARY", value: $l},
+                {name: "SHARD", value: $sh}, {name: "T0", value: $t0}, {name: "RUN_ID", value: $id}]}]}')"
+            task="$(aws ecs run-task --cluster "$CLUSTER" --task-definition meetlab-v2-staging-loadgen \
+              --launch-type FARGATE --started-by loadtest --network-configuration "$network" \
+              --overrides "$overrides" --query 'tasks[0].taskArn' --output text)"
+            echo "load generator $i/$GENERATORS: $task"
+            tasks="$tasks $task" results="$results s3://$bucket/$key"
+          done
+          echo "tasks=${tasks# }" >> "$GITHUB_OUTPUT"
+          echo "results=${results# }" >> "$GITHUB_OUTPUT"
       - name: Follow the run
         env:
-          TASK: ${{ steps.start.outputs.task }}
+          TASKS: ${{ steps.start.outputs.tasks }}
         run: |
           set -euo pipefail
-          stream="loadgen/loadgen/${TASK##*/}"
+          first="${TASKS%% *}"
+          stream="loadgen/loadgen/${first##*/}"  # the first generator's log; the others mirror it
           since=0
           while :; do
-            status="$(aws ecs describe-tasks --cluster "$CLUSTER" --tasks "$TASK" --query 'tasks[0].lastStatus' --output text)"
+            states="$(aws ecs describe-tasks --cluster "$CLUSTER" --tasks $TASKS --query 'tasks[].lastStatus' --output text)"
             aws logs filter-log-events --log-group-name /meetlab-v2/staging/loadgen --log-stream-names "$stream" \
               --start-time "$since" --query 'events[].[timestamp,message]' --output text 2>/dev/null \
               | while IFS=$'\t' read -r ts msg; do echo "$msg"; echo "$ts" > .since; done || true
             [ -f .since ] && since=$(( $(cat .since) + 1 ))
-            [ "$status" = STOPPED ] && break
+            [ -z "$(tr '\t' '\n' <<<"$states" | grep -v STOPPED)" ] && break
             sleep 30
           done
-          code="$(aws ecs describe-tasks --cluster "$CLUSTER" --tasks "$TASK" --query 'tasks[0].containers[0].exitCode' --output text)"
-          echo "exit code: $code ($(aws ecs describe-tasks --cluster "$CLUSTER" --tasks "$TASK" --query 'tasks[0].stoppedReason' --output text))"
-          echo "$code" > .code
+          codes="$(aws ecs describe-tasks --cluster "$CLUSTER" --tasks $TASKS --query 'tasks[].containers[0].exitCode' --output text)"
+          echo "exit codes: $codes"
+          [ -z "$(tr '\t' '\n' <<<"$codes" | grep -vx 0)" ] && echo 0 > .code || echo 1 > .code
       - name: Report
-        if: always() && steps.start.outputs.result
+        if: always() && steps.start.outputs.results
         env:
-          RESULT: ${{ steps.start.outputs.result }}
+          RESULTS: ${{ steps.start.outputs.results }}
         run: |
           set -euo pipefail
-          aws s3 cp "$RESULT" result.json --quiet || { echo "no result written: see the run's log above"; exit 1; }
+          files=""
+          for r in $RESULTS; do
+            f="result-$(basename "$r")"; aws s3 cp "$r" "$f" --quiet || { echo "no result at $r: see the run's log above"; exit 1; }
+            files="$files $f"
+          done
           # The voice scores' listener (faster-whisper) and naturalness model (UTMOS) run here,
-          # never in the bot's image; CPU-only PyTorch wheels.
+          # never in the bot's image; CPU-only PyTorch wheels. Several files: one split run, merged.
           uv run --no-project --index https://download.pytorch.org/whl/cpu \
             --with boto3 --with faster-whisper --with soundfile --with torch --with torchaudio --with numpy \
-            python agent-runner/tests/load_report.py result.json | tee -a "$GITHUB_STEP_SUMMARY"
-          echo "Result: \`$RESULT\`" >> "$GITHUB_STEP_SUMMARY"
+            python agent-runner/tests/load_report.py $files | tee -a "$GITHUB_STEP_SUMMARY"
+          echo "Results: \`$RESULTS\`" >> "$GITHUB_STEP_SUMMARY"
+          cp ${files%% *} result.json  # merged (written back into the first)
           [ "$(cat .code 2>/dev/null)" = 0 ]
       - uses: actions/upload-artifact@v4
-        if: always() && steps.start.outputs.result
+        if: always() && steps.start.outputs.results
         with:
           name: loadtest-result
           path: result.json

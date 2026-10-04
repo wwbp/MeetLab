@@ -60,7 +60,7 @@ from sessions import end
 from db.engine import AsyncSessionLocal
 from db.models import Conversation, MediaFile, Speaker, Utterance
 from interruption import InterruptionTracker
-from study_support import closing_due, prolific_id
+from study_support import closing_due, speaker_meta
 from multi_speaker_stt import MultiSpeakerSTT, SpeakerLabelInjector
 from speech_onset_vad import build_speech_onset_silero
 from runner_types import LiveKitRunnerArguments
@@ -908,10 +908,10 @@ async def _bot(runner_args: LiveKitRunnerArguments):
                     # utterances.speaker_id is a NOT NULL FK onto speakers.id, and a
                     # recovered participant never went through the connect handler
                     # that would have created the row.
+                    _p = _roster.get(_ident)
                     await db.execute(
                         pg_insert(Speaker)
-                        .values(id=_ident, meta={"role": "participant",
-                                                 "display_name": _name})
+                        .values(id=_ident, meta=speaker_meta(_name, getattr(_p, "metadata", "")))
                         .on_conflict_do_nothing(index_elements=["id"])
                     )
                 db.add(
@@ -1015,6 +1015,13 @@ async def _bot(runner_args: LiveKitRunnerArguments):
 
     @transport.event_handler("on_connected")
     async def on_connected(transport):
+        # Everyone already here: no on_participant_connected will come for them.
+        for p in list(transport._client.room.remote_participants.values()):
+            if not p.identity.startswith("bot_"):
+                try:
+                    await _register(p)
+                except Exception as e:
+                    logger.warning(f"could not register {p.identity} at join: {e}")
         try:
             await _publish_avatar(transport._client.room)
         except Exception as e:
@@ -1049,47 +1056,32 @@ async def _bot(runner_args: LiveKitRunnerArguments):
         logger.info("Session limit reached — speaking the closing message")
         await say(bot_config.closing_message)
 
-    @transport.event_handler("on_participant_connected")
-    async def on_participant_connected(transport, participant_id: str):
-        room = transport._client.room
-        # remote_participants is keyed by identity, not SID — find by SID
-        p = _find_participant(room.remote_participants, participant_id)
-        if not p:
-            return
+    async def _register(p) -> None:
+        """Know a person by name and keep their speaker record (name, Prolific ID), whether
+        they joined before the bot or after. People already in the room never trigger
+        on_participant_connected, so on_connected registers them: before, their first
+        sentence reached the LLM unnamed and their Prolific ID was never stored (2026-10-04)."""
         identity = p.identity
-        _sid_to_identity[participant_id] = identity
-        _sid_to_name[participant_id] = p.name or identity.split("__")[0]
-        logger.info(f"Participant connected: {identity} (sid={participant_id})")
-        meta = {
-            "role": "participant",
-            "display_name": _sid_to_name[participant_id],
-        }
-        # The Prolific ID rides in on the participant's token metadata, set by
-        # /api/connection-details from the pre-join form. It is what a paid study
-        # matches and pays a session on, so it is stored on the speaker rather
-        # than left in a JWT nobody keeps.
-        raw = (getattr(p, "metadata", "") or "").strip()
-        pid = prolific_id(raw)
-        if pid:
-            meta["prolific_id"] = pid
-        elif raw:
-            # The form validates before joining, so this means a bypassed or stale
-            # client. Keep what they typed anyway — an unmatched session is a
-            # participant who worked and cannot be paid.
-            meta["prolific_id_invalid"] = raw[:200]
-        stmt = pg_insert(Speaker).values(id=identity, meta=meta)
+        _sid_to_identity[identity] = identity  # Pipecat 1.8+ names participants by identity
+        _sid_to_name[identity] = p.name or identity.split("__")[0]
+        logger.info(f"Participant registered: {identity}")
+        stmt = pg_insert(Speaker).values(id=identity, meta=speaker_meta(_sid_to_name[identity], getattr(p, "metadata", "")))
         async with AsyncSessionLocal() as db:
             async with db.begin():
                 await db.execute(
                     stmt.on_conflict_do_update(
                         index_elements=["id"],
-                        # Merge rather than replace: the row may already exist from
-                        # the late-identity recovery path in resolve_speaker_identity,
-                        # and a reconnect without the URL parameter must not erase an
-                        # ID captured on the first join.
+                        # Merge rather than replace: a reconnect without the URL parameter
+                        # must not erase an ID captured on the first join.
                         set_={"meta": Speaker.meta + stmt.excluded.meta},
                     )
                 )
+
+    @transport.event_handler("on_participant_connected")
+    async def on_participant_connected(transport, participant_id: str):
+        p = _find_participant(transport._client.room.remote_participants, participant_id)
+        if p:
+            await _register(p)
 
     @transport.event_handler("on_active_speaker_changed")
     async def on_active_speaker_changed(transport, participant_id: str):

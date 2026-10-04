@@ -34,7 +34,7 @@ variable "livekit_instance_type" {
 variable "db_instance_class" {
   description = "The database's size; a big load test raises it (101 of ~180 connections at 60 rooms on db.t4g.small)"
   type        = string
-  default     = "db.t4g.medium" # raised for the B3 100-room session (2026-10-04); db.t4g.small after
+  default     = "db.t3.medium" # raised for the B3 100-room session (2026-10-04; db.t4g.medium had no capacity in us-east-1a); db.t4g.small after
 }
 
 variable "tts_replicas" {

@@ -1531,6 +1531,22 @@ async def conversation_utterances(conv_id: str, _=Depends(verify_api_key)):
                             "ts": u.ts, "text": u.text} for u in rows]}
 
 
+@app.get("/conversations/{conv_id}/speakers")
+async def conversation_speakers(conv_id: str, _=Depends(verify_api_key)):
+    """Who took part, in the order they first spoke, with the Prolific ID a paid study is
+    matched and paid on (docs/study-support.md). People only, not the bot."""
+    async with AsyncSessionLocal() as db:
+        if not await db.get(Conversation, conv_id):
+            return JSONResponse({"error": "conversation not found"}, status_code=404)
+        rows = (await db.execute(
+            select(Speaker, func.min(Utterance.ts)).join(Utterance, Utterance.speaker_id == Speaker.id)
+            .where(Utterance.conv_id == conv_id).group_by(Speaker.id).order_by(func.min(Utterance.ts))
+        )).all()
+    return {"speakers": [{"speaker": sp.id, "display_name": sp.meta.get("display_name"),
+                          "prolific_id": sp.meta.get("prolific_id"), "prolific_id_invalid": sp.meta.get("prolific_id_invalid")}
+                         for sp, _ in rows if sp.meta.get("role") != "bot"]}
+
+
 @app.post("/conversations/{conv_id}/transcript")
 async def queue_transcript(
     conv_id: str,

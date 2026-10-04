@@ -258,7 +258,7 @@ resource "aws_ecs_service" "livekit" {
 
 resource "aws_security_group" "turn_lb" {
   name        = "meetlab-v2-staging-turn-lb"
-  description = "TURN over TLS on 443 from anywhere (every relay needs LiveKit's credentials)"
+  description = "TURN over TLS on 443 from anywhere (every relay needs LiveKit credentials)"
   vpc_id      = aws_vpc.this.id
   ingress {
     from_port   = 443

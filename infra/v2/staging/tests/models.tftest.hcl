@@ -14,6 +14,7 @@ run "switched_off_bots_use_the_vendors" {
 
   variables {
     model_services = [] # the default is the switch (variables.tf)
+    tts_replicas   = 1
   }
 
   assert {

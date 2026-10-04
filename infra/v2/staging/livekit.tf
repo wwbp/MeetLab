@@ -59,7 +59,7 @@ resource "aws_security_group" "livekit" {
 resource "aws_launch_template" "livekit" {
   name          = "meetlab-v2-staging-livekit"
   image_id      = data.aws_ssm_parameter.ecs_ami.value
-  instance_type = "c6i.large"
+  instance_type = var.livekit_instance_type # c6i.large; raised for big load tests
   network_interfaces {
     associate_public_ip_address = true
     security_groups             = [aws_security_group.livekit.id]
@@ -101,6 +101,16 @@ resource "aws_autoscaling_group" "livekit" {
     key                 = "Project"
     value               = "meetlab-v2"
     propagate_at_launch = true
+  }
+  # A new machine type (livekit_instance_type) replaces the running machine; without this
+  # the change would only reach machines launched later. One machine: it is down for the
+  # few minutes of the swap, so change it only when no test runs.
+  instance_refresh {
+    strategy = "Rolling"
+    preferences {
+      min_healthy_percentage       = 0
+      scale_in_protected_instances = "Refresh"
+    }
   }
   lifecycle {
     ignore_changes = [desired_capacity] # ECS managed scaling owns it

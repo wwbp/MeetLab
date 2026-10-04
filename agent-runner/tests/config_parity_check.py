@@ -3,7 +3,8 @@ the database (agent-runner/db/models.py), the runner's /config API (agent-runner
 and the console's Bot Config form (meet/app/(shell)/config/page.tsx). The two services' own
 tests can't see each other (each container mounts only its own directory), so this runs from
 the repository root in CI (make test-config-parity). Whether the bot *uses* each field is
-tests/test_config_contract.py. tts_aggregation_mode was missing from the form (2026-10-04).
+tests/test_config_contract.py. tts_aggregation_mode was missing from the form, and stt_vad_mode
+and stt_delay had no input on screen (2026-10-04).
 
     python3 agent-runner/tests/config_parity_check.py
 """
@@ -24,7 +25,9 @@ def columns(models: str) -> set[str]:
 def missing(models: str, runner: str, form: str) -> dict[str, list[str]]:
     cols = columns(models)
     api = set(re.findall(r'"(\w+)": cfg\.\w+', runner))
-    in_form = {c for c in cols if re.search(rf"\b{c}\b", form)}
+    # Shown, not merely carried: an input bound to form.<field> (stt_vad_mode and stt_delay
+    # were in the form's data with no input on screen, 2026-10-04).
+    in_form = {c for c in cols if re.search(rf"(value|checked)=\{{[^}}]*\bform\.{c}\b", form)}
     return {"runner /config": sorted(cols - api), "console form": sorted(cols - in_form)}
 
 

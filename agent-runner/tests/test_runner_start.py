@@ -740,6 +740,13 @@ class RunnerStartApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.text)
         self.assertEqual(response.json().get("stt_model"), "parakeet-unified-en-0.6b")
 
+    def test_config_put_accepts_smart_turn_and_refuses_anything_else(self):
+        scope = f"turn-{uuid.uuid4().hex[:6]}"
+        ok = self.client.put("/config", json={"scope": scope, "turn_detection": "smart_turn"})
+        self.assertEqual(ok.status_code, 200, ok.text)
+        self.assertEqual(ok.json()["turn_detection"], "smart_turn")
+        self.assertEqual(self.client.put("/config", json={"scope": scope, "turn_detection": "magic"}).status_code, 400)
+
     def test_config_put_accepts_our_kokoro_voice(self):
         response = self.client.put("/config", json={"scope": f"kokoro-{uuid.uuid4().hex[:6]}", "tts_provider": "kokoro"})
         self.assertEqual(response.status_code, 200, response.text)

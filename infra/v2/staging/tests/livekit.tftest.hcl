@@ -37,6 +37,7 @@ run "switched_on_it_runs_our_livekit_server" {
   variables {
     livekit_self_hosted   = true
     livekit_instance_type = "c6i.large" # the size between test sessions (tests/scale.tftest.hcl)
+    egress_count          = 0           # video off between studies (tests/egress_server.tftest.hcl)
   }
 
   assert {
@@ -83,7 +84,7 @@ run "switched_on_it_runs_our_livekit_server" {
   }
   assert {
     condition     = output.livekit == { url = "wss://livekit-staging.wwbp.org", key_parameter = "SELFHOSTED_LIVEKIT_API_KEY", secret_parameter = "SELFHOSTED_LIVEKIT_API_SECRET", video = false }
-    error_message = "the live tests learn which LiveKit to use, and that there is no video recording yet"
+    error_message = "the live tests learn which LiveKit to use, and that video is off while egress is"
   }
 }
 

@@ -68,5 +68,5 @@ variable "livekit_self_hosted" {
 variable "egress_count" {
   description = "Egress machines recording video on our own LiveKit (egress_server.tf); 0 between studies"
   type        = number
-  default     = 0 # switched on for a study or a video test (2026-10-05)
+  default     = 1 # on for the first video test on our own LiveKit (2026-10-05); 0 after
 }

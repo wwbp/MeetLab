@@ -71,6 +71,10 @@ run "egress_uploads_with_its_own_role_and_no_key" {
 run "off_between_studies" {
   command = apply
 
+  variables {
+    egress_count = 0 # the value between studies (a session PR raises it)
+  }
+
   assert {
     condition     = aws_ecs_service.egress[0].desired_count == 0 && !output.livekit.video
     error_message = "no egress machine unless switched on; the live tests then skip video"

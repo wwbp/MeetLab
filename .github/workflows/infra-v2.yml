@@ -232,5 +232,7 @@ jobs:
           url="$(jq -r '.url // empty' <<<"$lk")"
           if [ -n "$url" ]; then export LIVEKIT_URL="$url"; else secret LIVEKIT_URL LIVEKIT_URL; fi
           [ "$(jq -r .video <<<"$lk")" = true ] || export NO_VIDEO=1
-          uv run --no-project --with livekit --with livekit-api --with boto3 \
+          # Chromium for turn_relay: a participant's browser, relay-only, through our TURN.
+          uvx --with playwright playwright install --with-deps chromium
+          uv run --no-project --with livekit --with livekit-api --with boto3 --with playwright \
             python agent-runner/tests/acceptance_staging.py

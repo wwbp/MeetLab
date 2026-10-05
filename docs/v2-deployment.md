@@ -155,11 +155,12 @@ The same tests CI runs, from your laptop:
 
 ```bash
 CONSOLE_PASSWORD=... LIVEKIT_URL=... LIVEKIT_API_KEY=... LIVEKIT_API_SECRET=... \
-caffeinate -i uv run --no-project --with livekit --with livekit-api --with boto3 \
+caffeinate -i uv run --no-project --with livekit --with livekit-api --with boto3 --with playwright \
   python agent-runner/tests/acceptance_staging.py video_recording
 ```
 
-Leave out the scenario name to run all of them. Offline infra tests:
+Leave out the scenario name to run all of them. `turn_relay` drives a real Chromium; install
+it once with `uvx --with playwright playwright install chromium`. Offline infra tests:
 `make test-infra`.
 
 ## Gotchas we've hit

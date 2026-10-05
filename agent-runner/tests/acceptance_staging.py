@@ -27,14 +27,14 @@ room-gone cleanup can never be what closes a session and hide a failure.
   session_limit    a room's time limit: the bot speaks its closing message when time is up   (D2)
   our_models       a room configured for our LLM (vLLM) and voice (Kokoro): the bot hears,
                    answers and speaks on them (waits for cold models first)          (L3)
-  turn_relay       a participant whose network allows no direct path (relay-only) joins through
-                   TURN over TLS on 443 and hears the bot's greeting                 (D1)
+  turn_relay       a participant's browser (Chromium) allowed no direct path (relay-only) joins
+                   through TURN over TLS on 443 and receives the bot's greeting      (D1)
 
 A scenario that cannot reach its situation (e.g. the participant drops before the
 kill) is a FAIL, not a skip: an acceptance test that didn't test anything passed nothing.
 
     CONSOLE_PASSWORD=... LIVEKIT_URL=... LIVEKIT_API_KEY=... LIVEKIT_API_SECRET=... \\
-    uv run --no-project --with livekit --with livekit-api --with boto3 \\
+    uv run --no-project --with livekit --with livekit-api --with boto3 --with playwright \\
         python agent-runner/tests/acceptance_staging.py [scenario ...]
 
 Needs AWS credentials that can read the staging logs and tasks, stop and exec into
@@ -127,10 +127,8 @@ async def _until(check, timeout, what):
 class Meeting:
     """A room with a stand-in participant and a bot started through meet."""
 
-    def __init__(self, wait_for_bot=True, second_human=False, room=None, relay_only=False):
+    def __init__(self, wait_for_bot=True, second_human=False, room=None):
         self.wait_for_bot, self.second_human = wait_for_bot, second_human
-        self.options = rtc.RoomOptions(rtc_config=rtc.RtcConfiguration(
-            ice_transport_type=rtc.IceTransportType.TRANSPORT_RELAY)) if relay_only else rtc.RoomOptions()
         self.room = room or f"accept-{uuid.uuid4().hex[:6]}"
 
     async def __aenter__(self):
@@ -140,7 +138,7 @@ class Meeting:
         _post("/api/console/login", {"password": os.environ["CONSOLE_PASSWORD"]})
         _post("/api/concierge/rooms", {"name": self.room})
         self.human = rtc.Room()
-        await self.human.connect(os.environ["LIVEKIT_URL"], _token(self.room, "human_standin"), self.options)
+        await self.human.connect(os.environ["LIVEKIT_URL"], _token(self.room, "human_standin"))
         self.second = rtc.Room()
         if self.second_human:  # in the room before the bot, as in diagnosis F1
             await self.second.connect(os.environ["LIVEKIT_URL"], _token(self.room, "human_second"))
@@ -612,28 +610,53 @@ async def scenario_our_models():
         return f"heard ({stt}), answered by {OUR_LLM}, spoken by Kokoro; latency_ms={reply} (models ready after {m.started - t0:.0f} s)"
 
 
+# Every peer connection the page opens, so the check can read Chromium's own stats.
+_RECORD_PCS = """(() => { const PC = window.RTCPeerConnection; window.__pcs = [];
+  window.RTCPeerConnection = function (...a) { const pc = new PC(...a); window.__pcs.push(pc); return pc; };
+  window.RTCPeerConnection.prototype = PC.prototype; })()"""
+
+# What arrived and over which path: audio bytes in, and the selected pair's local candidate type.
+_RELAY_STATS = """async () => { let bytes = 0, relay = false;
+  for (const pc of window.__pcs) { const st = await pc.getStats(); const by = new Map(); st.forEach(r => by.set(r.id, r));
+    st.forEach(r => {
+      if (r.type === "inbound-rtp" && r.kind === "audio") bytes += r.bytesReceived || 0;
+      if (r.type === "candidate-pair" && r.state === "succeeded" && r.nominated)
+        relay = relay || by.get(r.localCandidateId)?.candidateType === "relay";
+    }); }
+  return {bytes, relay}; }"""
+
+
 async def scenario_turn_relay():
-    """D1: relay-only ICE leaves no direct path, so the bot's greeting can only arrive through
-    a TURN server: ours, over TLS on 443 (the only one LiveKit offers; no TURN over UDP)."""
-    async with Meeting(relay_only=True) as m:
-        heard = asyncio.Event()
-
-        async def listen(track):
-            async for event in rtc.AudioStream(track, num_channels=1):
-                if any(bytes(event.frame.data)):  # not silence: the greeting
-                    heard.set()
-                    return
-
-        bot = next(p for p in m.human.remote_participants.values() if p.identity.startswith("bot_"))
-        await _until(lambda: any(t.track for t in bot.track_publications.values()), 60, "the bot's audio track")
-        task = asyncio.create_task(listen(next(t.track for t in bot.track_publications.values() if t.track)))
+    """D1: a participant's browser (Chromium, meet's LiveKit client) allowed only relayed paths
+    (iceTransportPolicy "relay") joins, and the bot's greeting arrives over a relay: our TURN
+    over TLS on 443, the only one LiveKit offers. A real browser, because LiveKit's Python SDK
+    on Linux can't relay over TLS at all (2026-10-05), while browsers are what participants use."""
+    from playwright.async_api import async_playwright
+    room = f"accept-{uuid.uuid4().hex[:6]}"
+    _post("/api/console/login", {"password": os.environ["CONSOLE_PASSWORD"]})
+    _post("/api/concierge/rooms", {"name": room})
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(args=["--use-fake-ui-for-media-stream", "--use-fake-device-for-media-stream"])
         try:
-            await asyncio.wait_for(heard.wait(), 90)
-        except asyncio.TimeoutError:
-            raise Fail("no audio from the bot through TURN within 90 s")
+            page = await browser.new_page()
+            await page.add_script_tag(url="https://cdn.jsdelivr.net/npm/livekit-client@2.17.1/dist/livekit-client.umd.js")
+            await page.evaluate(_RECORD_PCS)
+            await page.evaluate("""async ([url, token]) => { window.__room = new LivekitClient.Room();
+                await window.__room.connect(url, token, {rtcConfig: {iceTransportPolicy: "relay"}}); }""",
+                                [os.environ["LIVEKIT_URL"], _token(room, "human_standin")])
+            _post(f"/api/concierge/rooms/{room}/bots", {})
+
+            async def bot_in():
+                return await page.evaluate(
+                    "() => [...window.__room.remoteParticipants.values()].some(p => p.identity.startsWith('bot_'))")
+            joined = await _until(bot_in, 420, "bot in the room")
+            async def heard():
+                st = await page.evaluate(_RELAY_STATS)
+                return st["relay"] and st["bytes"] > 5000
+            await _until(heard, 90, "the bot's audio over a relayed path")
+            return f"the bot's greeting reached a relay-only Chromium over TURN/TLS 443 (bot joined after {joined:.0f}s)"
         finally:
-            task.cancel()
-        return f"the bot's greeting heard through TURN/TLS 443 (relay-only), bot joined after {m.join_s:.0f}s"
+            await browser.close()
 
 
 SCENARIOS = {"start": scenario_start, "stoptask": scenario_stoptask, "removed": scenario_removed,

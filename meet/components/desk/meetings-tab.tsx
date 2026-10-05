@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { Button } from '@/components/ui/button';
+import { PageHeader, Stat, secondaryButtonClass, textActionClass } from '@/components/console/swiss';
 import type { ConversationRecord, ConversationsResponse } from '@/lib/concierge/types';
 
 const POLL_INTERVAL_MS = 10_000;
@@ -38,59 +38,45 @@ function FileActions({
   const isRunning = conv.status === 'running';
 
   return (
-    <div className="flex flex-wrap gap-1.5">
-      {/* Recording */}
+    <div className="flex flex-wrap justify-end gap-x-4 gap-y-1">
       {recording?.status === 'available' && (
-        <Button variant="outline" size="sm" onClick={() => onDownload(conv.id, recording.id)}>
-          Video
-        </Button>
+        <button className={textActionClass} onClick={() => onDownload(conv.id, recording.id)}>Video</button>
       )}
-      {recording?.status === 'pending' && (
-        <span className="text-xs text-muted-foreground animate-pulse self-center">recording…</span>
-      )}
-      {recording?.status === 'failed' && (
-        <span className="text-xs text-destructive self-center">rec failed</span>
-      )}
+      {recording?.status === 'pending' && <span className="text-muted-foreground animate-pulse text-sm">Recording…</span>}
+      {recording?.status === 'failed' && <span className="text-signal text-sm">Video failed</span>}
 
-      {/* Transcript */}
       {transcript?.status === 'available' && (
-        <Button variant="outline" size="sm" onClick={() => onDownload(conv.id, transcript.id)}>
-          Transcript
-        </Button>
+        <button className={textActionClass} onClick={() => onDownload(conv.id, transcript.id)}>Transcript</button>
       )}
-      {transcript?.status === 'pending' && (
-        <span className="text-xs text-muted-foreground animate-pulse self-center">generating…</span>
-      )}
-      {transcript?.status === 'failed' && (
-        <span className="text-xs text-destructive self-center">tx failed</span>
-      )}
+      {transcript?.status === 'pending' && <span className="text-muted-foreground animate-pulse text-sm">Making transcript…</span>}
+      {transcript?.status === 'failed' && <span className="text-signal text-sm">Transcript failed</span>}
       {!transcript && (
-        <Button
-          variant="ghost"
-          size="sm"
+        <button
+          className={textActionClass + ' text-muted-foreground'}
           onClick={() => onGenerate(conv.id)}
           disabled={isRunning}
-          title={isRunning ? 'Session still running' : 'Generate transcript'}
-          className="text-muted-foreground"
+          title={isRunning ? 'Available when the meeting ends' : 'Make a transcript'}
         >
-          + Transcript
-        </Button>
+          Make transcript
+        </button>
       )}
 
       {/* Per-speaker audio tracks (source-separated WAV), bundled into one zip */}
       {audioTrackCount > 0 && (
-        <Button
-          variant="outline"
-          size="sm"
+        <button
+          className={textActionClass}
           onClick={() => window.open(`/api/meetings/${conv.id}/audio-tracks/download`, '_blank')}
-          title="Download all per-speaker audio tracks as a zip"
+          title="Each speaker's own audio, as a zip"
         >
           Audio ({audioTrackCount})
-        </Button>
+        </button>
       )}
     </div>
   );
 }
+
+// A meeting's status in plain words.
+const MEETING_STATE: Record<string, string> = { running: 'Live', completed: 'Ended', ended: 'Room closed', error: 'Ended with an error' };
 
 export function MeetingsTab() {
   const [conversations, setConversations] = useState<ConversationRecord[]>([]);
@@ -165,91 +151,45 @@ export function MeetingsTab() {
   }, [hasStuckRecording]);
 
   return (
-    <div className="p-6 space-y-4 max-w-5xl">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <h1 className="text-lg font-semibold">Meetings</h1>
-        <span className="text-muted-foreground text-sm">{total} total</span>
-      </div>
+    <div className="mx-auto w-full max-w-6xl px-6 py-10">
+      <PageHeader title="Meetings" lead="Every meeting a bot was in, newest first, with its recordings and transcript." />
+      <div className="pb-12"><Stat value={total} label="meetings" /></div>
 
-      {/* Errors */}
-      {(error || actionError) && (
-        <div className="text-destructive text-sm border border-destructive/30 rounded px-3 py-2">
-          {error ?? actionError}
-        </div>
-      )}
+      {(error || actionError) && <p className="text-signal pb-6 text-sm">{error ?? actionError}</p>}
 
-      {/* Content */}
       {loading ? (
         <p className="text-muted-foreground text-sm">Loading…</p>
       ) : conversations.length === 0 ? (
-        <p className="text-muted-foreground text-sm">No meetings recorded yet.</p>
+        <p className="text-muted-foreground text-sm">No meetings yet.</p>
       ) : (
         <>
-          {/* Card grid */}
-          <div className="grid gap-2">
-            {conversations.map((conv) => (
-              <div
-                key={conv.id}
-                className="flex items-center gap-4 rounded border px-4 py-3 hover:bg-muted/10 transition-colors"
-              >
-                {/* Room + date */}
-                <div className="min-w-0 flex-1">
-                  <p className="font-mono text-sm truncate">{conv.room_name}</p>
-                  <p className="text-xs text-muted-foreground mt-0.5">
-                    {formatDate(conv.started_at)}
-                    {' · '}
-                    {formatDuration(conv.started_at, conv.ended_at)}
-                    {' · '}
-                    {conv.utterance_count} turns
-                  </p>
-                </div>
-
-                {/* Status badge */}
-                <span
-                  className={`shrink-0 text-xs px-2 py-0.5 rounded-full ${
-                    conv.status === 'running'
-                      ? 'bg-green-100 text-green-800'
-                      : conv.status === 'error'
-                        ? 'bg-red-100 text-red-800'
-                        : 'bg-muted text-muted-foreground'
-                  }`}
-                >
-                  {conv.status === 'running' ? 'live' : conv.status}
-                </span>
-
-                {/* Actions */}
-                <FileActions
-                  conv={conv}
-                  onGenerate={handleGenerate}
-                  onDownload={handleDownload}
-                />
-              </div>
-            ))}
+          <div className="text-muted-foreground grid grid-cols-[minmax(0,2fr)_5rem_4rem_10rem_minmax(0,2fr)] gap-4 border-b pb-2 text-sm">
+            <span>Meeting</span>
+            <span>Length</span>
+            <span>Turns</span>
+            <span>Status</span>
+            <span className="text-right">Files</span>
           </div>
+          {conversations.map((conv) => (
+            <div key={conv.id} className="border-foreground/15 grid grid-cols-[minmax(0,2fr)_5rem_4rem_10rem_minmax(0,2fr)] items-center gap-4 border-b py-3">
+              <div className="min-w-0">
+                <p className="truncate font-mono text-sm font-medium">{conv.room_name}</p>
+                <p className="text-muted-foreground text-xs">{formatDate(conv.started_at)}</p>
+              </div>
+              <p className="text-sm tabular-nums">{formatDuration(conv.started_at, conv.ended_at)}</p>
+              <p className="text-sm tabular-nums">{conv.utterance_count}</p>
+              <p className={`text-sm ${conv.status === 'error' ? 'text-signal' : conv.status === 'running' ? 'font-medium' : 'text-muted-foreground'}`}>
+                {MEETING_STATE[conv.status] ?? conv.status}
+              </p>
+              <FileActions conv={conv} onGenerate={handleGenerate} onDownload={handleDownload} />
+            </div>
+          ))}
 
-          {/* Pagination */}
           {totalPages > 1 && (
-            <div className="flex items-center justify-between pt-1">
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={page === 0}
-                onClick={() => setPage(page - 1)}
-              >
-                ← Previous
-              </Button>
-              <span className="text-muted-foreground text-xs">
-                Page {page + 1} of {totalPages}
-              </span>
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={page >= totalPages - 1}
-                onClick={() => setPage(page + 1)}
-              >
-                Next →
-              </Button>
+            <div className="flex items-center justify-between pt-6">
+              <button className={secondaryButtonClass} disabled={page === 0} onClick={() => setPage(page - 1)}>← Newer</button>
+              <span className="text-muted-foreground text-sm">Page {page + 1} of {totalPages}</span>
+              <button className={secondaryButtonClass} disabled={page >= totalPages - 1} onClick={() => setPage(page + 1)}>Older →</button>
             </div>
           )}
         </>

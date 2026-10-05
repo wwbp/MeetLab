@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { buttonClass } from '@/components/console/swiss';
 
 export function StartClient({ token }: { token: string }) {
   const [loading, setLoading] = useState(false);
@@ -28,20 +29,16 @@ export function StartClient({ token }: { token: string }) {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center">
-      <div className="w-96 rounded-lg border border-border bg-card p-8 text-center">
-        <h1 className="text-xl font-semibold">You&apos;re invited to a meeting</h1>
-        <p className="mt-2 text-sm text-muted-foreground">
-          Joining creates a fresh meeting room with an assistant already in it.
-        </p>
-        <button
-          onClick={handleJoin}
-          disabled={loading}
-          className="mt-6 w-full rounded bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50"
-        >
+    <div className="flex min-h-screen items-center px-6 sm:px-16">
+      <div className="w-full max-w-md space-y-8">
+        <div className="space-y-3">
+          <h1 className="text-5xl font-bold tracking-tight">Join the meeting</h1>
+          <p className="text-muted-foreground text-base">A new meeting room opens for you, with an assistant already in it.</p>
+        </div>
+        <button onClick={handleJoin} disabled={loading} className={buttonClass}>
           {loading ? 'Setting up your meeting…' : 'Join meeting'}
         </button>
-        {error && <p className="mt-3 text-sm text-destructive">{error}</p>}
+        {error && <p className="text-signal text-sm">{error}</p>}
       </div>
     </div>
   );

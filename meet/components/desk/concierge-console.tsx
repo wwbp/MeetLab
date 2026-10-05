@@ -1,7 +1,7 @@
 'use client';
 
 import { FormEvent, useEffect, useMemo, useState } from 'react';
-import { Button } from '@/components/ui/button';
+import { Label, PageHeader, SectionHeading, Stat, buttonClass, inputClass, secondaryButtonClass, textActionClass } from '@/components/console/swiss';
 import { PrepareStudy } from '@/components/desk/prepare-study';
 import type {
   ConciergeRoom,
@@ -62,6 +62,14 @@ function formatTimestamp(value?: string): string {
   }
   return parsed.toLocaleString();
 }
+
+// The bot's state in plain words (the raw status stays under Details).
+const BOT_STATE: Record<string, string> = {
+  missing: 'No bot',
+  starting: 'Joining…',
+  connected_no_tracks: 'In the room, no audio yet',
+  connected: 'In the room',
+};
 
 function prettyStatus(value: string): string {
   return value.replace(/_/g, ' ');
@@ -231,6 +239,22 @@ export function ConciergeConsole({ tracesUrl }: { tracesUrl?: string }) {
     }
   }
 
+  // Recording is the console's (F10): the participants' menu only shows whether it's on.
+  async function handleRecording(roomName: string, recording: boolean) {
+    setRunningAction(`record-${roomName}`);
+    try {
+      const res = await fetch(`/api/record/${recording ? 'stop' : 'start'}?roomName=${encodeURIComponent(roomName)}`, { cache: 'no-store' });
+      if (!res.ok) throw new Error((await res.text()) || `Recording request failed: ${res.status}`);
+      setNotice(recording ? `Recording stopped for "${roomName}"; the file appears in Meetings.` : `Recording "${roomName}".`);
+      setError(null);
+      await loadRoomsAndHealth();
+    } catch (recordError) {
+      setError(readErrorMessage(recordError));
+    } finally {
+      setRunningAction(null);
+    }
+  }
+
   async function handleCopyJoinLink(roomName: string) {
     try {
       const data = await requestJson<InviteResponse>(
@@ -253,184 +277,108 @@ export function ConciergeConsole({ tracesUrl }: { tracesUrl?: string }) {
   }, []);
 
   return (
-    <div className="bg-background">
-      <div className="mx-auto w-full max-w-6xl space-y-6 px-4 py-6 sm:px-8 sm:py-10">
-        <header className="space-y-2">
-          <div className="flex items-start justify-between gap-4">
-            <div className="space-y-2">
-              <p className="text-muted-foreground font-mono text-xs uppercase">Desk</p>
-              <h1 className="text-3xl font-medium">Rooms and Bot Ops</h1>
-              <p className="text-muted-foreground text-sm">
-                Minimal control plane: create or update rooms, run one bot per room, share join
-                links, and watch room and bot health.
-              </p>
-            </div>
-            {tracesUrl && (
-              <a
-                href={tracesUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="border-foreground/20 text-muted-foreground hover:text-foreground shrink-0 border px-3 py-1.5 font-mono text-xs transition-colors"
-              >
-                View Traces ↗
-              </a>
-            )}
-          </div>
-        </header>
+    <div className="mx-auto w-full max-w-6xl px-6 py-10">
+      <PageHeader title="Rooms" lead="Each room is one meeting with one bot. Create rooms, start or stop their bots, and share the join link.">
+        {tracesUrl && (
+          <a href={tracesUrl} target="_blank" rel="noopener noreferrer" className={textActionClass + ' text-muted-foreground'}>
+            Traces ↗
+          </a>
+        )}
+      </PageHeader>
 
-        <section className="grid gap-3 sm:grid-cols-3">
-          <div className="border-foreground/20 border p-3">
-            <p className="text-muted-foreground font-mono text-[11px] uppercase">rooms</p>
-            <p className="text-2xl">{rooms.length}</p>
-          </div>
-          <div className="border-foreground/20 border p-3">
-            <p className="text-muted-foreground font-mono text-[11px] uppercase">active rooms</p>
-            <p className="text-2xl">{activeRoomCount}</p>
-          </div>
-          <div className="border-foreground/20 border p-3">
-            <p className="text-muted-foreground font-mono text-[11px] uppercase">connected bots</p>
-            <p className="text-2xl">{connectedBotCount}</p>
-          </div>
+      <div className="grid grid-cols-3 gap-8 pb-12">
+        <Stat value={rooms.length} label="rooms" />
+        <Stat value={activeRoomCount} label="in use" />
+        <Stat value={connectedBotCount} label="bots in a room" />
+      </div>
+
+      {error && <p className="text-signal pb-6 text-sm">{error}</p>}
+      {notice && <p className="pb-6 text-sm">{notice}</p>}
+
+      <div className="space-y-12">
+        <section className="space-y-6">
+          <SectionHeading n={1} title="Prepare for a study" />
+          <div className="pl-12"><PrepareStudy /></div>
         </section>
 
-        {error && (
-          <div className="border-destructive text-destructive border p-3 text-sm">{error}</div>
-        )}
-        {notice && (
-          <div className="border-foreground/20 text-foreground border p-3 text-sm">{notice}</div>
-        )}
-
-        <PrepareStudy />
-
-        <section className="border-foreground/20 space-y-3 border p-4">
-          <h2 className="text-lg font-medium">Create Room</h2>
-          <form onSubmit={handleCreateRoom} className="space-y-3">
-            <input
-              value={newRoomName}
-              onChange={(event) => setNewRoomName(event.target.value)}
-              className="border-foreground/20 focus:border-foreground/50 w-full border bg-transparent px-3 py-2 text-sm outline-none"
-              placeholder="team-sync-1"
-              maxLength={128}
-            />
-            <label className="flex items-center gap-2 text-sm">
-              <input
-                type="checkbox"
-                checked={createWithBot}
-                onChange={(event) => setCreateWithBot(event.target.checked)}
-              />
-              Start one bot immediately
+        <section className="space-y-6">
+          <SectionHeading n={2} title="New room" />
+          <form onSubmit={handleCreateRoom} className="flex flex-wrap items-end gap-4 pl-12">
+            <label className="block w-72 space-y-1.5">
+              <Label>Name</Label>
+              <input value={newRoomName} onChange={(event) => setNewRoomName(event.target.value)} className={inputClass + ' font-mono'} placeholder="team-sync-1" maxLength={128} />
             </label>
-            <Button type="submit" variant="primary" disabled={runningAction === 'create-room'}>
-              {runningAction === 'create-room' ? 'Creating...' : 'Create Room'}
-            </Button>
+            <label className="flex items-center gap-2 pb-2.5 text-sm">
+              <input type="checkbox" checked={createWithBot} onChange={(event) => setCreateWithBot(event.target.checked)} className="accent-foreground h-4 w-4" />
+              Start its bot now
+            </label>
+            <button type="submit" className={buttonClass} disabled={runningAction === 'create-room'}>
+              {runningAction === 'create-room' ? 'Creating…' : 'Create room'}
+            </button>
           </form>
         </section>
 
-        <section className="space-y-3">
-          <div className="flex items-center justify-between">
-            <h2 className="text-lg font-medium">Room Controls</h2>
-            <p className="text-muted-foreground text-xs">{loading ? 'syncing...' : 'synced'}</p>
-          </div>
-
-          {rooms.length === 0 && (
-            <div className="border-foreground/20 text-muted-foreground border p-4 text-sm">
-              No rooms yet.
+        <section className="space-y-6">
+          <SectionHeading n={3} title="Rooms" />
+          <div className="pl-12">
+            <div className="text-muted-foreground grid grid-cols-[minmax(0,2fr)_6rem_minmax(0,1.5fr)_auto] gap-4 border-b pb-2 text-sm">
+              <span>Room</span>
+              <span>People</span>
+              <span>Bot</span>
+              <span className="text-right">{loading ? 'Updating…' : 'Up to date'}</span>
             </div>
-          )}
-
-          {rooms.map((room) => {
-            const health = roomHealthByName[room.name];
-            const botIdentity = health?.bot.identity;
-            const botAssignedIdentity = health?.bot.assignedIdentity;
-            const botTrackedIdentity = botIdentity ?? botAssignedIdentity ?? '-';
-            const botIsAssigned = Boolean(botIdentity || botAssignedIdentity);
-            const canStartBot = !botIsAssigned;
-
-            return (
-              <article key={room.name} className="border-foreground/20 space-y-3 border p-4">
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <div>
-                    <h3 className="font-mono text-base">{room.name}</h3>
-                    <p className="text-muted-foreground text-xs">
-                      created {formatTimestamp(health?.room.creationTime ?? room.creationTime)}
-                    </p>
+            {rooms.length === 0 && <p className="text-muted-foreground py-4 text-sm">No rooms yet.</p>}
+            {rooms.map((room) => {
+              const health = roomHealthByName[room.name];
+              const botIdentity = health?.bot.identity;
+              const botAssignedIdentity = health?.bot.assignedIdentity;
+              const botIsAssigned = Boolean(botIdentity || botAssignedIdentity);
+              const canStartBot = !botIsAssigned;
+              return (
+                <div key={room.name} className="border-foreground/15 border-b py-4">
+                  <div className="grid grid-cols-[minmax(0,2fr)_6rem_minmax(0,1.5fr)_auto] items-center gap-4">
+                    <div className="min-w-0">
+                      <p className="truncate font-mono text-sm font-medium">
+                        {room.name}
+                        {room.activeRecording && <span className="text-signal ml-2 font-sans text-xs font-medium">● Recording</span>}
+                      </p>
+                      <p className="text-muted-foreground text-xs">Created {formatTimestamp(health?.room.creationTime ?? room.creationTime)}</p>
+                    </div>
+                    <p className="text-sm tabular-nums">{health?.room.numParticipants ?? room.numParticipants ?? 0}</p>
+                    <p className="text-sm">{BOT_STATE[health?.bot.status ?? 'missing']}</p>
+                    <div className="flex items-center justify-end gap-3">
+                      {canStartBot ? (
+                        <button className={buttonClass + ' px-3 py-1.5'} disabled={runningAction === `start-bot-${room.name}`} onClick={() => handleStartBot(room.name)}>
+                          {runningAction === `start-bot-${room.name}` ? 'Starting…' : 'Start bot'}
+                        </button>
+                      ) : (
+                        <button className={secondaryButtonClass + ' px-3 py-1.5'} disabled={!botIdentity || runningAction === `stop-bot-${room.name}`} onClick={() => handleStopBot(room.name, botIdentity)}>
+                          {runningAction === `stop-bot-${room.name}` ? 'Stopping…' : 'Stop bot'}
+                        </button>
+                      )}
+                      <button className={textActionClass} disabled={runningAction === `record-${room.name}`} onClick={() => handleRecording(room.name, Boolean(room.activeRecording))}>
+                        {room.activeRecording ? 'Stop recording' : 'Record'}
+                      </button>
+                      <button className={textActionClass} onClick={() => handleCopyJoinLink(room.name)}>Copy join link</button>
+                      <button className={textActionClass + ' text-signal'} disabled={runningAction === `delete-${room.name}`} onClick={() => handleDeleteRoom(room.name)}>
+                        {runningAction === `delete-${room.name}` ? 'Deleting…' : 'Delete'}
+                      </button>
+                    </div>
                   </div>
-                  <Button
-                    size="sm"
-                    variant="secondary"
-                    onClick={() => handleCopyJoinLink(room.name)}
-                  >
-                    Copy Join Link
-                  </Button>
+                  <details className="pt-2">
+                    <summary className="text-muted-foreground hover:text-foreground cursor-pointer text-xs">Details</summary>
+                    <dl className="text-muted-foreground grid grid-cols-2 gap-x-6 gap-y-1 pt-2 text-xs sm:grid-cols-4">
+                      <dt>Room</dt><dd className="font-mono">{prettyStatus(health?.room.status ?? 'missing')}</dd>
+                      <dt>Bot</dt><dd className="font-mono">{prettyStatus(health?.bot.status ?? 'missing')}</dd>
+                      <dt>Bot tracks</dt><dd className="font-mono">{health?.bot.trackCount ?? 0}</dd>
+                      <dt>Subscription signal</dt><dd className="font-mono">{prettyStatus(health?.bot.subscriptionSignal.status ?? 'unknown')}</dd>
+                      <dt>Bot identity</dt><dd className="col-span-3 truncate font-mono">{botIdentity ?? botAssignedIdentity ?? '–'}</dd>
+                    </dl>
+                  </details>
                 </div>
-
-                <div className="grid gap-2 text-sm sm:grid-cols-5">
-                  <p>
-                    participants:{' '}
-                    <span className="font-mono">
-                      {health?.room.numParticipants ?? room.numParticipants ?? 0}
-                    </span>
-                  </p>
-                  <p>
-                    room health:{' '}
-                    <span className="font-mono">
-                      {prettyStatus(health?.room.status ?? 'missing')}
-                    </span>
-                  </p>
-                  <p>
-                    bot health:{' '}
-                    <span className="font-mono">
-                      {prettyStatus(health?.bot.status ?? 'missing')}
-                    </span>
-                  </p>
-                  <p>
-                    bot tracks: <span className="font-mono">{health?.bot.trackCount ?? 0}</span>
-                  </p>
-                  <p>
-                    bot sub signal:{' '}
-                    <span className="font-mono">
-                      {prettyStatus(health?.bot.subscriptionSignal.status ?? 'unknown')}
-                    </span>
-                  </p>
-                </div>
-
-                <p className="text-muted-foreground text-xs">
-                  bot identity: <span className="font-mono">{botTrackedIdentity}</span>
-                </p>
-
-                <div className="flex flex-wrap gap-2">
-                  <Button
-                    size="sm"
-                    variant="primary"
-                    disabled={!canStartBot || runningAction === `start-bot-${room.name}`}
-                    onClick={() => handleStartBot(room.name)}
-                  >
-                    {runningAction === `start-bot-${room.name}`
-                      ? 'Starting...'
-                      : canStartBot
-                        ? 'Start Bot'
-                        : 'Bot Assigned'}
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    disabled={!botIdentity || runningAction === `stop-bot-${room.name}`}
-                    onClick={() => handleStopBot(room.name, botIdentity)}
-                  >
-                    {runningAction === `stop-bot-${room.name}` ? 'Stopping...' : 'Stop Bot'}
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="destructive"
-                    disabled={runningAction === `delete-${room.name}`}
-                    onClick={() => handleDeleteRoom(room.name)}
-                  >
-                    {runningAction === `delete-${room.name}` ? 'Deleting...' : 'Delete Room'}
-                  </Button>
-                </div>
-              </article>
-            );
-          })}
+              );
+            })}
+          </div>
         </section>
       </div>
     </div>

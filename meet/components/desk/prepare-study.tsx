@@ -1,7 +1,7 @@
 'use client';
 
 import { FormEvent, useCallback, useEffect, useState } from 'react';
-import { Button } from '@/components/ui/button';
+import { Label, buttonClass, inputClass, secondaryButtonClass } from '@/components/console/swiss';
 import { CapacityStatus, describeCapacity, untilFromLocal } from '@/lib/prepare-study';
 
 // Prepare for study: warm the bot pool before the first room opens, so no participant
@@ -66,43 +66,25 @@ export function PrepareStudy() {
   }
 
   return (
-    <section className="border-foreground/20 space-y-3 border p-4">
-      <h2 className="text-lg font-medium">Prepare for study</h2>
+    <div className="space-y-4">
       <p className="text-sm" aria-live="polite">
         {status ? describeCapacity(status) : 'Checking…'}
       </p>
       {status?.available !== false && (
-        <form onSubmit={prepare} className="flex flex-wrap items-end gap-3">
-          <label className="flex flex-col gap-1 text-sm">
-            Sessions at once
-            <input
-              type="number"
-              min={1}
-              required
-              value={sessions}
-              onChange={(e) => setSessions(Number(e.target.value))}
-              className="border-foreground/20 w-28 border bg-transparent px-3 py-2"
-            />
+        <form onSubmit={prepare} className="flex flex-wrap items-end gap-4">
+          <label className="block w-36 space-y-1.5">
+            <Label>Sessions at once</Label>
+            <input type="number" min={1} required value={sessions} onChange={(e) => setSessions(Number(e.target.value))} className={inputClass} />
           </label>
-          <label className="flex flex-col gap-1 text-sm">
-            Until
-            <input
-              type="datetime-local"
-              required
-              value={until}
-              onChange={(e) => setUntil(e.target.value)}
-              className="border-foreground/20 border bg-transparent px-3 py-2"
-            />
+          <label className="block space-y-1.5">
+            <Label>Until</Label>
+            <input type="datetime-local" required value={until} onChange={(e) => setUntil(e.target.value)} className={inputClass} />
           </label>
-          <Button type="submit" disabled={busy}>
-            Prepare
-          </Button>
-          <Button type="button" variant="outline" disabled={busy} onClick={() => void act(() => call('DELETE'))}>
-            Stop preparing
-          </Button>
+          <button type="submit" disabled={busy} className={buttonClass}>Prepare</button>
+          <button type="button" disabled={busy} onClick={() => void act(() => call('DELETE'))} className={secondaryButtonClass}>Stop preparing</button>
         </form>
       )}
-      {message && <p className="text-destructive text-sm">{message}</p>}
-    </section>
+      {message && <p className="text-signal text-sm">{message}</p>}
+    </div>
   );
 }

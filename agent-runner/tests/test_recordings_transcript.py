@@ -126,6 +126,8 @@ class RecordingEndpointTests(unittest.TestCase):
         # 200 became reachable once the dev stack started running a real `egress`
         # service; before that this list was [404, 409, 502] and flaked ~1 run in 3.
         self.assertIn(r.status_code, [200, 404, 409, 502])
+        if r.status_code == 200:  # a real local egress took it: stop it, or it records for days
+            self.addCleanup(_post, "/recordings/stop", json={"room_name": "rec-lk-notfound-test-room"})
 
     def test_stop_no_active_egress_returns_404(self):
         """list_egress returns empty for an unknown room → 404 from active-check guard."""

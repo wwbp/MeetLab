@@ -1,45 +1,12 @@
 'use client';
 
-import { useEffect, useState, type FormEvent } from 'react';
+import { createContext, useContext, useEffect, useState, type FormEvent } from 'react';
+import { EMPTY_CONFIG, type BotConfig } from '@/lib/bot-config';
+import { CONFIG_INFO, SECTIONS } from '@/lib/config-info';
+import { KeyStat, Label, PageHeader, SectionHeading, inputClass } from '@/components/console/swiss';
 
-type BotConfig = {
-  scope: string;
-  system_prompt: string;
-  greeting: string;
-  stt_model: string;
-  llm_model: string;
-  tts_provider: string;
-  tts_voice: string;
-  tts_aggregation_mode: string;
-  turn_detection: string;
-  smart_turn_wait_ms: number;
-  stt_endpointing_ms: number;
-  user_speech_timeout_ms: number;
-  stt_vad_mode: string;
-  stt_delay: string | null;
-  auto_record: boolean;
-  session_limit_minutes: number;
-  closing_message: string;
-};
-
-const EMPTY_CONFIG: Omit<BotConfig, 'scope'> = {
-  system_prompt: '',
-  greeting: '',
-  stt_model: 'parakeet-tdt-0.6b-v2',
-  llm_model: 'gpt-5.4-nano',
-  tts_provider: 'elevenlabs',
-  tts_voice: 'WhMcMcvXQ8T2QfmQmlYh',
-  tts_aggregation_mode: 'sentence',
-  turn_detection: 'silence',
-  smart_turn_wait_ms: 3000,
-  stt_endpointing_ms: 450,
-  user_speech_timeout_ms: 50,
-  stt_vad_mode: 'local',
-  stt_delay: null,
-  auto_record: false,
-  session_limit_minutes: 0,
-  closing_message: '',
-};
+// Which setting (or category) the info panel explains: the one hovered or focused last.
+const Explain = createContext<(key: string) => void>(() => {});
 
 const STT_MODELS = [
   { value: 'parakeet-tdt-0.6b-v2',   label: 'parakeet-tdt-0.6b-v2 (self-hosted GPU) (default)' },
@@ -148,41 +115,57 @@ export default function ConfigPage() {
     loadConfig(newScope);
   }
 
-  const sel =
-    'border-input bg-background w-full rounded border px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-ring';
-  const inp = sel;
+  const [active, setActive] = useState<string>(SECTIONS[0].id);
+  const explains = (key: string) => ({ onMouseEnter: () => setActive(key), onFocusCapture: () => setActive(key) });
+  const sel = inputClass;
+  const inp = inputClass;
 
   return (
-    <div className="mx-auto w-full max-w-2xl space-y-6 px-4 py-6 sm:px-8 sm:py-10">
-      <header className="space-y-1">
-        <p className="text-muted-foreground font-mono text-xs uppercase">Console</p>
-        <h1 className="text-3xl font-medium">Bot Config</h1>
-        <p className="text-muted-foreground text-sm">
-          Scope <code>global</code> is the default; a room-specific row overrides it for that room.
-        </p>
-      </header>
+    <Explain.Provider value={setActive}>
+    <div className="mx-auto w-full max-w-7xl px-4 py-6 sm:px-8 sm:py-10 lg:grid lg:grid-cols-[13rem_minmax(0,1fr)_20rem] lg:gap-12">
+      {/* Categories: jump to one */}
+      <nav className="hidden lg:block" aria-label="Categories">
+        <div className="sticky top-8 space-y-0.5 pt-2">
+          {SECTIONS.map((s, i) => (
+            <a
+              key={s.id}
+              href={`#${s.id}`}
+              onClick={() => setActive(s.id)}
+              className={`flex gap-3 border-l-2 py-1.5 pl-3 text-sm ${
+                sectionOf(active) === s.id ? 'border-signal font-medium' : 'text-muted-foreground hover:text-foreground border-transparent'
+              }`}
+            >
+              <span className="w-5 tabular-nums">{String(i + 1).padStart(2, '0')}</span>
+              {s.label}
+            </a>
+          ))}
+        </div>
+      </nav>
 
-      <div className="flex items-center gap-2">
-        <label className="text-muted-foreground font-mono text-xs uppercase">Scope</label>
-        <input
-          type="text"
-          value={scope}
-          onChange={(e) => setScope(e.target.value)}
-          onBlur={(e) => handleScopeChange(e.target.value.trim() || 'global')}
-          className="border-input bg-background rounded border px-3 py-1.5 font-mono text-sm focus:outline-none focus:ring-1 focus:ring-ring"
-          placeholder="global"
-        />
-        <span className="text-muted-foreground text-xs">global or a room name</span>
-      </div>
+      <div className="min-w-0 space-y-6">
+      <PageHeader title="Bot settings" lead="What every bot runs with. The global settings apply everywhere; a room can have its own.">
+        <div className="flex items-center gap-3 pt-4">
+          <Label>Applies to</Label>
+          <input
+            type="text"
+            value={scope}
+            onChange={(e) => setScope(e.target.value)}
+            onBlur={(e) => handleScopeChange(e.target.value.trim() || 'global')}
+            className={inputClass.replace('w-full', 'w-56') + ' font-mono'}
+            placeholder="global"
+          />
+          <span className="text-muted-foreground text-sm">global, or a room&apos;s name</span>
+        </div>
+      </PageHeader>
 
       {loading ? (
         <p className="text-muted-foreground text-sm">Loading…</p>
       ) : (
-        <form onSubmit={handleSubmit} className="space-y-5">
+        <form onSubmit={handleSubmit} className="space-y-12">
 
           {/* ── Content ── */}
-          <Section label="Conversation">
-            <Field label="System Prompt" help="Who the bot is and how it should talk; sent to the language model with every turn.">
+          <Section id="conversation">
+            <Field name="system_prompt" label="System prompt" help="Who the bot is and how it should talk; sent to the language model with every turn.">
               <textarea
                 value={form.system_prompt}
                 onChange={(e) => setForm((f) => ({ ...f, system_prompt: e.target.value }))}
@@ -191,7 +174,7 @@ export default function ConfigPage() {
                 required
               />
             </Field>
-            <Field label="Greeting" help="What the bot says when the first person joins.">
+            <Field name="greeting" label="Greeting" help="What the bot says when the first person joins.">
               <textarea
                 value={form.greeting}
                 onChange={(e) => setForm((f) => ({ ...f, greeting: e.target.value }))}
@@ -204,9 +187,9 @@ export default function ConfigPage() {
 
           {/* ── STT: the model and the settings only it uses ── */}
           {/* ── Speech-to-Text and turn-taking: when someone has finished depends on the model ── */}
-          <Section label="Speech-to-Text and turn-taking">
+          <Section id="stt">
             <div className="grid gap-4 sm:grid-cols-2">
-              <Field label="STT Model" help="The speech-to-text model that turns what people say into text.">
+              <Field name="stt_model" label="Speech-to-text model" help="The speech-to-text model that turns what people say into text.">
                 <select
                   value={form.stt_model}
                   onChange={(e) => setForm((f) => ({ ...f, stt_model: e.target.value }))}
@@ -219,7 +202,7 @@ export default function ConfigPage() {
               </Field>
               {isOpenAiStt(form.stt_model) && (
                 <>
-                  <Field label="Transcription delay (OpenAI only)" help="How long OpenAI waits for more words before finalising: longer is more accurate, slower.">
+                  <Field name="stt_delay" label="Transcription delay (OpenAI)" help="How long OpenAI waits for more words before finalising: longer is more accurate, slower.">
                     <select
                       value={form.stt_delay ?? ''}
                       onChange={(e) => setForm((f) => ({ ...f, stt_delay: e.target.value || null }))}
@@ -231,32 +214,30 @@ export default function ConfigPage() {
                       ))}
                     </select>
                   </Field>
-                  <Field label="Voice detection (OpenAI only)" help="Who decides when someone is speaking: always the bot\u2019s own per-speaker detector.">
+                  <Field name="stt_vad_mode" label="Voice detection (OpenAI)" help="Who decides when someone is speaking: always the bot’s own per-speaker detector.">
                     <select value={form.stt_vad_mode} className={sel} disabled>
                       <option value="local">local: the bot&apos;s own per-speaker detector</option>
                     </select>
                   </Field>
                 </>
               )}
-              <label className="flex items-start gap-3 sm:col-span-2">
+              <label className="flex items-start gap-3 sm:col-span-2" {...explains('turn_detection')}>
                 <input
                   type="checkbox"
                   checked={form.turn_detection === 'smart_turn'}
                   disabled={!isSegmentedStt(form.stt_model)}
                   onChange={(e) => setForm((f) => ({ ...f, turn_detection: e.target.checked ? 'smart_turn' : 'silence' }))}
-                  className="mt-0.5 h-4 w-4"
+                  className="accent-foreground mt-0.5 h-4 w-4"
                 />
-                <span className="text-sm">
-                  Smart turn{!isSegmentedStt(form.stt_model) && ' (Parakeet or Whisper only)'}
-                  <span className="text-muted-foreground block text-xs">
-                    Each speaker&apos;s own model hears when they sound finished, so a mid-sentence pause doesn&apos;t
-                    end their turn (held 73% of such pauses on the pilot&apos;s real speech). Off: a turn ends after a silence.
-                  </span>
+                <span>
+                  <Label>Smart turn{!isSegmentedStt(form.stt_model) && ' (Parakeet or Whisper only)'}</Label>
+                  <span className="text-muted-foreground block text-sm lg:hidden">Waits for people who pause mid-thought.</span>
                 </span>
               </label>
               {form.turn_detection === 'smart_turn' && (
                 <Field
-                  label="Wait for an unfinished speaker (ms)"
+                  name="smart_turn_wait_ms"
+                  label="Wait for an unfinished speaker, ms"
                   help="How long a turn that sounds unfinished stays open before the bot replies anyway: longer cuts fewer people off, shorter keeps fewer waiting."
                 >
                   <input
@@ -274,7 +255,7 @@ export default function ConfigPage() {
               {/* The pause decides where a turn splits (450 ms, calibrated on pilot audio). The
                   wait comes after the transcript: with Parakeet or Whisper it only delays the
                   reply (B4, 2026-10-05: 300 → 50 ms was 0.24 s faster, splitting unchanged). */}
-              <Field label="Pause that counts as stopping (ms)" help="How long someone must be silent before their words count as finished: this decides where one turn ends and the next begins.">
+              <Field name="stt_endpointing_ms" label="Pause that ends a turn, ms" help="How long someone must be silent before their words count as finished: this decides where one turn ends and the next begins.">
                 <input
                   type="number"
                   step="50"
@@ -288,7 +269,7 @@ export default function ConfigPage() {
                   required
                 />
               </Field>
-              <Field label="Extra wait before replying (ms)" help="After a person's words are transcribed, how long the bot waits before it answers. 50 ms is measured best with Parakeet; more only delays the reply.">
+              <Field name="user_speech_timeout_ms" label="Wait before replying, ms" help="After a person's words are transcribed, how long the bot waits before it answers. 50 ms is measured best with Parakeet; more only delays the reply.">
                 <input
                   type="number"
                   step="50"
@@ -306,8 +287,8 @@ export default function ConfigPage() {
           </Section>
 
           {/* ── LLM ── */}
-          <Section label="Language Model">
-            <Field label="LLM Model" help="The language model that writes the bot\u2019s replies.">
+          <Section id="llm">
+            <Field name="llm_model" label="Model" help="The language model that writes the bot’s replies.">
               <select
                 value={form.llm_model}
                 onChange={(e) => setForm((f) => ({ ...f, llm_model: e.target.value }))}
@@ -321,9 +302,9 @@ export default function ConfigPage() {
           </Section>
 
           {/* ── TTS ── */}
-          <Section label="Voice (Text-to-Speech)">
+          <Section id="voice">
             <div className="grid gap-4 sm:grid-cols-2">
-              <Field label="TTS Provider" help="The service that speaks the bot\u2019s replies aloud.">
+              <Field name="tts_provider" label="Voice provider" help="The service that speaks the bot’s replies aloud.">
                 <select
                   value={form.tts_provider}
                   onChange={(e) => setForm((f) => ({ ...f, tts_provider: e.target.value }))}
@@ -335,7 +316,8 @@ export default function ConfigPage() {
                 </select>
               </Field>
               <Field
-                label={form.tts_provider === 'elevenlabs' ? 'Voice ID' : 'Voice Name'}
+                name="tts_voice"
+                label={form.tts_provider === 'elevenlabs' ? 'Voice ID' : 'Voice name'}
                 help="Which voice the provider uses: an ElevenLabs voice ID, or a voice name (alloy) for OpenAI and Kokoro."
               >
                 <input
@@ -347,7 +329,7 @@ export default function ConfigPage() {
                   required
                 />
               </Field>
-              <Field label="Start speaking" help="How much of the reply the voice waits for before it speaks: a whole sentence, the first clause (sooner, then whole sentences), or each word as it arrives (ElevenLabs only: other voices make one request per word).">
+              <Field name="tts_aggregation_mode" label="Start speaking" help="How much of the reply the voice waits for before it speaks: a whole sentence, the first clause (sooner, then whole sentences), or each word as it arrives (ElevenLabs only: other voices make one request per word).">
                 <select
                   value={form.tts_aggregation_mode}
                   onChange={(e) => setForm((f) => ({ ...f, tts_aggregation_mode: e.target.value }))}
@@ -362,27 +344,24 @@ export default function ConfigPage() {
           </Section>
 
           {/* ── Recording ── */}
-          <Section label="Recording">
-            <label className="flex items-start gap-3">
+          <Section id="recording">
+            <label className="flex items-start gap-3" {...explains('auto_record')}>
               <input
                 type="checkbox"
                 checked={form.auto_record}
                 onChange={(e) => setForm((f) => ({ ...f, auto_record: e.target.checked }))}
-                className="mt-0.5 h-4 w-4"
+                className="accent-foreground mt-0.5 h-4 w-4"
               />
-              <span className="text-sm">
-                Auto-record sessions
-                <span className="text-muted-foreground block text-xs">
-                  Start recording (composite mp4 + per-speaker audio tracks) automatically
-                  when the first participant joins. Ensure participants have consented.
-                </span>
+              <span>
+                <Label>Record every session</Label>
+                <span className="text-muted-foreground block text-sm lg:hidden">Video and each speaker&apos;s audio. Participants must consent.</span>
               </span>
             </label>
           </Section>
 
           {/* ── Session limit ── */}
-          <Section label="Session Limit">
-            <Field label="Minutes (0 = unlimited)" help="Session length; the browser counts down and the bot says the closing message at the end.">
+          <Section id="session">
+            <Field name="session_limit_minutes" label="Length, minutes (0 = no limit)" help="Session length; the browser counts down and the bot says the closing message at the end.">
               <input
                 type="number"
                 step="1"
@@ -402,13 +381,7 @@ export default function ConfigPage() {
                 required
               />
             </Field>
-            <p className="text-muted-foreground text-xs">
-              The countdown starts when the first person joins (not when the room is created or
-              the bot starts) and is shared by everyone in the room. Participants see a timer, a
-              warning three quarters of the way through, and a final reminder near the end. The
-              limit is advisory — nobody is disconnected.
-            </p>
-            <Field label="Closing message" help="What the bot says when time is up, e.g. where to paste the completion code.">
+            <Field name="closing_message" label="Closing message" help="What the bot says when time is up, e.g. where to paste the completion code.">
               <textarea
                 value={form.closing_message}
                 onChange={(e) => setForm((f) => ({ ...f, closing_message: e.target.value }))}
@@ -417,45 +390,93 @@ export default function ConfigPage() {
                 required
               />
             </Field>
-            <p className="text-muted-foreground text-xs">
-              Spoken once when the limit runs out, waiting for a gap in the conversation so it is
-              not interrupted away. Only ever said when a limit is set above. Mention the
-              completion code — the participant sees it on screen after they leave, and pastes it
-              into the study survey.
-            </p>
           </Section>
 
-          {error && <p className="text-destructive text-sm">{error}</p>}
-          {notice && <p className="text-sm text-green-600 dark:text-green-400">{notice}</p>}
-
-          <button
-            type="submit"
-            disabled={saving}
-            className="bg-primary text-primary-foreground rounded px-4 py-2 text-sm font-medium disabled:opacity-50"
-          >
-            {saving ? 'Saving…' : 'Save Config'}
-          </button>
+          <div className="bg-background border-foreground sticky bottom-0 flex items-center gap-4 border-t py-4">
+            <button
+              type="submit"
+              disabled={saving}
+              className="bg-foreground text-background rounded-sm px-5 py-2.5 text-sm font-medium disabled:opacity-50"
+            >
+              {saving ? 'Saving…' : scope === 'global' ? 'Save global settings' : `Save settings for ${scope}`}
+            </button>
+            {error && <p className="text-destructive text-sm">{error}</p>}
+            {notice && <p className="text-sm">{notice}</p>}
+          </div>
         </form>
+      )}
+      </div>
+
+      {/* What the setting does, and how it performed in our tests */}
+      <aside className="hidden lg:block" aria-label="About this setting">
+        <div className="sticky top-8 pt-2">
+          <InfoPanel active={active} />
+        </div>
+      </aside>
+    </div>
+    </Explain.Provider>
+  );
+}
+
+const sectionOf = (key: string) => SECTIONS.find((s) => s.id === key || s.fields.includes(key))?.id;
+
+function InfoPanel({ active }: { active: string }) {
+  const section = SECTIONS.find((s) => s.id === active);
+  if (section) {
+    return (
+      <div className="space-y-2">
+        <p className="text-lg font-bold tracking-tight">{section.label}</p>
+        <p className="text-muted-foreground text-sm">{section.about}</p>
+      </div>
+    );
+  }
+  const info = CONFIG_INFO[active];
+  if (!info) return null;
+  return (
+    <div className="space-y-5">
+      <div className="space-y-2">
+        <p className="text-lg font-bold tracking-tight">{info.title}</p>
+        <p className="text-sm">{info.about}</p>
+        {info.default && <p className="text-muted-foreground text-sm">Default: {info.default}</p>}
+      </div>
+      {info.key && <KeyStat value={info.key.value} label={info.key.label} />}
+      {info.results && (
+        // key={active}: a new setting starts with "More" closed
+        <details key={active} className="border-foreground/20 border-t pt-3 text-sm">
+          <summary className="text-muted-foreground hover:text-foreground cursor-pointer select-none">More from our tests</summary>
+          <div className="space-y-3 pt-3">
+            {info.results.map((r) => (
+              <div key={r.text}>
+                <p>{r.text}</p>
+                <p className="text-muted-foreground text-xs">{r.source}</p>
+              </div>
+            ))}
+          </div>
+        </details>
       )}
     </div>
   );
 }
 
-function Section({ label, children }: { label: string; children: React.ReactNode }) {
+function Section({ id, children }: { id: string; children: React.ReactNode }) {
+  const explain = useContext(Explain);
+  const n = SECTIONS.findIndex((s) => s.id === id);
   return (
-    <div className="space-y-3">
-      <p className="text-muted-foreground border-b pb-1 font-mono text-xs uppercase">{label}</p>
-      {children}
-    </div>
+    <section className="space-y-6" onMouseEnter={() => explain(id)}>
+      <SectionHeading id={id} n={n + 1} title={SECTIONS[n].label} />
+      <div className="space-y-6 pl-12">{children}</div>
+    </section>
   );
 }
 
-function Field({ label, help, children }: { label: string; help?: string; children: React.ReactNode }) {
+function Field({ name, label, help, children }: { name: string; label: string; help?: string; children: React.ReactNode }) {
+  const explain = useContext(Explain);
   return (
-    <div className="space-y-1">
-      <label className="text-muted-foreground font-mono text-xs uppercase">{label}</label>
+    <label className="block space-y-1.5" onMouseEnter={() => explain(name)} onFocusCapture={() => explain(name)}>
+      <Label>{label}</Label>
       {children}
-      {help && <p className="text-muted-foreground text-xs">{help}</p>}
-    </div>
+      {/* On wide screens the info panel explains it; here, one line. */}
+      {help && <span className="text-muted-foreground block text-sm lg:hidden">{help}</span>}
+    </label>
   );
 }

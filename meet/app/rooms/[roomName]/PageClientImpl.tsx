@@ -2,6 +2,10 @@
 import React from 'react';
 import { decodePassphrase } from '@/lib/client-utils';
 import { chatEncoder, clientReady } from '@/lib/rtvi';
+import { inter } from '@/lib/fonts';
+
+// Participant screens, Swiss style on LiveKit's dark theme: one typeface, left-aligned, red for problems.
+const SIGNAL = 'oklch(0.68 0.2 27)';
 import { DebugMode } from '@/lib/Debug';
 import { KeyboardShortcuts } from '@/lib/KeyboardShortcuts';
 import { RecordingIndicator } from '@/lib/RecordingIndicator';
@@ -153,12 +157,13 @@ export function PageClientImpl(props: {
   const handlePreJoinError = React.useCallback((e: any) => console.error(e), []);
 
   return (
-    <main data-lk-theme="default" style={{ height: '100%' }}>
+    <main data-lk-theme="default" className={inter.className} style={{ height: '100%' }}>
       {connectionDetails === undefined || preJoinChoices === undefined ? (
-        <div style={{ display: 'grid', placeItems: 'center', height: '100%' }}>
-          <div style={{ display: 'grid', gap: '0.75rem', justifyItems: 'stretch' }}>
-            <div style={{ display: 'grid', gap: '0.25rem' }}>
-              <label htmlFor="prolific-id" style={{ fontSize: '0.875rem' }}>
+        <div style={{ display: 'grid', placeItems: 'center', height: '100%', padding: '1rem' }}>
+          <div style={{ display: 'grid', gap: '1rem', justifyItems: 'stretch' }}>
+            <h1 style={{ margin: 0, fontSize: '2.5rem', fontWeight: 700, letterSpacing: '-0.02em' }}>Join the meeting</h1>
+            <div style={{ display: 'grid', gap: '0.375rem' }}>
+              <label htmlFor="prolific-id" style={{ fontSize: '0.875rem', fontWeight: 500 }}>
                 Prolific ID
               </label>
               <input
@@ -175,13 +180,13 @@ export function PageClientImpl(props: {
               <span
                 id="prolific-id-help"
                 style={{
-                  fontSize: '0.75rem',
-                  color: prolificId.length > 0 && !validProlificId ? '#fbbf24' : 'var(--lk-fg2)',
+                  fontSize: '0.875rem',
+                  color: prolificId.length > 0 && !validProlificId ? SIGNAL : 'var(--lk-fg2)',
                 }}
               >
                 {prolificId.length > 0 && !validProlificId
-                  ? "That doesn't look like a Prolific ID — it should be 24 letters and numbers."
-                  : 'Copied from Prolific. Needed to pay you for this session.'}
+                  ? 'A Prolific ID is 24 letters and numbers: please check it.'
+                  : 'From Prolific. We need it to pay you.'}
               </span>
             </div>
             <PreJoin
@@ -429,20 +434,22 @@ function CompletionScreen(props: { code: string; onDone: () => void }) {
   return (
     <main
       data-lk-theme="default"
+      className={inter.className}
       style={{ display: 'grid', placeItems: 'center', height: '100%', padding: '1rem' }}
     >
-      <div style={{ display: 'grid', gap: '1rem', justifyItems: 'center', maxWidth: '32rem' }}>
-        <h2 style={{ margin: 0 }}>Thanks for taking part</h2>
-        <p style={{ margin: 0, textAlign: 'center', color: 'var(--lk-fg2)' }}>
-          Copy this completion code into the survey to finish the study.
-        </p>
+      <div style={{ display: 'grid', gap: '1.25rem', justifyItems: 'start', maxWidth: '32rem' }}>
+        <h1 style={{ margin: 0, fontSize: '2.5rem', fontWeight: 700, letterSpacing: '-0.02em' }}>Thank you for taking part</h1>
+        <p style={{ margin: 0, color: 'var(--lk-fg2)' }}>Copy this code into the survey to finish the study.</p>
         <code
           style={{
-            fontSize: '2rem',
-            letterSpacing: '0.25em',
-            padding: '0.75rem 1.25rem',
-            borderRadius: 8,
-            background: 'var(--lk-bg2)',
+            fontFamily: 'inherit',
+            fontSize: '2.5rem',
+            fontWeight: 700,
+            letterSpacing: '0.2em',
+            fontVariantNumeric: 'tabular-nums',
+            padding: '0.75rem 0',
+            borderTop: '1px solid var(--lk-fg)',
+            borderBottom: '1px solid var(--lk-fg)',
             userSelect: 'all',
           }}
         >

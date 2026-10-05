@@ -94,7 +94,14 @@ resource "aws_ecs_task_definition" "egress" {
     image             = "livekit/egress:v1.13.0"
     essential         = true
     memoryReservation = 6144
-    linuxParameters   = { capabilities = { add = ["SYS_ADMIN"] } } # Chrome, per LiveKit's docs
+    linuxParameters   = { capabilities = { add = ["SYS_ADMIN"], drop = [] } } # Chrome, per LiveKit's docs
+    # With linuxParameters set, ECS stores these empty lists explicitly; declared here too, or
+    # every plan shows a replacement and the deploy's drift check fails (2026-10-05, #186).
+    environment    = []
+    mountPoints    = []
+    portMappings   = []
+    systemControls = []
+    volumesFrom    = []
     secrets = [
       { name = "KEY", valueFrom = "${local.parameters}/SELFHOSTED_LIVEKIT_API_KEY" },
       { name = "SECRET", valueFrom = "${local.parameters}/SELFHOSTED_LIVEKIT_API_SECRET" },

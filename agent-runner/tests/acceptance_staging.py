@@ -9,7 +9,8 @@ room-gone cleanup can never be what closes a session and hide a failure.
   removed    the bot removed from the room: its task stops by itself, exit 0          (4c PR 4)
   kill9      kill -9 inside the task (ECS Exec): exit 137, and the heartbeat check
              fails the session within 60 s while the participant is still there, and
-             is able to stop its task (a hung bot must not keep running)              (4c PR 5)
+             is able to stop its task (a hung bot must not keep running)              (4c PR 5);
+             then a new bot rejoins with the conversation so far                      (rejoin)
   stop_early       Stop before the bot joins: it never joins, and its task stops
   audio_recording  per-speaker audio reaches the media bucket through the bot's role  (8a)
   video_recording  LiveKit egress uploads the room's mp4 with the egress key          (8b)
@@ -19,7 +20,8 @@ room-gone cleanup can never be what closes a session and hide a failure.
                    preparing resets the pool; no bot machine is stuck unhealthy
   two_humans       two humans in before the bot, one leaves: the bot stays     (F1)
   refresh          the only human refreshes: the bot is still there after the grace
-  chat             a malformed packet is ignored; a chat message becomes a turn   (F13)
+  chat             a non-RTVI packet is ignored; RTVI chat becomes the sender's turn, once, marked chat (F13)
+  bot_ready        RTVI: client-ready gets bot-ready; the room hears no tokens, transcripts or metrics
   auto_record      with no Record press: the room's video, the bot's own audio and its greeting line
   record_auth      an outsider cannot start or stop a room's recording (F10): 401
   study_prolific   a participant joins as a study sends them (Prolific ID, before the bot): the completion
@@ -239,7 +241,26 @@ async def scenario_kill9():
             raise Fail("the reconciler failed the session but could not stop its bot (a hung bot would keep running)")
         if after > 60:
             raise Fail(f"failed by heartbeat only {after:.0f}s after the kill (limit 60 s)")
-        return f"exit 137, failed by heartbeat {after:.0f}s after the kill, participant still in the room"
+
+        # Rejoin with context (the user's decision, 2026-10-05): a new bot takes the room and
+        # continues the conversation (here: the greeting the dead bot stored).
+        def new_bot():
+            m.require_participant()
+            return any(p.identity.startswith("bot_") and p.identity != m.bot_identity
+                       for p in m.human.remote_participants.values())
+        await _until(new_bot, 150, "a new bot in the room after the death")
+        rejoined = time.time() - killed_at
+        line = next((l for l in _log_lines("/meetlab-v2/staging/agent-runner", m.session, killed_at)
+                     if "resumes it" in l), None)
+        if not line:
+            raise Fail("a bot joined, but the runner logged no rejoin of this session")
+        resumed = line.split("session ")[-1].split()[0]
+        loaded = next((l for l in _log_lines("/meetlab-v2/staging/bot", resumed, killed_at) if "turns (" in l), "")
+        turns = int(loaded.split(" with ")[1].split()[0]) if " with " in loaded else 0
+        if turns < 1:
+            raise Fail(f"the new bot ({resumed}) did not load the conversation so far: {loaded[:160]!r}")
+        return (f"exit 137, failed by heartbeat {after:.0f}s after the kill; a new bot resumed with "
+                f"{turns} turn(s) {rejoined:.0f}s after the kill, participant still in the room")
 
 
 async def scenario_stop_early():
@@ -471,15 +492,42 @@ async def scenario_refresh():
 
 
 async def scenario_chat():
-    """Diagnosis F13: a packet that isn't chat is ignored; a chat message becomes a turn."""
+    """Diagnosis F13, now RTVI (rtvi.py): a packet that isn't RTVI is ignored; chat sent as meet
+    sends it (RTVI send-text) becomes the sender's turn, once."""
     async with Meeting() as m:
         await asyncio.sleep(5)  # the greeting
         await m.human.local_participant.publish_data(b"5", reliable=True, topic="lk-chat-topic")
-        message = {"id": uuid.uuid4().hex, "timestamp": int(time.time() * 1000), "message": "What is two plus two?"}
+        message = {"id": uuid.uuid4().hex, "timestamp": int(time.time() * 1000), "message": "What is two plus two?",
+                   "label": "rtvi-ai", "type": "send-text", "data": {"content": "What is two plus two?"}}
         await m.human.local_participant.publish_data(json.dumps(message).encode(), reliable=True, topic="lk-chat-topic")
-        await _until(lambda: any("user utterance" in l for l in _log_lines("/meetlab-v2/staging/bot", m.session, m.started)),
-                     60, "the chat message stored as a user turn")
-        return "a malformed packet ignored; the chat message stored as a user turn"
+        utterances = lambda: [l for l in _log_lines("/meetlab-v2/staging/bot", m.session, m.started)  # noqa: E731
+                              if "user utterance" in l]
+        await _until(utterances, 60, "the chat message stored as a user turn")
+        await asyncio.sleep(5)
+        if len(utterances()) != 1:
+            raise Fail(f"the chat message became {len(utterances())} turns, not one")
+        typed = [u for u in _meeting_get(m.session, "utterances") if not u["bot"]]
+        if [u.get("source") for u in typed] != ["chat"]:
+            raise Fail(f"the typed turn isn't marked as chat: {[u.get('source') for u in typed]}")
+        return "a non-RTVI packet ignored; RTVI chat stored as the sender's turn, once, marked as chat"
+
+
+async def scenario_bot_ready():
+    """RTVI (rtvi.py): a page that says client-ready hears bot-ready; the room hears nothing
+    private (no LLM tokens, transcripts or metrics: the user's choice A, 2026-10-05)."""
+    async with Meeting() as m:
+        heard = []
+        m.human.on("data_received", lambda p: heard.append(p.data))
+        ready = {"label": "rtvi-ai", "type": "client-ready", "id": uuid.uuid4().hex,
+                 "data": {"version": "2.1.0", "about": {"library": "acceptance"}}}
+        await m.human.local_participant.publish_data(json.dumps(ready).encode(), reliable=True)
+        types = lambda: {json.loads(d).get("type") for d in heard if d[:1] == b"{"}  # noqa: E731
+        await _until(lambda: "bot-ready" in types(), 20, "bot-ready after client-ready")
+        await asyncio.sleep(15)  # the greeting plays meanwhile: speaking events, and nothing else
+        private = types() & {"bot-llm-text", "bot-tts-text", "user-transcription", "user-llm-text", "metrics", "bot-output"}
+        if private:
+            raise Fail(f"the room heard {sorted(private)}")
+        return f"bot-ready after client-ready; the room heard only {sorted(types())}"
 
 
 async def scenario_auto_record():
@@ -665,7 +713,7 @@ SCENARIOS = {"start": scenario_start, "stoptask": scenario_stoptask, "removed": 
              "transcript": scenario_transcript, "two_humans": scenario_two_humans, "refresh": scenario_refresh,
              "chat": scenario_chat, "auto_record": scenario_auto_record, "our_models": scenario_our_models, "record_auth": scenario_record_auth,
              "study_prolific": scenario_study_prolific, "session_limit": scenario_session_limit,
-             "turn_relay": scenario_turn_relay,
+             "turn_relay": scenario_turn_relay, "bot_ready": scenario_bot_ready,
              "prewarm": scenario_prewarm}  # last: its Stop preparing cools the pool the run prepared
 
 
@@ -726,7 +774,7 @@ async def _run(names):
 
 if __name__ == "__main__":
     names = sys.argv[1:] or list(SCENARIOS)
-    if os.getenv("NO_VIDEO"):  # self-hosted LiveKit has no egress server yet (livekit.tf)
+    if os.getenv("NO_VIDEO"):  # our own LiveKit with egress switched off (egress_count = 0, egress_server.tf)
         skipped = [n for n in names if n in ("video_recording", "auto_record")]
         if skipped:
             print(f"not run (no video recording on this LiveKit): {', '.join(skipped)}", flush=True)

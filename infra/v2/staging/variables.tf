@@ -6,13 +6,13 @@ variable "image_tag" {
 variable "stt_nim_enabled" {
   description = "Run staging's Parakeet NIM (an on-demand g6.xlarge, $0.805/hour) and point bots at it; off = Deepgram"
   type        = bool
-  default     = true # on for the B4 session (2026-10-05); off after
+  default     = false # off between test runs; on for L3, the comparisons, L6, B2/B3, B4 (2026-10-02/05)
 }
 
 variable "model_services" {
   description = "Our own models to run, each on an on-demand g6.xlarge ($0.805/hour): llm (Qwen on vLLM), tts (Kokoro)"
   type        = set(string)
-  default     = ["llm", "tts"] # on for the B4 session (2026-10-05); off after
+  default     = [] # off between test runs; on for L3, the comparisons, L6, B2/B3, B4 (2026-10-02/05)
   validation {
     condition     = length(setsubtract(var.model_services, ["llm", "tts"])) == 0
     error_message = "model_services names llm and/or tts"
@@ -50,7 +50,7 @@ variable "tts_replicas" {
 variable "bot_pool_max" {
   description = "Most bot machines at once (c6i.large, about 3 sessions each); a load test raises it"
   type        = number
-  default     = 12 # raised for the B4 session (30 rooms, ~3 per machine); 2 after
+  default     = 2 # a load test raises it (35 for B2/B3, 12 for B4, 2026-10-04/05)
 }
 
 variable "container_insights" {
@@ -63,4 +63,10 @@ variable "livekit_self_hosted" {
   description = "Run our own LiveKit (livekit.tf) and point meet, the runner and bots at it; off = LiveKit Cloud"
   type        = bool
   default     = true # on for load-test readiness (2026-10-02); LiveKit Cloud when off
+}
+
+variable "egress_count" {
+  description = "Egress machines recording video on our own LiveKit (egress_server.tf); 0 between studies"
+  type        = number
+  default     = 0 # switched on for a study or a video test (2026-10-05)
 }

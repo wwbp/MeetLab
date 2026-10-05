@@ -136,6 +136,7 @@ run "apply_role_writes_are_scoped_to_meetlab_v2" {
           strcontains(r, ":secret:rds!"),
           strcontains(r, ":pg:default.postgres17"),
           strcontains(r, ":og:default:postgres-17"),
+          strcontains(r, ":parametergroup:default.redis7"), # ElastiCache reads it at create
         ])]),
         try(s.Condition.StringEquals["aws:ResourceTag/Project"], "") == "meetlab-v2",
         try(s.Condition.StringEquals["aws:RequestTag/Project"], "") == "meetlab-v2",
@@ -468,5 +469,22 @@ run "acceptance_can_list_recordings_but_not_read_them" {
       try(s.Condition.StringLike["s3:prefix"], "") == "recordings/*"
     ])
     error_message = "list recordings/ in the staging media bucket, nothing else"
+  }
+}
+
+# Video recording on our own LiveKit (egress_server.tf): Redis on ElastiCache, ours by name only.
+run "ci_can_manage_only_our_redis" {
+  command = plan
+
+  assert {
+    condition = alltrue([for a in ["elasticache:Describe*", "elasticache:List*"] :
+    contains(flatten([for p in aws_iam_role_policy.plan : [for s in jsondecode(p.policy).Statement : s.Action]]), a)])
+    error_message = "plan needs to refresh the Redis cluster"
+  }
+  assert {
+    condition = anytrue([for s in flatten([for p in aws_iam_role_policy.apply : jsondecode(p.policy).Statement]) :
+      contains(flatten([s.Action]), "elasticache:*") &&
+    alltrue([for r in flatten([s.Resource]) : strcontains(r, ":meetlab-v2-") || strcontains(r, ":parametergroup:default.redis7")])])
+    error_message = "ElastiCache only on resources named meetlab-v2-* (and AWS's default Redis 7 parameter group)"
   }
 }

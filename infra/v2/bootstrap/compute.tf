@@ -23,6 +23,7 @@ locals {
           "acm:ListTagsForCertificate", "route53:GetHostedZone", "route53:ListHostedZones",
           "route53:ListResourceRecordSets", "route53:GetChange", "route53:ListTagsForResource",
           "servicediscovery:Get*", "servicediscovery:List*",
+          "elasticache:Describe*", "elasticache:List*",
         ]
         Resource = "*"
       },
@@ -81,6 +82,15 @@ locals {
           "listener/app/meetlab-v2-*/*", "listener-rule/app/meetlab-v2-*/*",
           "loadbalancer/net/meetlab-v2-*/*", "listener/net/meetlab-v2-*/*", # the STT NIM's
         ] : format(local.arn, "elasticloadbalancing", r)]
+      },
+      {
+        # Redis for LiveKit and its egress (egress_server.tf); creating a cluster also
+        # reads AWS's default parameter group.
+        Sid    = "OwnRedis"
+        Effect = "Allow"
+        Action = "elasticache:*"
+        Resource = [for r in ["cluster:meetlab-v2-*", "subnetgroup:meetlab-v2-*", "parametergroup:default.redis7"] :
+        format(local.arn, "elasticache", r)]
       },
       {
         Sid      = "OwnAutoScalingGroups"

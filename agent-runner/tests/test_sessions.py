@@ -51,6 +51,20 @@ class EndTests(unittest.TestCase):
         async with AsyncSessionLocal() as db:
             return (await db.get(Conversation, sid)).status
 
+    def test_the_ending_event_is_kept(self):
+        # A rejoin needs to know the bot died (silent, crashed), not that it was stopped:
+        # the status alone ("error") can't tell a crash from a failed dispatch.
+        async def scenario():
+            from db.engine import AsyncSessionLocal
+            from db.models import Conversation
+
+            sid = await self._session()
+            async with AsyncSessionLocal() as db, db.begin():
+                await end(db, [sid], "crashed")
+            async with AsyncSessionLocal() as db:
+                return (await db.get(Conversation, sid)).meta
+        self.assertEqual(self._run(scenario()).get("ended_by"), "crashed")
+
     def test_a_late_writer_cannot_overwrite_an_ended_session(self):
         async def scenario():
             from db.engine import AsyncSessionLocal

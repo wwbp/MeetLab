@@ -22,12 +22,13 @@ second terminal while the test runs:
 
 import asyncio
 import json
+import uuid
 import os
 import sys
 import time
 import unittest
 import urllib.request
-from datetime import datetime, timedelta
+from datetime import timedelta
 from uuid import uuid4
 
 from livekit import api, rtc
@@ -92,15 +93,8 @@ def _put(path: str, body: dict) -> dict:
 
 
 async def _send_message(room: rtc.Room, text: str) -> None:
-    """Inject text via LiveKit data channel — triggers on_data_received in bot.py.
-
-    Timestamp is sent as an ISO string because Pipecat's RTVI observer expects
-    TranscriptionFrame.timestamp to be a string, not an int.
-    """
-    payload = json.dumps({
-        "message": text,
-        "timestamp": datetime.utcnow().isoformat() + "Z",
-    })
+    """Typed chat as meet sends it: RTVI send-text (rtvi.py), the sender's turn."""
+    payload = json.dumps({"label": "rtvi-ai", "type": "send-text", "id": uuid.uuid4().hex, "data": {"content": text}})
     await room.local_participant.publish_data(payload.encode())
 
 

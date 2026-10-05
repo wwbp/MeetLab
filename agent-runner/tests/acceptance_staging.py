@@ -19,7 +19,8 @@ room-gone cleanup can never be what closes a session and hide a failure.
                    preparing resets the pool; no bot machine is stuck unhealthy
   two_humans       two humans in before the bot, one leaves: the bot stays     (F1)
   refresh          the only human refreshes: the bot is still there after the grace
-  chat             a malformed packet is ignored; a chat message becomes a turn   (F13)
+  chat             a non-RTVI packet is ignored; RTVI chat becomes the sender's turn, once   (F13)
+  bot_ready        RTVI: client-ready gets bot-ready; the room hears no tokens, transcripts or metrics
   auto_record      with no Record press: the room's video, the bot's own audio and its greeting line
   record_auth      an outsider cannot start or stop a room's recording (F10): 401
   study_prolific   a participant joins as a study sends them (Prolific ID, before the bot): the completion
@@ -471,15 +472,39 @@ async def scenario_refresh():
 
 
 async def scenario_chat():
-    """Diagnosis F13: a packet that isn't chat is ignored; a chat message becomes a turn."""
+    """Diagnosis F13, now RTVI (rtvi.py): a packet that isn't RTVI is ignored; chat sent as meet
+    sends it (RTVI send-text) becomes the sender's turn, once."""
     async with Meeting() as m:
         await asyncio.sleep(5)  # the greeting
         await m.human.local_participant.publish_data(b"5", reliable=True, topic="lk-chat-topic")
-        message = {"id": uuid.uuid4().hex, "timestamp": int(time.time() * 1000), "message": "What is two plus two?"}
+        message = {"id": uuid.uuid4().hex, "timestamp": int(time.time() * 1000), "message": "What is two plus two?",
+                   "label": "rtvi-ai", "type": "send-text", "data": {"content": "What is two plus two?"}}
         await m.human.local_participant.publish_data(json.dumps(message).encode(), reliable=True, topic="lk-chat-topic")
-        await _until(lambda: any("user utterance" in l for l in _log_lines("/meetlab-v2/staging/bot", m.session, m.started)),
-                     60, "the chat message stored as a user turn")
-        return "a malformed packet ignored; the chat message stored as a user turn"
+        utterances = lambda: [l for l in _log_lines("/meetlab-v2/staging/bot", m.session, m.started)  # noqa: E731
+                              if "user utterance" in l]
+        await _until(utterances, 60, "the chat message stored as a user turn")
+        await asyncio.sleep(5)
+        if len(utterances()) != 1:
+            raise Fail(f"the chat message became {len(utterances())} turns, not one")
+        return "a non-RTVI packet ignored; RTVI chat stored as the sender's turn, once"
+
+
+async def scenario_bot_ready():
+    """RTVI (rtvi.py): a page that says client-ready hears bot-ready; the room hears nothing
+    private (no LLM tokens, transcripts or metrics: the user's choice A, 2026-10-05)."""
+    async with Meeting() as m:
+        heard = []
+        m.human.on("data_received", lambda p: heard.append(p.data))
+        ready = {"label": "rtvi-ai", "type": "client-ready", "id": uuid.uuid4().hex,
+                 "data": {"version": "2.1.0", "about": {"library": "acceptance"}}}
+        await m.human.local_participant.publish_data(json.dumps(ready).encode(), reliable=True)
+        types = lambda: {json.loads(d).get("type") for d in heard if d[:1] == b"{"}  # noqa: E731
+        await _until(lambda: "bot-ready" in types(), 20, "bot-ready after client-ready")
+        await asyncio.sleep(15)  # the greeting plays meanwhile: speaking events, and nothing else
+        private = types() & {"bot-llm-text", "bot-tts-text", "user-transcription", "user-llm-text", "metrics", "bot-output"}
+        if private:
+            raise Fail(f"the room heard {sorted(private)}")
+        return f"bot-ready after client-ready; the room heard only {sorted(types())}"
 
 
 async def scenario_auto_record():
@@ -665,7 +690,7 @@ SCENARIOS = {"start": scenario_start, "stoptask": scenario_stoptask, "removed": 
              "transcript": scenario_transcript, "two_humans": scenario_two_humans, "refresh": scenario_refresh,
              "chat": scenario_chat, "auto_record": scenario_auto_record, "our_models": scenario_our_models, "record_auth": scenario_record_auth,
              "study_prolific": scenario_study_prolific, "session_limit": scenario_session_limit,
-             "turn_relay": scenario_turn_relay,
+             "turn_relay": scenario_turn_relay, "bot_ready": scenario_bot_ready,
              "prewarm": scenario_prewarm}  # last: its Stop preparing cools the pool the run prepared
 
 

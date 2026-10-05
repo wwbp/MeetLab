@@ -1,7 +1,7 @@
 'use client';
-
 import React from 'react';
 import { decodePassphrase } from '@/lib/client-utils';
+import { chatEncoder, clientReady } from '@/lib/rtvi';
 import { DebugMode } from '@/lib/Debug';
 import { KeyboardShortcuts } from '@/lib/KeyboardShortcuts';
 import { RecordingIndicator } from '@/lib/RecordingIndicator';
@@ -290,6 +290,10 @@ function VideoConferenceComponent(props: {
     room.on(RoomEvent.Disconnected, handleOnLeave);
     room.on(RoomEvent.EncryptionError, handleEncryptionError);
     room.on(RoomEvent.MediaDevicesError, handleError);
+    // RTVI: tell the bot this page is ready (lib/rtvi.ts); it answers bot-ready.
+    const sendClientReady = () =>
+      room.localParticipant.publishData(clientReady(), { reliable: true }).catch(() => {});
+    room.on(RoomEvent.Connected, sendClientReady);
 
     if (e2eeSetupComplete) {
       room
@@ -324,6 +328,7 @@ function VideoConferenceComponent(props: {
       room.off(RoomEvent.Disconnected, handleOnLeave);
       room.off(RoomEvent.EncryptionError, handleEncryptionError);
       room.off(RoomEvent.MediaDevicesError, handleError);
+      room.off(RoomEvent.Connected, sendClientReady);
     };
   }, [e2eeSetupComplete, room, props.connectionDetails, props.userChoices]);
 
@@ -391,7 +396,11 @@ function VideoConferenceComponent(props: {
       <RoomContext.Provider value={room}>
         <KeyboardShortcuts />
         <ConferenceErrorBoundary onRecover={handleOnLeave}>
-          <VideoConference chatMessageFormatter={formatChatMessageLinks} SettingsComponent={SettingsMenu} />
+          <VideoConference
+            chatMessageFormatter={formatChatMessageLinks}
+            chatMessageEncoder={chatEncoder}
+            SettingsComponent={SettingsMenu}
+          />
         </ConferenceErrorBoundary>
         <DebugMode />
         <RecordingIndicator />

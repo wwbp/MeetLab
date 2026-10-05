@@ -93,11 +93,13 @@ _DEFAULT_ENDPOINTING_MS = 450
 #              750 ms          78        0.97x   <- matches reality
 #             1050 ms          61        0.76x   merges separate turns
 #
-# 450 + 300 = 750ms. Over-splitting is cheap here (the aggregator rejoins
-# fragments); under-splitting is not, because merging two turns makes the bot
-# answer both at once — the "chained answers" complaint. See
-# tests/test_turn_calibration.py and scripts/analyze-pause-distribution.py.
-_DEFAULT_USER_SPEECH_TIMEOUT_MS = 300
+# The pause (stt_endpointing_ms, 450) is what splits turns: each speaker's VAD closes the
+# segment, then the transcript arrives, and only then does the aggregator wait this long.
+# It was assumed to add up to 750 ms; B4 (2026-10-05) measured that it doesn't: the wait
+# can't join fragments (the next words need their own pause first), so it only delays the
+# reply. 300 → 50 ms: 0.24 s faster, fragmentation unchanged. 450 over-splits (1.34x, the
+# cheap direction); smart turn is the fix. See tests/test_turn_calibration.py.
+_DEFAULT_USER_SPEECH_TIMEOUT_MS = 50
 
 
 

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { ConciergeEvent, EventSeverity } from '@/lib/concierge/types';
 import { cn } from '@/lib/utils';
+import { PageHeader, inputClass, secondaryButtonClass } from '@/components/console/swiss';
 
 const SEVERITY_FILTERS: { label: string; value: EventSeverity | 'all' }[] = [
   { label: 'Errors', value: 'error' },
@@ -11,11 +12,13 @@ const SEVERITY_FILTERS: { label: string; value: EventSeverity | 'all' }[] = [
   { label: 'Everything', value: 'all' },
 ];
 
+// Severity as a word; red only for errors.
 const SEVERITY_STYLE: Record<EventSeverity, string> = {
-  error: 'bg-destructive/15 text-destructive',
-  warning: 'bg-amber-500/15 text-amber-600 dark:text-amber-400',
-  info: 'bg-muted text-muted-foreground',
+  error: 'text-signal font-medium',
+  warning: 'font-medium',
+  info: 'text-muted-foreground',
 };
+const SEVERITY_WORD: Record<EventSeverity, string> = { error: 'Error', warning: 'Warning', info: 'Info' };
 
 const SOURCE_LABEL: Record<ConciergeEvent['source'], string> = {
   concierge: 'meet',
@@ -70,26 +73,17 @@ export function EventsTab() {
   }, [load]);
 
   return (
-    <div className="mx-auto w-full max-w-5xl space-y-5 px-4 py-6 sm:px-8 sm:py-10">
-      <header className="space-y-1">
-        <p className="text-muted-foreground font-mono text-xs uppercase">Console</p>
-        <h1 className="text-3xl font-medium">Errors &amp; Events</h1>
-        <p className="text-muted-foreground text-sm">
-          Everything the pipeline recorded — meet, LiveKit, the bot runner and the bots — newest
-          first. Survives restarts and deploys.
-        </p>
-      </header>
+    <div className="mx-auto w-full max-w-6xl space-y-6 px-6 py-10">
+      <PageHeader title="Events" lead="What went wrong, and when: from the website, LiveKit, the bot runner and the bots, newest first. Kept across restarts." />
 
-      <div className="flex flex-wrap items-center gap-2">
+      <div className="border-foreground/15 flex flex-wrap items-center gap-6 border-b">
         {SEVERITY_FILTERS.map(({ label, value }) => (
           <button
             key={value}
             onClick={() => setSeverity(value)}
             className={cn(
-              'rounded px-3 py-1.5 text-sm transition-colors',
-              severity === value
-                ? 'bg-foreground text-background'
-                : 'text-muted-foreground hover:text-foreground',
+              '-mb-px border-b-2 py-2 text-sm transition-colors',
+              severity === value ? 'border-signal font-medium' : 'text-muted-foreground hover:text-foreground border-transparent',
             )}
           >
             {label}
@@ -98,21 +92,16 @@ export function EventsTab() {
         <input
           value={room}
           onChange={(e) => setRoom(e.target.value)}
-          placeholder="filter by room"
-          className="border-input bg-background focus:ring-ring ml-auto rounded border px-3 py-1.5 font-mono text-sm focus:ring-1 focus:outline-none"
+          placeholder="Filter by room"
+          className={inputClass.replace('w-full', 'ml-auto w-56') + ' mb-2 font-mono'}
         />
-        <button
-          onClick={load}
-          className="text-muted-foreground hover:text-foreground rounded border px-3 py-1.5 text-sm"
-        >
+        <button onClick={load} className={secondaryButtonClass + ' mb-2'}>
           Refresh
         </button>
       </div>
 
       {error && (
-        <p className="border-destructive/40 bg-destructive/10 text-destructive rounded border p-3 text-sm">
-          {error}
-        </p>
+        <p className="text-signal text-sm">{error}</p>
       )}
 
       {loading ? (
@@ -123,25 +112,20 @@ export function EventsTab() {
           {room.trim() ? ` for room “${room.trim()}”` : ''}.
         </p>
       ) : (
-        <div className="divide-border divide-y rounded border">
+        <div className="divide-foreground/15 divide-y">
           {events.map((event) => {
             const isOpen = expanded === event.id;
             const payload = (event.payload ?? {}) as Record<string, unknown>;
             const hasPayload = Object.keys(payload).length > 0;
             return (
-              <div key={event.id} className="p-3 text-sm">
+              <div key={event.id} className="py-3 text-sm">
                 <button
                   onClick={() => setExpanded(isOpen ? null : event.id)}
                   className="flex w-full items-start gap-3 text-left"
                   aria-expanded={isOpen}
                 >
-                  <span
-                    className={cn(
-                      'rounded px-1.5 py-0.5 font-mono text-[0.65rem] uppercase',
-                      SEVERITY_STYLE[event.severity],
-                    )}
-                  >
-                    {event.severity}
+                  <span className={cn('w-16 shrink-0 text-sm', SEVERITY_STYLE[event.severity])}>
+                    {SEVERITY_WORD[event.severity]}
                   </span>
                   <span className="text-muted-foreground font-mono text-xs whitespace-nowrap">
                     {new Date(event.receivedAt).toLocaleTimeString()}
@@ -160,7 +144,7 @@ export function EventsTab() {
                   )}
                 </button>
                 {isOpen && hasPayload && (
-                  <pre className="bg-muted text-muted-foreground mt-2 overflow-x-auto rounded p-2 text-xs">
+                  <pre className="bg-muted text-muted-foreground mt-2 overflow-x-auto p-3 text-xs">
                     {JSON.stringify(payload, null, 2)}
                   </pre>
                 )}

@@ -2,6 +2,7 @@
 
 import { Suspense, useState, type FormEvent } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
+import { Label, buttonClass, inputClass } from '@/components/console/swiss';
 
 function LoginForm() {
   const router = useRouter();
@@ -34,27 +35,25 @@ function LoginForm() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center">
-      <form
-        onSubmit={handleSubmit}
-        className="flex w-80 flex-col gap-4 rounded-lg border border-border bg-card p-8"
-      >
-        <h1 className="text-xl font-semibold">MeetLab</h1>
-        <input
-          type="password"
-          placeholder="Password"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          className="rounded border border-input bg-background px-3 py-2 text-sm text-foreground outline-none focus:ring-1 focus:ring-ring"
-          autoFocus
-          required
-        />
-        {error && <p className="text-sm text-destructive">{error}</p>}
-        <button
-          type="submit"
-          disabled={loading}
-          className="rounded bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50"
-        >
+    <div className="flex min-h-screen items-center px-6 sm:px-16">
+      <form onSubmit={handleSubmit} className="w-full max-w-sm space-y-8">
+        <div className="space-y-2">
+          <h1 className="text-5xl font-bold tracking-tight">MeetLab</h1>
+          <p className="text-muted-foreground text-base">Console for the lab&apos;s researchers.</p>
+        </div>
+        <label className="border-foreground block space-y-1.5 border-t pt-6">
+          <Label>Password</Label>
+          <input
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            className={inputClass}
+            autoFocus
+            required
+          />
+        </label>
+        {error && <p className="text-signal text-sm">{error}</p>}
+        <button type="submit" disabled={loading} className={buttonClass}>
           {loading ? 'Signing in…' : 'Sign in'}
         </button>
       </form>

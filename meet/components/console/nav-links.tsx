@@ -5,12 +5,12 @@ import { usePathname } from 'next/navigation';
 import { cn } from '@/lib/utils';
 
 const NAV_ITEMS = [
-  { label: 'Rooms & Bots', href: '/' },
+  { label: 'Rooms', href: '/' },
   { label: 'Meetings', href: '/meetings' },
-  { label: 'Errors & Events', href: '/events' },
-  { label: 'Bot Config', href: '/config' },
-  { label: 'Start Links', href: '/start-links' },
-  { label: 'DB Admin', href: '/api/db', external: true },
+  { label: 'Events', href: '/events' },
+  { label: 'Bot settings', href: '/config' },
+  { label: 'Start links', href: '/start-links' },
+  { label: 'Database ↗', href: '/api/db', external: true },
 ];
 
 export function NavLinks() {

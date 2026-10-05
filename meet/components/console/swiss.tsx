@@ -38,3 +38,20 @@ export function KeyStat({ value, label }: { value: string; label: string }) {
 
 export const inputClass =
   'border-foreground/30 bg-background w-full rounded-sm border px-3 py-2 text-sm focus:border-foreground focus:outline-none';
+
+export const buttonClass =
+  'bg-foreground text-background rounded-sm px-5 py-2.5 text-sm font-medium disabled:opacity-50';
+export const secondaryButtonClass =
+  'border-foreground/30 hover:border-foreground rounded-sm border px-4 py-2 text-sm font-medium disabled:opacity-50';
+
+/** A count: big and black (red is for results that matter, KeyStat). */
+export function Stat({ value, label }: { value: number | string; label: string }) {
+  return (
+    <div>
+      <p className="text-4xl font-bold tracking-tight tabular-nums">{value}</p>
+      <p className="text-muted-foreground text-sm">{label}</p>
+    </div>
+  );
+}
+
+export const textActionClass = 'text-sm underline-offset-4 hover:underline disabled:opacity-50';

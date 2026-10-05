@@ -1,17 +1,16 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { Label, PageHeader, buttonClass, inputClass, secondaryButtonClass } from '@/components/console/swiss';
 
 /**
- * Start Links — pick a pool of bot configs (by scope name), generate a shareable
+ * Start links: pick saved bot settings for the pool (by name), and create a shareable
  * meeting start link. Every click on the link provisions a fresh room with one
  * config uniformly randomly picked from the pool.
  */
 export default function StartLinksPage() {
   const [available, setAvailable] = useState<string[]>([]);
   const [selected, setSelected] = useState<string[]>([]);
-  const [availPicked, setAvailPicked] = useState<string[]>([]);
-  const [selPicked, setSelPicked] = useState<string[]>([]);
   const [link, setLink] = useState('');
   const [loading, setLoading] = useState(true);
   const [generating, setGenerating] = useState(false);
@@ -36,17 +35,12 @@ export default function StartLinksPage() {
     })();
   }, []);
 
-  function moveRight() {
-    setSelected([...selected, ...availPicked]);
-    setAvailable(available.filter((s) => !availPicked.includes(s)));
-    setAvailPicked([]);
-    setLink('');
-  }
+  const [query, setQuery] = useState('');
+  // Not yet chosen, filtered by the search.
+  const shown = available.filter((x) => !selected.includes(x) && x.toLowerCase().includes(query.trim().toLowerCase()));
 
-  function moveLeft() {
-    setAvailable([...available, ...selPicked].sort());
-    setSelected(selected.filter((s) => !selPicked.includes(s)));
-    setSelPicked([]);
+  function toggle(scope: string) {
+    setSelected(selected.includes(scope) ? selected.filter((x) => x !== scope) : [...selected, scope]);
     setLink('');
   }
 
@@ -75,105 +69,65 @@ export default function StartLinksPage() {
 
   async function handleCopy() {
     await navigator.clipboard.writeText(link);
-    setNotice('Link copied to clipboard');
-  }
-
-  const box =
-    'border-input bg-background h-64 w-full rounded border px-1 py-1 font-mono text-sm focus:outline-none focus:ring-1 focus:ring-ring';
-
-  function pickHandler(setter: (v: string[]) => void) {
-    return (e: React.ChangeEvent<HTMLSelectElement>) =>
-      setter(Array.from(e.target.selectedOptions).map((o) => o.value));
+    setNotice('Copied.');
   }
 
   return (
-    <div className="mx-auto w-full max-w-3xl space-y-6 px-4 py-6 sm:px-8 sm:py-10">
-      <header className="space-y-1">
-        <p className="text-muted-foreground font-mono text-xs uppercase">Console</p>
-        <h1 className="text-3xl font-medium">Start Links</h1>
-        <p className="text-muted-foreground text-sm">
-          Pick the bot configs for the pool, then generate a shareable link. Every click on the
-          link starts a fresh meeting with one config randomly assigned from the pool.
-        </p>
-      </header>
+    <div className="mx-auto w-full max-w-6xl px-6 py-10">
+      <PageHeader
+        title="Start links"
+        lead="A link for participants. Each time it’s opened it starts a new meeting with a bot, using one of the settings you add, picked at random."
+      />
 
       {loading ? (
         <p className="text-muted-foreground text-sm">Loading…</p>
       ) : (
-        <>
-          <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-4">
-            <div className="space-y-1">
-              <p className="text-muted-foreground font-mono text-xs uppercase">Available configs</p>
-              <select multiple value={availPicked} onChange={pickHandler(setAvailPicked)} className={box}>
-                {available.map((s) => (
-                  <option key={s} value={s}>
-                    {s}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div className="flex flex-col gap-2">
-              <button
-                onClick={moveRight}
-                disabled={availPicked.length === 0}
-                className="rounded bg-secondary px-3 py-2 text-sm text-secondary-foreground disabled:opacity-50"
-                title="Add to pool"
-              >
-                →
-              </button>
-              <button
-                onClick={moveLeft}
-                disabled={selPicked.length === 0}
-                className="rounded bg-secondary px-3 py-2 text-sm text-secondary-foreground disabled:opacity-50"
-                title="Remove from pool"
-              >
-                ←
-              </button>
-            </div>
-
-            <div className="space-y-1">
-              <p className="text-muted-foreground font-mono text-xs uppercase">Selected pool</p>
-              <select multiple value={selPicked} onChange={pickHandler(setSelPicked)} className={box}>
-                {selected.map((s) => (
-                  <option key={s} value={s}>
-                    {s}
-                  </option>
-                ))}
-              </select>
-            </div>
-          </div>
-
+        <div className="grid gap-8 sm:grid-cols-2">
+          {/* All saved bot settings: search, click to add */}
           <div className="space-y-3">
-            <button
-              onClick={handleGenerate}
-              disabled={selected.length === 0 || generating}
-              className="rounded bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50"
-            >
-              {generating ? 'Generating…' : `Generate start link (${selected.length} in pool)`}
-            </button>
-
-            {link && (
-              <div className="flex items-center gap-2">
-                <input
-                  readOnly
-                  value={link}
-                  onFocus={(e) => e.target.select()}
-                  className="border-input bg-background w-full rounded border px-3 py-2 font-mono text-xs focus:outline-none focus:ring-1 focus:ring-ring"
-                />
-                <button
-                  onClick={handleCopy}
-                  className="rounded bg-secondary px-3 py-2 text-sm text-secondary-foreground"
-                >
-                  Copy
+            <Label>Saved bot settings</Label>
+            <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search" className={inputClass} />
+            <div className="border-foreground/30 h-80 overflow-y-auto rounded-sm border">
+              {shown.length === 0 && <p className="text-muted-foreground p-3 text-sm">{available.length === 0 ? 'None saved yet: create some in Bot settings.' : 'No match.'}</p>}
+              {shown.map((scope) => (
+                <button key={scope} onClick={() => toggle(scope)} className="hover:bg-muted flex w-full items-center justify-between px-3 py-2 text-left font-mono text-sm">
+                  {scope}
+                  <span className="text-muted-foreground font-sans">Add</span>
                 </button>
-              </div>
-            )}
-
-            {notice && <p className="text-sm text-emerald-500">{notice}</p>}
-            {error && <p className="text-destructive text-sm">{error}</p>}
+              ))}
+            </div>
           </div>
-        </>
+
+          {/* The chosen ones, and the button right under them */}
+          <div className="space-y-3">
+            <Label>In this link {selected.length > 0 && <span className="text-muted-foreground font-normal">({selected.length}, one picked at random per meeting)</span>}</Label>
+            <div className="border-foreground h-[23.25rem] overflow-y-auto rounded-sm border">
+              {selected.length === 0 && <p className="text-muted-foreground p-3 text-sm">Click settings on the left to add them.</p>}
+              {selected.map((scope) => (
+                <button key={scope} onClick={() => toggle(scope)} className="hover:bg-muted flex w-full items-center justify-between px-3 py-2 text-left font-mono text-sm">
+                  {scope}
+                  <span className="text-muted-foreground font-sans" aria-label={`Remove ${scope}`}>×</span>
+                </button>
+              ))}
+            </div>
+            <button onClick={handleGenerate} disabled={selected.length === 0 || generating} className={buttonClass}>
+              {generating ? 'Creating…' : 'Create link'}
+            </button>
+          </div>
+
+          {(link || notice || error) && (
+            <div className="space-y-2 sm:col-span-2">
+              {link && (
+                <div className="flex items-center gap-2">
+                  <input readOnly value={link} onFocus={(e) => e.target.select()} className={inputClass + ' font-mono text-xs'} />
+                  <button onClick={handleCopy} className={secondaryButtonClass}>Copy</button>
+                </div>
+              )}
+              {notice && <p className="text-sm">{notice}</p>}
+              {error && <p className="text-signal text-sm">{error}</p>}
+            </div>
+          )}
+        </div>
       )}
     </div>
   );

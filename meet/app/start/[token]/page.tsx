@@ -12,12 +12,11 @@ export default async function StartLinkPage({ params }: { params: Promise<{ toke
 
   if (!pool) {
     return (
-      <div className="flex min-h-screen items-center justify-center">
-        <div className="w-96 rounded-lg border border-border bg-card p-8 text-center">
-          <h1 className="text-xl font-semibold">Invalid meeting link</h1>
-          <p className="mt-2 text-sm text-muted-foreground">
-            This start link is invalid or was created with a different server key. Ask the person
-            who shared it for a new one.
+      <div className="flex min-h-screen items-center px-6 sm:px-16">
+        <div className="w-full max-w-md space-y-3">
+          <h1 className="text-5xl font-bold tracking-tight">This link doesn’t work</h1>
+          <p className="text-muted-foreground text-base">
+            It may be mistyped or out of date. Ask the person who sent it for a new one.
           </p>
         </div>
       </div>

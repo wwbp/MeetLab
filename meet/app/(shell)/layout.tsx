@@ -1,11 +1,9 @@
-import { Inter } from 'next/font/google';
+import { inter } from '@/lib/fonts';
 import { cn } from '@/lib/utils';
 import '@/styles/theme.css';
 import { NavLinks } from '@/components/console/nav-links';
 import { LogoutButton } from '@/components/console/logout-button';
 
-// One typeface, Swiss style: Inter, the closest open neo-grotesque to Helvetica.
-const inter = Inter({ variable: '--font-inter', subsets: ['latin'] });
 
 export default function ShellLayout({ children }: { children: React.ReactNode }) {
   return (

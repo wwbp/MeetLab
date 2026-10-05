@@ -143,9 +143,9 @@ export default function ConfigPage() {
       </nav>
 
       <div className="min-w-0 space-y-6">
-      <PageHeader title="Bot Config" lead="What every bot runs with. Global is the default; a room's own settings override it.">
+      <PageHeader title="Bot settings" lead="What every bot runs with. The global settings apply everywhere; a room can have its own.">
         <div className="flex items-center gap-3 pt-4">
-          <Label>Scope</Label>
+          <Label>Applies to</Label>
           <input
             type="text"
             value={scope}
@@ -154,7 +154,7 @@ export default function ConfigPage() {
             className={inputClass.replace('w-full', 'w-56') + ' font-mono'}
             placeholder="global"
           />
-          <span className="text-muted-foreground text-sm">global, or a room name</span>
+          <span className="text-muted-foreground text-sm">global, or a room&apos;s name</span>
         </div>
       </PageHeader>
 
@@ -398,7 +398,7 @@ export default function ConfigPage() {
               disabled={saving}
               className="bg-foreground text-background rounded-sm px-5 py-2.5 text-sm font-medium disabled:opacity-50"
             >
-              {saving ? 'Saving…' : `Save ${scope === 'global' ? 'global config' : `config for ${scope}`}`}
+              {saving ? 'Saving…' : scope === 'global' ? 'Save global settings' : `Save settings for ${scope}`}
             </button>
             {error && <p className="text-destructive text-sm">{error}</p>}
             {notice && <p className="text-sm">{notice}</p>}

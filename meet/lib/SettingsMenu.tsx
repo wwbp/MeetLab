@@ -5,7 +5,6 @@ import {
   useMaybeLayoutContext,
   MediaDeviceMenu,
   TrackToggle,
-  useRoomContext,
   useIsRecording,
 } from '@livekit/components-react';
 import styles from '../styles/SettingsMenu.module.css';
@@ -21,13 +20,12 @@ export interface SettingsMenuProps extends React.HTMLAttributes<HTMLDivElement> 
  */
 export function SettingsMenu(props: SettingsMenuProps) {
   const layoutContext = useMaybeLayoutContext();
-  const room = useRoomContext();
-  const recordingEndpoint = process.env.NEXT_PUBLIC_LK_RECORD_ENDPOINT;
-
   const settings = React.useMemo(() => {
     return {
       media: { camera: true, microphone: true, label: 'Media Devices', speaker: true },
-      recording: recordingEndpoint ? { label: 'Recording' } : undefined,
+      // Shown so participants can see whether they are being recorded. Starting or
+      // stopping a recording is the console's (F10, lib/record-auth.ts): no button here.
+      recording: { label: 'Recording' },
     };
   }, []);
 
@@ -38,40 +36,6 @@ export function SettingsMenu(props: SettingsMenuProps) {
   const [activeTab, setActiveTab] = React.useState(tabs[0]);
 
   const isRecording = useIsRecording();
-  const [initialRecStatus, setInitialRecStatus] = React.useState(isRecording);
-  const [processingRecRequest, setProcessingRecRequest] = React.useState(false);
-
-  React.useEffect(() => {
-    if (initialRecStatus !== isRecording) {
-      setProcessingRecRequest(false);
-    }
-  }, [isRecording, initialRecStatus]);
-
-  const toggleRoomRecording = async () => {
-    if (!recordingEndpoint) {
-      throw TypeError('No recording endpoint specified');
-    }
-    if (room.isE2EEEnabled) {
-      throw Error('Recording of encrypted meetings is currently not supported');
-    }
-    setProcessingRecRequest(true);
-    setInitialRecStatus(isRecording);
-    let response: Response;
-    if (isRecording) {
-      response = await fetch(recordingEndpoint + `/stop?roomName=${room.name}`);
-    } else {
-      response = await fetch(recordingEndpoint + `/start?roomName=${room.name}`);
-    }
-    if (response.ok) {
-    } else {
-      console.error(
-        'Error handling recording request, check server logs:',
-        response.status,
-        response.statusText,
-      );
-      setProcessingRecRequest(false);
-    }
-  };
 
   return (
     <div className="settings-menu" style={{ width: '100%', position: 'relative' }} {...props}>
@@ -127,16 +91,9 @@ export function SettingsMenu(props: SettingsMenuProps) {
         )}
         {activeTab === 'recording' && (
           <>
-            <h3>Record Meeting</h3>
+            <h3>Recording</h3>
             <section>
-              <p>
-                {isRecording
-                  ? 'Meeting is currently being recorded'
-                  : 'No active recordings for this meeting'}
-              </p>
-              <button disabled={processingRecRequest} onClick={() => toggleRoomRecording()}>
-                {isRecording ? 'Stop' : 'Start'} Recording
-              </button>
+              <p>{isRecording ? 'This meeting is being recorded.' : 'This meeting is not being recorded.'}</p>
             </section>
           </>
         )}

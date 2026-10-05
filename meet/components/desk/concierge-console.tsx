@@ -239,6 +239,22 @@ export function ConciergeConsole({ tracesUrl }: { tracesUrl?: string }) {
     }
   }
 
+  // Recording is the console's (F10): the participants' menu only shows whether it's on.
+  async function handleRecording(roomName: string, recording: boolean) {
+    setRunningAction(`record-${roomName}`);
+    try {
+      const res = await fetch(`/api/record/${recording ? 'stop' : 'start'}?roomName=${encodeURIComponent(roomName)}`, { cache: 'no-store' });
+      if (!res.ok) throw new Error((await res.text()) || `Recording request failed: ${res.status}`);
+      setNotice(recording ? `Recording stopped for "${roomName}"; the file appears in Meetings.` : `Recording "${roomName}".`);
+      setError(null);
+      await loadRoomsAndHealth();
+    } catch (recordError) {
+      setError(readErrorMessage(recordError));
+    } finally {
+      setRunningAction(null);
+    }
+  }
+
   async function handleCopyJoinLink(roomName: string) {
     try {
       const data = await requestJson<InviteResponse>(
@@ -322,7 +338,10 @@ export function ConciergeConsole({ tracesUrl }: { tracesUrl?: string }) {
                 <div key={room.name} className="border-foreground/15 border-b py-4">
                   <div className="grid grid-cols-[minmax(0,2fr)_6rem_minmax(0,1.5fr)_auto] items-center gap-4">
                     <div className="min-w-0">
-                      <p className="truncate font-mono text-sm font-medium">{room.name}</p>
+                      <p className="truncate font-mono text-sm font-medium">
+                        {room.name}
+                        {room.activeRecording && <span className="text-signal ml-2 font-sans text-xs font-medium">● Recording</span>}
+                      </p>
                       <p className="text-muted-foreground text-xs">Created {formatTimestamp(health?.room.creationTime ?? room.creationTime)}</p>
                     </div>
                     <p className="text-sm tabular-nums">{health?.room.numParticipants ?? room.numParticipants ?? 0}</p>
@@ -337,6 +356,9 @@ export function ConciergeConsole({ tracesUrl }: { tracesUrl?: string }) {
                           {runningAction === `stop-bot-${room.name}` ? 'Stopping…' : 'Stop bot'}
                         </button>
                       )}
+                      <button className={textActionClass} disabled={runningAction === `record-${room.name}`} onClick={() => handleRecording(room.name, Boolean(room.activeRecording))}>
+                        {room.activeRecording ? 'Stop recording' : 'Record'}
+                      </button>
                       <button className={textActionClass} onClick={() => handleCopyJoinLink(room.name)}>Copy join link</button>
                       <button className={textActionClass + ' text-signal'} disabled={runningAction === `delete-${room.name}`} onClick={() => handleDeleteRoom(room.name)}>
                         {runningAction === `delete-${room.name}` ? 'Deleting…' : 'Delete'}

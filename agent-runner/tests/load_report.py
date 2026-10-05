@@ -5,7 +5,7 @@ Quality, per step (quality.py): what the bot heard against what the participant 
 (word error rate, fragmented and missed sentences) and how long its replies ran.
 
 Inside staging, per step: the bot's own stage timings (its "bot reply" log lines:
-speech-to-text, LLM first token, TTS first audio) and CloudWatch maxima (CPU and memory
+turn-end wait, LLM first token, first sentence, TTS first audio) and CloudWatch maxima (CPU and memory
 of each service, CPU of each machine group, database CPU and connections).
 
 Run by the Load test v2 workflow after the load generator stops, with the acceptance
@@ -137,14 +137,14 @@ def markdown(r: dict) -> str:
                      f"{_ms(m['p99_ms'])} | {_ms(m['join_p95_s'])} | {verdict} |")
     if any("server" in m for m in r["steps"]):
         lines += ["", "**Inside staging** (p95 of the bot's own stage timings; maximum CPU/memory %)", "",
-                  "| step | rooms | STT ms | LLM first token ms | TTS first audio ms | meet CPU/mem | runner CPU/mem | "
+                  "| step | rooms | turn-end wait ms | LLM first token ms | first sentence ms | TTS first audio ms | meet CPU/mem | runner CPU/mem | "
                   "LiveKit CPU | bot machines CPU | LLM / TTS / STT machine CPU | DB CPU / connections |",
-                  "|---|---|---|---|---|---|---|---|---|---|---|"]
+                  "|---|---|---|---|---|---|---|---|---|---|---|---|"]
         for k, m in enumerate(r["steps"]):
             s, x = m.get("server", {}).get("stages", {}), m.get("server", {}).get("max", {})
             p95 = lambda st: _ms(s.get(st, {}).get("p95"))  # noqa: E731
             g = lambda key: "-" if key not in x else f"{x[key]:.0f}"  # noqa: E731
-            lines.append(f"| {k} | {m['rooms']} | {p95('stt_ms')} | {p95('llm_ttft_ms')} | {p95('tts_ttfb_ms')} | "
+            lines.append(f"| {k} | {m['rooms']} | {p95('stt_ms')} | {p95('llm_ttft_ms')} | {p95('sentence_agg_ms')} | {p95('tts_ttfb_ms')} | "
                          f"{g('meet_cpu')}/{g('meet_mem')} | {g('agent-runner_cpu')}/{g('agent-runner_mem')} | "
                          f"{g('livekit_hosts_cpu')} | {g('bots_hosts_cpu')} | "
                          f"{g('llm_hosts_cpu')} / {g('tts_hosts_cpu')} / {g('stt-nim_hosts_cpu')} | {g('db_cpu')} / {g('db_connections')} |")

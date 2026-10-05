@@ -588,6 +588,13 @@ class RunnerStartApiTests(unittest.TestCase):
             BotConfig.__table__.c.stt_endpointing_ms.default.arg,
         )
 
+    def test_config_put_accepts_the_clause_start(self):
+        # B4: the voice starts at the first clause (clause_aggregator.py); still only known values.
+        ok = self.client.put("/config", json={"tts_aggregation_mode": "clause"})
+        self.assertEqual(ok.status_code, 200, ok.text)
+        self.assertEqual(ok.json().get("tts_aggregation_mode"), "clause")
+        self.assertEqual(self.client.put("/config", json={"tts_aggregation_mode": "paragraph"}).status_code, 400)
+
     def test_config_put_valid_stt_delay_accepted(self):
         response = self.client.put(
             "/config",

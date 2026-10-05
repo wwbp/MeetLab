@@ -282,7 +282,7 @@ class BotConfigAdmin(ModelView, model=BotConfig):
         "stt_vad_mode": {"choices": [("local", "local")]},
         "stt_delay": {"choices": [("", "— (none)")]},
         "tts_provider": {"choices": [("elevenlabs", "elevenlabs"), ("openai", "openai"), ("kokoro", "kokoro (ours)")]},
-        "tts_aggregation_mode": {"choices": [("sentence", "sentence (default)"), ("token", "token (lower latency)")]},
+        "tts_aggregation_mode": {"choices": [("sentence", "sentence (default)"), ("clause", "first clause, then sentences"), ("token", "token (lower latency)")]},
         "turn_detection": {"choices": [("silence", "after a silence (default)"), ("smart_turn", "when the speaker sounds finished (smart turn)")]},
         # These two ADD together to form the turn-end window; 450+300=750ms is
         # calibrated against real pilot audio (tests/test_turn_calibration.py).
@@ -832,8 +832,8 @@ async def update_config(request: Request, _=Depends(verify_api_key)):
             return JSONResponse({"error": "turn_detection must be 'silence' or 'smart_turn'"}, status_code=400)
         fields["turn_detection"] = body["turn_detection"]
     if "tts_aggregation_mode" in body:
-        if body["tts_aggregation_mode"] not in ("sentence", "token"):
-            return JSONResponse({"error": "tts_aggregation_mode must be 'sentence' or 'token'"}, status_code=400)
+        if body["tts_aggregation_mode"] not in ("sentence", "clause", "token"):
+            return JSONResponse({"error": "tts_aggregation_mode must be 'sentence', 'clause' or 'token'"}, status_code=400)
         fields["tts_aggregation_mode"] = body["tts_aggregation_mode"]
     if "stt_endpointing_ms" in body:
         # A duration, so range-checked rather than enumerated. It was previously

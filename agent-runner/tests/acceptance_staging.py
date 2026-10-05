@@ -19,7 +19,7 @@ room-gone cleanup can never be what closes a session and hide a failure.
                    preparing resets the pool; no bot machine is stuck unhealthy
   two_humans       two humans in before the bot, one leaves: the bot stays     (F1)
   refresh          the only human refreshes: the bot is still there after the grace
-  chat             a non-RTVI packet is ignored; RTVI chat becomes the sender's turn, once   (F13)
+  chat             a non-RTVI packet is ignored; RTVI chat becomes the sender's turn, once, marked chat (F13)
   bot_ready        RTVI: client-ready gets bot-ready; the room hears no tokens, transcripts or metrics
   auto_record      with no Record press: the room's video, the bot's own audio and its greeting line
   record_auth      an outsider cannot start or stop a room's recording (F10): 401
@@ -486,7 +486,10 @@ async def scenario_chat():
         await asyncio.sleep(5)
         if len(utterances()) != 1:
             raise Fail(f"the chat message became {len(utterances())} turns, not one")
-        return "a non-RTVI packet ignored; RTVI chat stored as the sender's turn, once"
+        typed = [u for u in _meeting_get(m.session, "utterances") if not u["bot"]]
+        if [u.get("source") for u in typed] != ["chat"]:
+            raise Fail(f"the typed turn isn't marked as chat: {[u.get('source') for u in typed]}")
+        return "a non-RTVI packet ignored; RTVI chat stored as the sender's turn, once, marked as chat"
 
 
 async def scenario_bot_ready():

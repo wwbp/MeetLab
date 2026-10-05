@@ -32,7 +32,8 @@ async def _seed(conv_id: str):
         await db.execute(insert(Speaker).values([{"id": person, "meta": {}}, {"id": bot, "meta": {"role": "bot"}}]))
         await db.execute(insert(Utterance).values([
             {"id": uuid.uuid4().hex, "speaker_id": bot, "conv_id": conv_id, "ts": 1000.0, "text": "Hello there."},
-            {"id": uuid.uuid4().hex, "speaker_id": person, "conv_id": conv_id, "ts": 1003.5, "text": "What is new?"},
+            {"id": uuid.uuid4().hex, "speaker_id": person, "conv_id": conv_id, "ts": 1003.5, "text": "What is new?",
+             "meta": {"source": "chat"}},
             {"id": uuid.uuid4().hex, "speaker_id": bot, "conv_id": conv_id, "ts": 1005.25, "text": "Not much."},
         ]))
     await engine.dispose()
@@ -89,6 +90,13 @@ class TestConversationUtterances(unittest.TestCase):
         self.assertEqual(r.status_code, 200, r.text)
         self.assertEqual([(u["bot"], u["ts"], u["text"]) for u in r.json()["utterances"]],
                          [(True, 1000.0, "Hello there."), (False, 1003.5, "What is new?"), (True, 1005.25, "Not much.")])
+
+    def test_a_typed_turn_says_so(self):
+        # Chat becomes a turn like speech; researchers need to tell them apart (user, 2026-10-05).
+        conv_id = str(uuid.uuid4())
+        asyncio.run(_seed(conv_id))
+        r = requests.get(f"{BASE}/conversations/{conv_id}/utterances", headers=AUTH, timeout=10)
+        self.assertEqual([u["source"] for u in r.json()["utterances"]], [None, "chat", None])
 
     def test_an_unknown_conversation_is_404(self):
         r = requests.get(f"{BASE}/conversations/{uuid.uuid4()}/utterances", headers=AUTH, timeout=10)

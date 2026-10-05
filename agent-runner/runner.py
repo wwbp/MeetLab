@@ -1536,7 +1536,7 @@ async def conversation_utterances(conv_id: str, _=Depends(verify_api_key)):
             .where(Utterance.conv_id == conv_id).order_by(Utterance.ts)
         )).scalars().all()
     return {"utterances": [{"speaker": u.speaker_id, "bot": bool(u.speaker and u.speaker.meta.get("role") == "bot"),
-                            "ts": u.ts, "text": u.text} for u in rows]}
+                            "ts": u.ts, "text": u.text, "source": (u.meta or {}).get("source")} for u in rows]}
 
 
 @app.get("/conversations/{conv_id}/speakers")

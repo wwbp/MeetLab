@@ -516,6 +516,10 @@ async def _bot(runner_args: LiveKitRunnerArguments):
     # Set in on_data_received before queueing frames so on_user_turn_stopped
     # can fall back to it when _sid_to_identity is not yet populated.
     _last_data_sender: list[str | None] = [None]
+    # Chat turns queued and not yet stored: the next stored user turn was typed (meta.source).
+    # ponytail: a spoken turn finishing between a chat's queueing and its storing would take
+    # the mark; a per-turn tag on the frame would close that if it ever matters.
+    _chat_turns_pending: list[int] = [0]
     # last utterance ids for reply_to chaining
     _last_user_utt_id: list[str | None] = [None]
     _last_bot_utt_id: list[str | None] = [None]
@@ -826,6 +830,7 @@ async def _bot(runner_args: LiveKitRunnerArguments):
                             .on_conflict_do_nothing(index_elements=["id"])
                         )
         _last_data_sender[0] = participant_id
+        _chat_turns_pending[0] += 1
         await task.queue_frames(
             [
                 InterruptionFrame(),
@@ -977,10 +982,12 @@ async def _bot(runner_args: LiveKitRunnerArguments):
                         reply_to=_last_bot_utt_id[0],
                         ts=ts,
                         text=_spoken_text(message.content, {_sid_to_name.get(speaker_sid), identity.split("__")[0]}),
+                        meta={"source": "chat" if _chat_turns_pending[0] else "speech"},  # typed or said
                     )
                 )
                 await _set_root_utterance_if_needed(db, runner_args.session_id, utt_id)
         _last_user_utt_id[0] = utt_id
+        _chat_turns_pending[0] = max(0, _chat_turns_pending[0] - 1)
         # IDs only, never the words: participants' speech stays out of logs. Live
         # acceptance (transcript) waits for this line.
         logger.info(f"user utterance {utt_id} stored for session {runner_args.session_id}")

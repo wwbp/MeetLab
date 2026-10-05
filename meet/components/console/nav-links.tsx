@@ -17,12 +17,13 @@ export function NavLinks() {
   const pathname = usePathname();
 
   return (
-    <nav className="flex items-center gap-1">
+    <nav className="flex items-center gap-6">
       {NAV_ITEMS.map(({ label, href, external }) => {
         const isActive = href === '/' ? pathname === '/' : pathname.startsWith(href);
         const className = cn(
-          'rounded px-3 py-1.5 text-sm transition-colors',
-          isActive ? 'bg-foreground text-background' : 'text-muted-foreground hover:text-foreground'
+          // The current page: black, with the signal-red rule under it.
+          'border-b-2 py-4 text-sm transition-colors',
+          isActive ? 'border-signal text-foreground font-medium' : 'text-muted-foreground hover:text-foreground border-transparent'
         );
         return external ? (
           <a key={href} href={href} target="_blank" rel="noopener noreferrer" className={className}>

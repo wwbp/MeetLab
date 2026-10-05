@@ -64,3 +64,9 @@ variable "livekit_self_hosted" {
   type        = bool
   default     = true # on for load-test readiness (2026-10-02); LiveKit Cloud when off
 }
+
+variable "egress_count" {
+  description = "Egress machines recording video on our own LiveKit (egress_server.tf); 0 between studies"
+  type        = number
+  default     = 0 # switched on for a study or a video test (2026-10-05)
+}

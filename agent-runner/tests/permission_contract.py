@@ -23,6 +23,7 @@ OTHER_CLUSTER = f"{ARN}:cluster/bcfg-twilio-bot-dev-Cluster-c7MF3TrrR6WL"  # ano
 ROLE = f"arn:aws:iam::{ACCOUNT}:role"
 RUNNER, BOT = "meetlab-v2-staging-runner-task", "meetlab-v2-staging-bot-task"
 EGRESS = "user/meetlab-v2-staging-egress-writer"  # LiveKit uploads video with its key
+EGRESS_TASK = "meetlab-v2-staging-egress-task"  # our own egress uploads with this role (no key)
 EXECUTION = "meetlab-v2-staging-task-execution"  # ECS: image pulls and task secrets
 SECRET = f"arn:aws:secretsmanager:us-east-1:{ACCOUNT}:secret"
 GROUP = f"arn:aws:autoscaling:us-east-1:{ACCOUNT}:autoScalingGroup:00000000-0000-0000-0000-000000000000:autoScalingGroupName"
@@ -53,6 +54,9 @@ ALLOW = [
     # LiveKit Cloud egress, with the key the runner sends in each recording request
     Call(EGRESS, "s3:PutObject", f"{MEDIA}/recordings/room-recording.mp4"),
     Call(EGRESS, "s3:AbortMultipartUpload", f"{MEDIA}/recordings/room-recording.mp4"),
+    # Our own egress (egress_server.tf), with its task role
+    Call(EGRESS_TASK, "s3:PutObject", f"{MEDIA}/recordings/room-recording.mp4"),
+    Call(EGRESS_TASK, "s3:AbortMultipartUpload", f"{MEDIA}/recordings/room-recording.mp4"),
     # capacity.py: Prepare for study warms the bot pool, and AWS cools it at the end time
     *[Call(RUNNER, f"autoscaling:{a}", f"{GROUP}/meetlab-v2-staging-bots") for a in
       ("UpdateAutoScalingGroup", "PutScheduledUpdateGroupAction", "DeleteScheduledAction")],
@@ -82,6 +86,10 @@ DENY = [
     Call(EGRESS, "s3:ListBucket", MEDIA),
     Call(EGRESS, "s3:PutObject", f"{MEDIA}/elsewhere/room-recording.mp4"),
     Call(EGRESS, "s3:PutAccountPublicAccessBlock", "*"),  # v1's egress key could
+    Call(EGRESS_TASK, "s3:GetObject", f"{MEDIA}/recordings/room-recording.mp4"),
+    Call(EGRESS_TASK, "s3:DeleteObject", f"{MEDIA}/recordings/room-recording.mp4"),
+    Call(EGRESS_TASK, "s3:ListBucket", MEDIA),
+    Call(EGRESS_TASK, "s3:PutObject", f"{MEDIA}/elsewhere/room-recording.mp4"),
     Call(RUNNER, "s3:DeleteObject", f"{MEDIA}/recordings/speaker.wav"),
     Call(EXECUTION, "secretsmanager:GetSecretValue", f"{SECRET}:meetlab-v2/staging/other-AbCdEf"),
     Call(RUNNER, "autoscaling:UpdateAutoScalingGroup", f"{GROUP}/meetlab-v2-staging-ecs"),  # services

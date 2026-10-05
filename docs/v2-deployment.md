@@ -149,6 +149,20 @@ them by choosing `Qwen/Qwen2.5-7B-Instruct` as its model and `kokoro` as its voi
 provider (voice names like `alloy` work). The `our_models` live test waits for both,
 then checks a bot answers and speaks on them. Turn them off with `default = []`.
 
+## Switching video recording on and off
+
+Our own LiveKit records rooms as video with LiveKit's egress server
+(`infra/v2/staging/egress_server.tf`). It's off between studies. Switch it on **before** a
+study or a video test: set `default = 1` on `egress_count` in
+`infra/v2/staging/variables.tf` and merge. That starts one `c6i.2xlarge` ($0.34/hour),
+which records one room at a time; raise the number for more rooms at once.
+
+A recording asked for while no egress machine is up fails straight away (LiveKit doesn't
+wait). The audio of each speaker is recorded by the bot either way. With egress on, the
+`video_recording` and `auto_record` live tests run; with it off they show as "not run".
+Turn it off with `default = 0`. Redis (which hands LiveKit's recordings to egress) stays on:
+about $12 a month.
+
 ## Running the live tests yourself
 
 The same tests CI runs, from your laptop:

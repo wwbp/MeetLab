@@ -7,8 +7,8 @@
 # TURN server at turn-staging.wwbp.org:443; the network load balancer ends TLS with the
 # *.wwbp.org certificate and passes plain TCP to the machine (external_tls).
 #
-# ponytail: no egress server (no video recording): fine for load tests; add before a study
-# needs video. TURN over UDP (3478) not offered: 443/TLS covers the strict networks.
+# Video recording: egress_server.tf. ponytail: TURN over UDP (3478) not offered: 443/TLS
+# covers the strict networks.
 
 locals {
   livekit_host = "livekit-staging.wwbp.org"
@@ -25,7 +25,7 @@ locals {
 output "livekit" {
   description = "Which LiveKit the live tests use, and whether it records video"
   value = var.livekit_self_hosted ? {
-    url = "wss://${local.livekit_host}", key_parameter = "SELFHOSTED_LIVEKIT_API_KEY", secret_parameter = "SELFHOSTED_LIVEKIT_API_SECRET", video = false
+    url = "wss://${local.livekit_host}", key_parameter = "SELFHOSTED_LIVEKIT_API_KEY", secret_parameter = "SELFHOSTED_LIVEKIT_API_SECRET", video = var.egress_count > 0
     } : {
     url = null, key_parameter = "LIVEKIT_API_KEY", secret_parameter = "LIVEKIT_API_SECRET", video = true
   }
@@ -172,6 +172,7 @@ resource "aws_ecs_task_definition" "livekit" {
     command = [join("", [
       "export LIVEKIT_CONFIG=\"$(printf 'port: 7880\\nrtc:\\n  tcp_port: 7881\\n  udp_port: 7882\\n  use_external_ip: true\\n",
       "turn:\\n  enabled: true\\n  domain: ${local.turn_host}\\n  tls_port: 5349\\n  external_tls: true\\n",
+      "redis:\\n  address: ${local.redis_address}\\n", # hands recordings to egress (egress_server.tf)
       "keys:\\n  %s: %s\\nwebhook:\\n  api_key: %s\\n  urls: [%s]\\n' \"$KEY\" \"$SECRET\" \"$KEY\" \"$WEBHOOK\")\"; ",
       "exec /livekit-server",
     ])]

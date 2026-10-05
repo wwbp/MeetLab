@@ -1,45 +1,11 @@
 'use client';
 
-import { useEffect, useState, type FormEvent } from 'react';
+import { createContext, useContext, useEffect, useState, type FormEvent } from 'react';
+import { EMPTY_CONFIG, type BotConfig } from '@/lib/bot-config';
+import { CONFIG_INFO, SECTIONS } from '@/lib/config-info';
 
-type BotConfig = {
-  scope: string;
-  system_prompt: string;
-  greeting: string;
-  stt_model: string;
-  llm_model: string;
-  tts_provider: string;
-  tts_voice: string;
-  tts_aggregation_mode: string;
-  turn_detection: string;
-  smart_turn_wait_ms: number;
-  stt_endpointing_ms: number;
-  user_speech_timeout_ms: number;
-  stt_vad_mode: string;
-  stt_delay: string | null;
-  auto_record: boolean;
-  session_limit_minutes: number;
-  closing_message: string;
-};
-
-const EMPTY_CONFIG: Omit<BotConfig, 'scope'> = {
-  system_prompt: '',
-  greeting: '',
-  stt_model: 'parakeet-tdt-0.6b-v2',
-  llm_model: 'gpt-5.4-nano',
-  tts_provider: 'elevenlabs',
-  tts_voice: 'WhMcMcvXQ8T2QfmQmlYh',
-  tts_aggregation_mode: 'sentence',
-  turn_detection: 'silence',
-  smart_turn_wait_ms: 3000,
-  stt_endpointing_ms: 450,
-  user_speech_timeout_ms: 50,
-  stt_vad_mode: 'local',
-  stt_delay: null,
-  auto_record: false,
-  session_limit_minutes: 0,
-  closing_message: '',
-};
+// Which setting (or category) the info panel explains: the one hovered or focused last.
+const Explain = createContext<(key: string) => void>(() => {});
 
 const STT_MODELS = [
   { value: 'parakeet-tdt-0.6b-v2',   label: 'parakeet-tdt-0.6b-v2 (self-hosted GPU) (default)' },
@@ -148,12 +114,34 @@ export default function ConfigPage() {
     loadConfig(newScope);
   }
 
+  const [active, setActive] = useState<string>(SECTIONS[0].id);
+  const explains = (key: string) => ({ onMouseEnter: () => setActive(key), onFocusCapture: () => setActive(key) });
   const sel =
     'border-input bg-background w-full rounded border px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-ring';
   const inp = sel;
 
   return (
-    <div className="mx-auto w-full max-w-2xl space-y-6 px-4 py-6 sm:px-8 sm:py-10">
+    <Explain.Provider value={setActive}>
+    <div className="mx-auto w-full max-w-7xl px-4 py-6 sm:px-8 sm:py-10 lg:grid lg:grid-cols-[11rem_minmax(0,1fr)_22rem] lg:gap-10">
+      {/* Categories: jump to one */}
+      <nav className="hidden lg:block" aria-label="Categories">
+        <div className="sticky top-6 space-y-1 pt-24">
+          {SECTIONS.map((s) => (
+            <a
+              key={s.id}
+              href={`#${s.id}`}
+              onClick={() => setActive(s.id)}
+              className={`block rounded px-2 py-1.5 text-sm ${
+                sectionOf(active) === s.id ? 'bg-muted font-medium' : 'text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              {s.label}
+            </a>
+          ))}
+        </div>
+      </nav>
+
+      <div className="min-w-0 space-y-6">
       <header className="space-y-1">
         <p className="text-muted-foreground font-mono text-xs uppercase">Console</p>
         <h1 className="text-3xl font-medium">Bot Config</h1>
@@ -181,8 +169,8 @@ export default function ConfigPage() {
         <form onSubmit={handleSubmit} className="space-y-5">
 
           {/* ── Content ── */}
-          <Section label="Conversation">
-            <Field label="System Prompt" help="Who the bot is and how it should talk; sent to the language model with every turn.">
+          <Section id="conversation" label="Conversation">
+            <Field name="system_prompt" label="System Prompt" help="Who the bot is and how it should talk; sent to the language model with every turn.">
               <textarea
                 value={form.system_prompt}
                 onChange={(e) => setForm((f) => ({ ...f, system_prompt: e.target.value }))}
@@ -191,7 +179,7 @@ export default function ConfigPage() {
                 required
               />
             </Field>
-            <Field label="Greeting" help="What the bot says when the first person joins.">
+            <Field name="greeting" label="Greeting" help="What the bot says when the first person joins.">
               <textarea
                 value={form.greeting}
                 onChange={(e) => setForm((f) => ({ ...f, greeting: e.target.value }))}
@@ -204,9 +192,9 @@ export default function ConfigPage() {
 
           {/* ── STT: the model and the settings only it uses ── */}
           {/* ── Speech-to-Text and turn-taking: when someone has finished depends on the model ── */}
-          <Section label="Speech-to-Text and turn-taking">
+          <Section id="stt" label="Speech-to-Text and turn-taking">
             <div className="grid gap-4 sm:grid-cols-2">
-              <Field label="STT Model" help="The speech-to-text model that turns what people say into text.">
+              <Field name="stt_model" label="STT Model" help="The speech-to-text model that turns what people say into text.">
                 <select
                   value={form.stt_model}
                   onChange={(e) => setForm((f) => ({ ...f, stt_model: e.target.value }))}
@@ -219,7 +207,7 @@ export default function ConfigPage() {
               </Field>
               {isOpenAiStt(form.stt_model) && (
                 <>
-                  <Field label="Transcription delay (OpenAI only)" help="How long OpenAI waits for more words before finalising: longer is more accurate, slower.">
+                  <Field name="stt_delay" label="Transcription delay (OpenAI only)" help="How long OpenAI waits for more words before finalising: longer is more accurate, slower.">
                     <select
                       value={form.stt_delay ?? ''}
                       onChange={(e) => setForm((f) => ({ ...f, stt_delay: e.target.value || null }))}
@@ -231,14 +219,14 @@ export default function ConfigPage() {
                       ))}
                     </select>
                   </Field>
-                  <Field label="Voice detection (OpenAI only)" help="Who decides when someone is speaking: always the bot\u2019s own per-speaker detector.">
+                  <Field name="stt_vad_mode" label="Voice detection (OpenAI only)" help="Who decides when someone is speaking: always the bot’s own per-speaker detector.">
                     <select value={form.stt_vad_mode} className={sel} disabled>
                       <option value="local">local: the bot&apos;s own per-speaker detector</option>
                     </select>
                   </Field>
                 </>
               )}
-              <label className="flex items-start gap-3 sm:col-span-2">
+              <label className="flex items-start gap-3 sm:col-span-2" {...explains('turn_detection')}>
                 <input
                   type="checkbox"
                   checked={form.turn_detection === 'smart_turn'}
@@ -256,6 +244,7 @@ export default function ConfigPage() {
               </label>
               {form.turn_detection === 'smart_turn' && (
                 <Field
+                  name="smart_turn_wait_ms"
                   label="Wait for an unfinished speaker (ms)"
                   help="How long a turn that sounds unfinished stays open before the bot replies anyway: longer cuts fewer people off, shorter keeps fewer waiting."
                 >
@@ -274,7 +263,7 @@ export default function ConfigPage() {
               {/* The pause decides where a turn splits (450 ms, calibrated on pilot audio). The
                   wait comes after the transcript: with Parakeet or Whisper it only delays the
                   reply (B4, 2026-10-05: 300 → 50 ms was 0.24 s faster, splitting unchanged). */}
-              <Field label="Pause that counts as stopping (ms)" help="How long someone must be silent before their words count as finished: this decides where one turn ends and the next begins.">
+              <Field name="stt_endpointing_ms" label="Pause that counts as stopping (ms)" help="How long someone must be silent before their words count as finished: this decides where one turn ends and the next begins.">
                 <input
                   type="number"
                   step="50"
@@ -288,7 +277,7 @@ export default function ConfigPage() {
                   required
                 />
               </Field>
-              <Field label="Extra wait before replying (ms)" help="After a person's words are transcribed, how long the bot waits before it answers. 50 ms is measured best with Parakeet; more only delays the reply.">
+              <Field name="user_speech_timeout_ms" label="Extra wait before replying (ms)" help="After a person's words are transcribed, how long the bot waits before it answers. 50 ms is measured best with Parakeet; more only delays the reply.">
                 <input
                   type="number"
                   step="50"
@@ -306,8 +295,8 @@ export default function ConfigPage() {
           </Section>
 
           {/* ── LLM ── */}
-          <Section label="Language Model">
-            <Field label="LLM Model" help="The language model that writes the bot\u2019s replies.">
+          <Section id="llm" label="Language Model">
+            <Field name="llm_model" label="LLM Model" help="The language model that writes the bot’s replies.">
               <select
                 value={form.llm_model}
                 onChange={(e) => setForm((f) => ({ ...f, llm_model: e.target.value }))}
@@ -321,9 +310,9 @@ export default function ConfigPage() {
           </Section>
 
           {/* ── TTS ── */}
-          <Section label="Voice (Text-to-Speech)">
+          <Section id="voice" label="Voice (Text-to-Speech)">
             <div className="grid gap-4 sm:grid-cols-2">
-              <Field label="TTS Provider" help="The service that speaks the bot\u2019s replies aloud.">
+              <Field name="tts_provider" label="TTS Provider" help="The service that speaks the bot’s replies aloud.">
                 <select
                   value={form.tts_provider}
                   onChange={(e) => setForm((f) => ({ ...f, tts_provider: e.target.value }))}
@@ -335,6 +324,7 @@ export default function ConfigPage() {
                 </select>
               </Field>
               <Field
+                name="tts_voice"
                 label={form.tts_provider === 'elevenlabs' ? 'Voice ID' : 'Voice Name'}
                 help="Which voice the provider uses: an ElevenLabs voice ID, or a voice name (alloy) for OpenAI and Kokoro."
               >
@@ -347,7 +337,7 @@ export default function ConfigPage() {
                   required
                 />
               </Field>
-              <Field label="Start speaking" help="How much of the reply the voice waits for before it speaks: a whole sentence, the first clause (sooner, then whole sentences), or each word as it arrives (ElevenLabs only: other voices make one request per word).">
+              <Field name="tts_aggregation_mode" label="Start speaking" help="How much of the reply the voice waits for before it speaks: a whole sentence, the first clause (sooner, then whole sentences), or each word as it arrives (ElevenLabs only: other voices make one request per word).">
                 <select
                   value={form.tts_aggregation_mode}
                   onChange={(e) => setForm((f) => ({ ...f, tts_aggregation_mode: e.target.value }))}
@@ -362,8 +352,8 @@ export default function ConfigPage() {
           </Section>
 
           {/* ── Recording ── */}
-          <Section label="Recording">
-            <label className="flex items-start gap-3">
+          <Section id="recording" label="Recording">
+            <label className="flex items-start gap-3" {...explains('auto_record')}>
               <input
                 type="checkbox"
                 checked={form.auto_record}
@@ -381,8 +371,8 @@ export default function ConfigPage() {
           </Section>
 
           {/* ── Session limit ── */}
-          <Section label="Session Limit">
-            <Field label="Minutes (0 = unlimited)" help="Session length; the browser counts down and the bot says the closing message at the end.">
+          <Section id="session" label="Session Limit">
+            <Field name="session_limit_minutes" label="Minutes (0 = unlimited)" help="Session length; the browser counts down and the bot says the closing message at the end.">
               <input
                 type="number"
                 step="1"
@@ -408,7 +398,7 @@ export default function ConfigPage() {
               warning three quarters of the way through, and a final reminder near the end. The
               limit is advisory — nobody is disconnected.
             </p>
-            <Field label="Closing message" help="What the bot says when time is up, e.g. where to paste the completion code.">
+            <Field name="closing_message" label="Closing message" help="What the bot says when time is up, e.g. where to paste the completion code.">
               <textarea
                 value={form.closing_message}
                 onChange={(e) => setForm((f) => ({ ...f, closing_message: e.target.value }))}
@@ -437,22 +427,74 @@ export default function ConfigPage() {
           </button>
         </form>
       )}
+      </div>
+
+      {/* What the setting does, and how it performed in our tests */}
+      <aside className="hidden lg:block" aria-label="About this setting">
+        <div className="sticky top-6 pt-24">
+          <InfoPanel active={active} />
+        </div>
+      </aside>
+    </div>
+    </Explain.Provider>
+  );
+}
+
+const sectionOf = (key: string) => SECTIONS.find((s) => s.id === key || s.fields.includes(key))?.id;
+
+function InfoPanel({ active }: { active: string }) {
+  const section = SECTIONS.find((s) => s.id === active);
+  if (section) {
+    return (
+      <div className="space-y-3 rounded border p-4">
+        <p className="text-muted-foreground font-mono text-xs uppercase">{section.label}</p>
+        <p className="text-sm">{section.about}</p>
+        <p className="text-muted-foreground text-xs">Hover or select a setting to see what it does and how it performed in our tests.</p>
+      </div>
+    );
+  }
+  const info = CONFIG_INFO[active];
+  if (!info) return null;
+  return (
+    <div className="space-y-3 rounded border p-4">
+      <p className="text-muted-foreground font-mono text-xs uppercase">{SECTIONS.find((s) => s.fields.includes(active))?.label}</p>
+      <h2 className="text-base font-medium">{info.title}</h2>
+      <p className="text-sm leading-relaxed">{info.about}</p>
+      {info.default && (
+        <p className="text-sm">
+          <span className="text-muted-foreground">Default: </span>
+          {info.default}
+        </p>
+      )}
+      {info.results && (
+        <div className="space-y-2 border-t pt-3">
+          <p className="text-muted-foreground font-mono text-xs uppercase">In our tests</p>
+          {info.results.map((r) => (
+            <div key={r.text} className="text-sm">
+              <p className="leading-relaxed">{r.text}</p>
+              <p className="text-muted-foreground mt-0.5 text-xs">{r.source}</p>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
 
-function Section({ label, children }: { label: string; children: React.ReactNode }) {
+function Section({ id, label, children }: { id: string; label: string; children: React.ReactNode }) {
+  const explain = useContext(Explain);
   return (
-    <div className="space-y-3">
+    <div id={id} className="scroll-mt-6 space-y-3" onMouseEnter={() => explain(id)}>
       <p className="text-muted-foreground border-b pb-1 font-mono text-xs uppercase">{label}</p>
       {children}
     </div>
   );
 }
 
-function Field({ label, help, children }: { label: string; help?: string; children: React.ReactNode }) {
+function Field({ name, label, help, children }: { name: string; label: string; help?: string; children: React.ReactNode }) {
+  const explain = useContext(Explain);
   return (
-    <div className="space-y-1">
+    <div className="space-y-1" onMouseEnter={() => explain(name)} onFocusCapture={() => explain(name)}>
       <label className="text-muted-foreground font-mono text-xs uppercase">{label}</label>
       {children}
       {help && <p className="text-muted-foreground text-xs">{help}</p>}

@@ -46,6 +46,12 @@ run "egress_uploads_with_its_own_role_and_no_key" {
     error_message = "the egress version local development runs; Chrome needs SYS_ADMIN (LiveKit's docs)"
   }
   assert {
+    # The image's own entrypoint starts PulseAudio (Chrome's audio) before egress; calling
+    # egress directly skipped it and every recording failed on staging (2026-10-05).
+    condition     = endswith(join("", jsondecode(aws_ecs_task_definition.egress.container_definitions)[0].command), "exec /entrypoint.sh")
+    error_message = "egress starts through the image's entrypoint, which starts PulseAudio first"
+  }
+  assert {
     condition = (
       strcontains(join("", jsondecode(aws_ecs_task_definition.egress.container_definitions)[0].command), "bucket: ${aws_s3_bucket.media.bucket}") &&
       !strcontains(join("", jsondecode(aws_ecs_task_definition.egress.container_definitions)[0].command), "access_key")

@@ -48,7 +48,7 @@ os.environ.setdefault("LIVEKIT_URL", "ws://transport-server:7880")
 os.environ.setdefault("OPENAI_API_KEY", "test-key")
 os.environ.setdefault("ELEVENLABS_API_KEY", "test-key")
 
-# Measured crossover: where predicted segments == real turns taken.
+# Measured crossover: where predicted segments == real turns taken (one VAD pause).
 CALIBRATED_OPTIMUM_MS = 750
 # Below this we over-split (cheap, recoverable). Above it we merge distinct
 # turns (expensive — the bot answers two things at once).
@@ -125,46 +125,33 @@ class TunabilityTests(unittest.TestCase):
 
 
 class TurnEndWindowTests(unittest.TestCase):
-    def test_the_two_settings_add_up_to_the_calibrated_window(self):
-        window = effective_turn_end_window_ms()
+    """What B4 measured (2026-10-05, 30 rooms on Parakeet): the two settings do NOT add up.
 
-        self.assertGreaterEqual(
-            window, LOWER_BOUND_MS,
-            f"{window:.0f}ms over-splits real speech; participants get chopped mid-sentence",
-        )
-        self.assertLessEqual(
-            window, UPPER_BOUND_MS,
-            f"{window:.0f}ms merges separate turns — the bot will answer two things at once",
-        )
+    Each speaker's own VAD closes a segment after stt_endpointing_ms of silence; the
+    transcript follows, and only then does the aggregator wait user_speech_timeout_ms. A
+    speaker's next words can't arrive inside that wait (they need their own pause first),
+    so the wait never joins fragments: it only delays the reply. 300 → 50 ms made replies
+    0.24 s faster at p50 and p95 with fragmentation unchanged (24.5% → 24.6%). So the
+    split window is the endpointing alone, and the wait stays as short as the API allows.
+    (OpenAI realtime STT, whose own VAD ends a turn, is the exception; we default to Parakeet.)
+    """
 
-    def test_the_window_lands_near_the_measured_crossover(self):
-        """Within 100ms of where predicted segments matched real turns (0.97x)."""
-        self.assertAlmostEqual(
-            effective_turn_end_window_ms(), CALIBRATED_OPTIMUM_MS, delta=100
-        )
+    def test_turns_split_on_the_pause_alone(self):
+        from db.models import BotConfig
+        pause = BotConfig.__table__.c.stt_endpointing_ms.default.arg
+        # 450 ms over-splits real speech 1.34x (the table above): the cheap direction,
+        # recovered by smart turn. Never above the crossover: that merges turns.
+        self.assertEqual(pause, 450)
+        self.assertLessEqual(pause, UPPER_BOUND_MS)
+
+    def test_the_wait_after_the_transcript_is_as_short_as_allowed(self):
+        from db.models import BotConfig
+        self.assertEqual(BotConfig.__table__.c.user_speech_timeout_ms.default.arg, 50)
 
     def test_it_is_a_large_improvement_on_the_pilot(self):
         """The pilot's effective window was ~5.1s: 100ms endpointing, then the
         5.0s wall-clock fallback that every turn fell through to."""
         self.assertLess(effective_turn_end_window_ms(), 5100 / 4)
-
-    def test_neither_setting_alone_is_mistaken_for_the_window(self):
-        """Guards the trap that produced the wrong first attempt at this fix.
-
-        Endpointing alone looks fine at 450ms. The aggregator timeout alone looks
-        fine at 300ms. Only the sum tells you what a participant experiences, so
-        a future change to either must be judged against the total.
-        """
-        from db.models import BotConfig
-
-        endpointing = BotConfig.__table__.c.stt_endpointing_ms.default.arg
-        aggregator_ms = BotConfig.__table__.c.user_speech_timeout_ms.default.arg
-
-        self.assertGreater(endpointing, 0)
-        self.assertGreater(aggregator_ms, 0)
-        self.assertAlmostEqual(
-            effective_turn_end_window_ms(), endpointing + aggregator_ms, places=6
-        )
 
 
 if __name__ == "__main__":

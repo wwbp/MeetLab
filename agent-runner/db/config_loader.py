@@ -18,17 +18,15 @@ class EffectiveBotConfig:
     stt_delay: str | None  # "minimal" | "low" | "medium" | "high" | "xhigh" | None
     tts_provider: str  # "elevenlabs" | "openai"
     tts_aggregation_mode: str  # "sentence" | "token"
-    # The turn-end window is the SUM of these two: a turn commits after roughly
-    # stt_endpointing_ms + user_speech_timeout_ms of silence. 450+300=750ms is
-    # calibrated against real pilot audio — see tests/test_turn_calibration.py.
+    # The pause that splits turns (450 ms, calibrated on pilot audio). The reply then waits
+    # user_speech_timeout_ms after the transcript: pure delay (B4) — tests/test_turn_calibration.py.
     stt_endpointing_ms: int
     auto_record: bool  # auto-start recording when the first participant joins
     # Advisory session cap in minutes, measured from the first human join; 0 = unlimited.
     # Defaulted so callers predating the field keep the old (uncapped) behaviour.
     session_limit_minutes: int = 0
-    # Second half of the turn-end window (see stt_endpointing_ms above). Defaulted
-    # so callers predating the field keep the calibrated behaviour.
-    user_speech_timeout_ms: int = 300
+    # The wait after the transcript (see stt_endpointing_ms above): 50 ms since B4.
+    user_speech_timeout_ms: int = 50
     # Spoken when the session limit elapses. Only used when a limit is set.
     closing_message: str = CLOSING_MESSAGE
     turn_detection: str = "silence"  # "silence" | "smart_turn" (smart_turn.py)
@@ -74,7 +72,7 @@ async def load_bot_config(room_name: str | None = None) -> EffectiveBotConfig:
                 # the pilot value RC2 fixed — so an empty table silently
                 # reinstated the behaviour that cut participants off.
                 stt_endpointing_ms=450,
-                user_speech_timeout_ms=300,
+                user_speech_timeout_ms=50,
                 auto_record=False,
                 session_limit_minutes=0,
                 closing_message=CLOSING_MESSAGE,
@@ -93,7 +91,7 @@ async def load_bot_config(room_name: str | None = None) -> EffectiveBotConfig:
             turn_detection=getattr(row, "turn_detection", None) or "silence",
             smart_turn_wait_ms=int(getattr(row, "smart_turn_wait_ms", None) or 3000),
             stt_endpointing_ms=getattr(row, "stt_endpointing_ms", 450),
-            user_speech_timeout_ms=int(getattr(row, "user_speech_timeout_ms", 300) or 300),
+            user_speech_timeout_ms=int(getattr(row, "user_speech_timeout_ms", 50) or 50),
             auto_record=bool(getattr(row, "auto_record", False)),
             session_limit_minutes=int(getattr(row, "session_limit_minutes", 0) or 0),
             closing_message=getattr(row, "closing_message", None) or CLOSING_MESSAGE,

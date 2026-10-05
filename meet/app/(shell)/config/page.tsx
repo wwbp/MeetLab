@@ -33,7 +33,7 @@ const EMPTY_CONFIG: Omit<BotConfig, 'scope'> = {
   turn_detection: 'silence',
   smart_turn_wait_ms: 3000,
   stt_endpointing_ms: 450,
-  user_speech_timeout_ms: 300,
+  user_speech_timeout_ms: 50,
   stt_vad_mode: 'local',
   stt_delay: null,
   auto_record: false,
@@ -100,7 +100,7 @@ export default function ConfigPage() {
         turn_detection: data.turn_detection ?? 'silence',
         smart_turn_wait_ms: data.smart_turn_wait_ms ?? 3000,
         stt_endpointing_ms: data.stt_endpointing_ms ?? 450,
-        user_speech_timeout_ms: data.user_speech_timeout_ms ?? 300,
+        user_speech_timeout_ms: data.user_speech_timeout_ms ?? 50,
         stt_vad_mode: data.stt_vad_mode ?? 'local',
         stt_delay: data.stt_delay ?? null,
         auto_record: data.auto_record ?? false,
@@ -203,7 +203,8 @@ export default function ConfigPage() {
           </Section>
 
           {/* ── STT: the model and the settings only it uses ── */}
-          <Section label="Speech-to-Text (model)">
+          {/* ── Speech-to-Text and turn-taking: when someone has finished depends on the model ── */}
+          <Section label="Speech-to-Text and turn-taking">
             <div className="grid gap-4 sm:grid-cols-2">
               <Field label="STT Model" help="The speech-to-text model that turns what people say into text.">
                 <select
@@ -237,12 +238,6 @@ export default function ConfigPage() {
                   </Field>
                 </>
               )}
-            </div>
-          </Section>
-
-          {/* ── Turn-taking: when a person has finished, for every STT model ── */}
-          <Section label="Turn-taking (all models)">
-            <div className="grid gap-4 sm:grid-cols-2">
               <label className="flex items-start gap-3 sm:col-span-2">
                 <input
                   type="checkbox"
@@ -276,14 +271,10 @@ export default function ConfigPage() {
                   />
                 </Field>
               )}
-              {/* These two ADD together to form the turn-end window: the bot
-                  commits a turn after roughly stt_endpointing_ms +
-                  user_speech_timeout_ms of silence. 450+300=750ms is calibrated
-                  against real pilot audio — judge any change by the sum, not
-                  either field alone. Too low cuts people off mid-thought; too
-                  high merges two separate points into one answer. With smart
-                  turn, a speaker who sounds unfinished is waited for up to 3s. */}
-              <Field label="Pause that counts as stopping (ms)" help="How long someone must be silent before they count as having stopped speaking.">
+              {/* The pause decides where a turn splits (450 ms, calibrated on pilot audio). The
+                  wait comes after the transcript: with Parakeet or Whisper it only delays the
+                  reply (B4, 2026-10-05: 300 → 50 ms was 0.24 s faster, splitting unchanged). */}
+              <Field label="Pause that counts as stopping (ms)" help="How long someone must be silent before their words count as finished: this decides where one turn ends and the next begins.">
                 <input
                   type="number"
                   step="50"
@@ -297,7 +288,7 @@ export default function ConfigPage() {
                   required
                 />
               </Field>
-              <Field label="Extra wait before replying (ms)" help="After someone stops, how long the bot waits for them to go on before it answers.">
+              <Field label="Extra wait before replying (ms)" help="After a person's words are transcribed, how long the bot waits before it answers. 50 ms is measured best with Parakeet; more only delays the reply.">
                 <input
                   type="number"
                   step="50"
@@ -310,12 +301,6 @@ export default function ConfigPage() {
                   className={inp}
                   required
                 />
-              </Field>
-              <Field label={`Turn ends after ${form.stt_endpointing_ms + form.user_speech_timeout_ms}ms of silence`}>
-                <p className="text-xs opacity-70">
-                  Sum of the two fields above. 750ms is the calibrated default; the
-                  Jul/Aug pilot effectively ran at ~5100ms.{form.turn_detection === 'smart_turn' && ' With smart turn, someone who sounds unfinished is waited for up to 3s.'}
-                </p>
               </Field>
             </div>
           </Section>

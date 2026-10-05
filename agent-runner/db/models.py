@@ -212,7 +212,7 @@ class BotConfig(Base):
     # tests/test_turn_calibration.py. Config-driven so the window can be tuned
     # against live conversations without a deploy.
     user_speech_timeout_ms: Mapped[int] = mapped_column(
-        BigInteger, default=300, server_default="300", nullable=False
+        BigInteger, default=50, server_default="50", nullable=False  # B4, 2026-10-05
     )
     # When true, the bot auto-starts recording (composite mp4 + per-speaker WAV)
     # once the first participant joins. Off by default — opt in per room/global.

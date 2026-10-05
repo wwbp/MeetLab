@@ -298,8 +298,9 @@ class BotConfigAdmin(ModelView, model=BotConfig):
             ("800", "800ms (patient)"),
         ]},
         "user_speech_timeout_ms": {"choices": [
-            ("150", "150ms (snappy)"),
-            ("300", "300ms (default, calibrated)"),
+            ("50", "50ms (default: measured, B4)"),
+            ("150", "150ms"),
+            ("300", "300ms (the old default)"),
             ("450", "450ms"),
             ("600", "600ms (patient — may merge turns)"),
         ]},

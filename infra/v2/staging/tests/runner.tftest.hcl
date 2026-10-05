@@ -131,10 +131,15 @@ run "silent_bots_are_noticed_within_seconds" {
   }
 }
 
-# Video egress (8b): the runner sends LiveKit a write-only key with each recording
-# request, so the runner, and only the runner, holds it.
+# Video egress (8b): with LiveKit Cloud the runner sends a write-only key with each
+# recording request, so the runner, and only the runner, holds it. (Our own egress needs
+# no key at all: tests/egress_server.tftest.hcl.)
 run "only_the_runner_gets_the_egress_key" {
   command = apply
+
+  variables {
+    livekit_self_hosted = false
+  }
 
   assert {
     condition = alltrue([for n in ["EGRESS_S3_KEY_ID", "EGRESS_S3_KEY_SECRET"] :

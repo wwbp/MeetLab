@@ -746,7 +746,7 @@ async def _run(names):
 
 if __name__ == "__main__":
     names = sys.argv[1:] or list(SCENARIOS)
-    if os.getenv("NO_VIDEO"):  # self-hosted LiveKit has no egress server yet (livekit.tf)
+    if os.getenv("NO_VIDEO"):  # our own LiveKit with egress switched off (egress_count = 0, egress_server.tf)
         skipped = [n for n in names if n in ("video_recording", "auto_record")]
         if skipped:
             print(f"not run (no video recording on this LiveKit): {', '.join(skipped)}", flush=True)

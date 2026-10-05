@@ -60,6 +60,14 @@ class ContractTest(unittest.TestCase):
         for action in ("s3:GetObject", "s3:DeleteObject", "s3:ListBucket", "s3:PutAccountPublicAccessBlock"):
             self.assertIn((egress, action), forbidden)
 
+    def test_our_own_egress_role_can_only_add_recordings(self):
+        # egress_server.tf: our egress uploads video with its task role, no key at all.
+        role = "meetlab-v2-staging-egress-task"
+        self.assertTrue({(role, "s3:PutObject"), (role, "s3:AbortMultipartUpload")} <= {(c.role, c.action) for c in ALLOW})
+        forbidden = {(c.role, c.action) for c in DENY}
+        for action in ("s3:GetObject", "s3:DeleteObject", "s3:ListBucket"):
+            self.assertIn((role, action), forbidden)
+
     def test_users_and_roles_are_simulated_by_their_own_arns(self):
         from permission_contract import principal_arn
         self.assertTrue(principal_arn("user/meetlab-v2-staging-egress-writer").endswith(":user/meetlab-v2-staging-egress-writer"))

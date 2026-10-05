@@ -991,6 +991,24 @@ async def start_recording(request: Request, _=Depends(verify_api_key)):
     return JSONResponse(payload, status_code=status)
 
 
+def egress_file_output(cfg: dict, filename: str, cloud: bool, local_path: str):
+    """Where a room's video goes. LiveKit Cloud uploads from its own servers: it gets the
+    write-only key with each request. Our own egress (egress_server.tf) uploads with its task
+    role to the bucket its config names: no key travels. Local development: the egress disk."""
+    from livekit.protocol.egress import EncodedFileOutput, S3Upload
+    if cfg["backend"] != "s3":
+        return EncodedFileOutput(filepath=local_path)
+    if not cloud:
+        return EncodedFileOutput(filepath=f"recordings/{filename}")
+    missing = [k for k in ("egress_key_id", "egress_key_secret", "bucket", "region") if not cfg[k]]
+    if missing:
+        raise ValueError(f"S3 not fully configured: {missing}")
+    return EncodedFileOutput(
+        filepath=f"recordings/{filename}",
+        s3=S3Upload(access_key=cfg["egress_key_id"], secret=cfg["egress_key_secret"], bucket=cfg["bucket"],
+                    region=cfg["region"], **({"endpoint": cfg["endpoint"]} if cfg["endpoint"] else {})))
+
+
 async def start_recording_for_room(room_name: str) -> tuple[int, dict]:
     """Start composite egress + per-speaker WAV capture for a room.
 
@@ -1056,22 +1074,10 @@ async def start_recording_for_room(room_name: str) -> tuple[int, dict]:
             )
         }
 
-    if cfg["backend"] == "s3":
-        missing = [k for k in ("egress_key_id", "egress_key_secret", "bucket", "region") if not cfg[k]]
-        if missing:
-            return 500, {"error": f"S3 not fully configured: {missing}"}
-        file_output = EncodedFileOutput(
-            filepath=f"recordings/{filename}",
-            s3=S3Upload(
-                access_key=cfg["egress_key_id"],
-                secret=cfg["egress_key_secret"],
-                bucket=cfg["bucket"],
-                region=cfg["region"],
-                **({"endpoint": cfg["endpoint"]} if cfg["endpoint"] else {}),
-            ),
-        )
-    else:
-        file_output = EncodedFileOutput(filepath=filepath)
+    try:
+        file_output = egress_file_output(cfg, filename, cloud=is_cloud_livekit, local_path=filepath)
+    except ValueError as e:
+        return 500, {"error": str(e)}
     logger.info(
         "recording output prepared: "
         f"room={room_name} backend={cfg['backend']} filepath={file_output.filepath} "

@@ -402,72 +402,13 @@ async def start_bot(request: Request, _=Depends(verify_api_key)):
             logger.error(f"BOT_DISPATCHER is {dispatcher!r}; cannot start a bot for {room_name}")
             return JSONResponse({"error": "BOT_DISPATCHER must be 'ecs' or 'docker'"}, status_code=500)
 
-        session_id = str(uuid.uuid4())
-
         # Persist the caller's custom_data (e.g. requested_by, bot_config_scope from a
         # start link) on the conversation so "which config ran this session" is queryable.
         custom_data = body.get("custom_data")
         conv_meta = dict(custom_data) if isinstance(custom_data, dict) else {}
         if agent_name:
             conv_meta["agent_name"] = agent_name  # bot_task re-mints the same token from the row
-
-        async with AsyncSessionLocal() as session:
-            async with session.begin():
-                await session.execute(
-                    pg_insert(Speaker)
-                    .values(id=bot_identity, meta={"role": "bot"})
-                    .on_conflict_do_nothing(index_elements=["id"])
-                )
-                # One running session per room (uq_conversations_one_running_per_room):
-                # a repeated start returns the session already running, no second bot.
-                inserted = (await session.execute(
-                    pg_insert(Conversation)
-                    .values(id=session_id, room_name=room_name, bot_identity=bot_identity,
-                            status="running", meta=conv_meta)
-                    .on_conflict_do_nothing(index_elements=["room_name"],
-                                            index_where=text("status = 'running'"))
-                    .returning(Conversation.id)
-                )).scalar_one_or_none()
-                running = None if inserted else (await session.execute(
-                    select(Conversation).where(Conversation.room_name == room_name,
-                                               Conversation.status == "running")
-                )).scalar_one()
-
-        if running is not None:
-            logger.info(f"Room {room_name} already has running session {running.id}; not starting another bot")
-            return {
-                "session_id": running.id,
-                "room_name": room_name,
-                "bot_identity": running.bot_identity,
-                "message": "Bot already running in this room",
-                "already_running": True,
-            }
-
-        # The bot reads this row and mints its own token; the session ID makes a retry
-        # the same bot (ECS clientToken, Docker container name).
-        try:
-            if dispatcher == "ecs":
-                task_arn = await asyncio.to_thread(
-                    run_bot_task, _ecs_client(), session_id, EcsBotTarget.from_env(os.environ))
-            else:
-                task_arn = await asyncio.to_thread(
-                    run_bot_container, _docker_api(), session_id, socket.gethostname())
-        except DispatchError as e:
-            async with AsyncSessionLocal() as session, session.begin():
-                await sessions.end(session, [session_id], "dispatch_failed")
-            logger.error(f"bot dispatch failed for {room_name}: {e}")
-            return JSONResponse({"error": str(e), "session_id": session_id}, status_code=503)
-        logger.info(f"Started bot {task_arn} for session {session_id}")
-        if (await load_bot_config(room_name)).auto_record:
-            _record_from_the_start(room_name)
-        logger.info(f"Starting bot session {session_id} in room {room_name}")
-
-        return {
-            "session_id": session_id,
-            "room_name": room_name,
-            "bot_identity": bot_identity,
-            "message": "Bot is joining room",
-        }
+        return await _start_session(room_name, bot_identity, conv_meta, dispatcher)
 
     except Exception as e:
         logger.error(f"Error starting bot: {e}\n{traceback.format_exc()}")
@@ -1050,6 +991,24 @@ async def start_recording(request: Request, _=Depends(verify_api_key)):
     return JSONResponse(payload, status_code=status)
 
 
+def egress_file_output(cfg: dict, filename: str, cloud: bool, local_path: str):
+    """Where a room's video goes. LiveKit Cloud uploads from its own servers: it gets the
+    write-only key with each request. Our own egress (egress_server.tf) uploads with its task
+    role to the bucket its config names: no key travels. Local development: the egress disk."""
+    from livekit.protocol.egress import EncodedFileOutput, S3Upload
+    if cfg["backend"] != "s3":
+        return EncodedFileOutput(filepath=local_path)
+    if not cloud:
+        return EncodedFileOutput(filepath=f"recordings/{filename}")
+    missing = [k for k in ("egress_key_id", "egress_key_secret", "bucket", "region") if not cfg[k]]
+    if missing:
+        raise ValueError(f"S3 not fully configured: {missing}")
+    return EncodedFileOutput(
+        filepath=f"recordings/{filename}",
+        s3=S3Upload(access_key=cfg["egress_key_id"], secret=cfg["egress_key_secret"], bucket=cfg["bucket"],
+                    region=cfg["region"], **({"endpoint": cfg["endpoint"]} if cfg["endpoint"] else {})))
+
+
 async def start_recording_for_room(room_name: str) -> tuple[int, dict]:
     """Start composite egress + per-speaker WAV capture for a room.
 
@@ -1115,22 +1074,10 @@ async def start_recording_for_room(room_name: str) -> tuple[int, dict]:
             )
         }
 
-    if cfg["backend"] == "s3":
-        missing = [k for k in ("egress_key_id", "egress_key_secret", "bucket", "region") if not cfg[k]]
-        if missing:
-            return 500, {"error": f"S3 not fully configured: {missing}"}
-        file_output = EncodedFileOutput(
-            filepath=f"recordings/{filename}",
-            s3=S3Upload(
-                access_key=cfg["egress_key_id"],
-                secret=cfg["egress_key_secret"],
-                bucket=cfg["bucket"],
-                region=cfg["region"],
-                **({"endpoint": cfg["endpoint"]} if cfg["endpoint"] else {}),
-            ),
-        )
-    else:
-        file_output = EncodedFileOutput(filepath=filepath)
+    try:
+        file_output = egress_file_output(cfg, filename, cloud=is_cloud_livekit, local_path=filepath)
+    except ValueError as e:
+        return 500, {"error": str(e)}
     logger.info(
         "recording output prepared: "
         f"room={room_name} backend={cfg['backend']} filepath={file_output.filepath} "
@@ -1203,6 +1150,109 @@ async def stop_recording(request: Request, _=Depends(verify_api_key)):
     return {"stopped": len(active)}
 
 
+
+async def _start_session(room_name: str, bot_identity: str, conv_meta: dict, dispatcher: str):
+    """Record a running session for the room and dispatch its bot: /start, and the rejoin sweep
+    (a resumed session carries meta.resumes). One running session per room, so a repeat returns
+    the session already running."""
+    session_id = str(uuid.uuid4())
+    async with AsyncSessionLocal() as session:
+        async with session.begin():
+            await session.execute(
+                pg_insert(Speaker)
+                .values(id=bot_identity, meta={"role": "bot"})
+                .on_conflict_do_nothing(index_elements=["id"])
+            )
+            # One running session per room (uq_conversations_one_running_per_room):
+            # a repeated start returns the session already running, no second bot.
+            inserted = (await session.execute(
+                pg_insert(Conversation)
+                .values(id=session_id, room_name=room_name, bot_identity=bot_identity,
+                        status="running", meta=conv_meta)
+                .on_conflict_do_nothing(index_elements=["room_name"],
+                                        index_where=text("status = 'running'"))
+                .returning(Conversation.id)
+            )).scalar_one_or_none()
+            running = None if inserted else (await session.execute(
+                select(Conversation).where(Conversation.room_name == room_name,
+                                           Conversation.status == "running")
+            )).scalar_one()
+
+    if running is not None:
+        logger.info(f"Room {room_name} already has running session {running.id}; not starting another bot")
+        return {
+            "session_id": running.id,
+            "room_name": room_name,
+            "bot_identity": running.bot_identity,
+            "message": "Bot already running in this room",
+            "already_running": True,
+        }
+
+    # The bot reads this row and mints its own token; the session ID makes a retry
+    # the same bot (ECS clientToken, Docker container name).
+    try:
+        if dispatcher == "ecs":
+            task_arn = await asyncio.to_thread(
+                run_bot_task, _ecs_client(), session_id, EcsBotTarget.from_env(os.environ))
+        else:
+            task_arn = await asyncio.to_thread(
+                run_bot_container, _docker_api(), session_id, socket.gethostname())
+    except DispatchError as e:
+        async with AsyncSessionLocal() as session, session.begin():
+            await sessions.end(session, [session_id], "dispatch_failed")
+        logger.error(f"bot dispatch failed for {room_name}: {e}")
+        return JSONResponse({"error": str(e), "session_id": session_id}, status_code=503)
+    logger.info(f"Started bot {task_arn} for session {session_id}")
+    # A resumed session's room is still being recorded: the recording outlives its bot.
+    if not conv_meta.get("resumes") and (await load_bot_config(room_name)).auto_record:
+        _record_from_the_start(room_name)
+    logger.info(f"Starting bot session {session_id} in room {room_name}")
+
+    return {
+        "session_id": session_id,
+        "room_name": room_name,
+        "bot_identity": bot_identity,
+        "message": "Bot is joining room",
+    }
+
+
+async def _humans_in_room(room_name: str) -> int:
+    """People (not bots: identity "bot_…") in the room now, by LiveKit's roster."""
+    from livekit.protocol.room import ListParticipantsRequest
+    async with api.LiveKitAPI(url=_lk_http_url(), api_key=LIVEKIT_API_KEY, api_secret=LIVEKIT_API_SECRET) as lk:
+        people = (await lk.room.list_participants(ListParticipantsRequest(room=room_name))).participants
+    return sum(not p.identity.startswith("bot_") for p in people)
+
+
+async def rejoin_dead_sessions() -> list[str]:
+    """A room whose bot died (rejoin.DEATHS) with people still in it gets a new bot that resumes
+    the conversation (rejoin.py). Only a room's latest session counts, so a chain grows one link
+    per death and stops at rejoin.MAX_REJOINS. Returns the new session IDs."""
+    from rejoin import DEATHS, WINDOW, chain, rejoin_due
+
+    now = datetime.now(timezone.utc)
+    async with AsyncSessionLocal() as db:
+        dead = (await db.execute(select(Conversation).where(
+            Conversation.status == "error", Conversation.ended_at > now - WINDOW,
+            Conversation.meta["ended_by"].astext.in_(DEATHS)))).scalars().all()
+        started = []
+        for room in {d.room_name for d in dead}:
+            rows = {r.id: r for r in (await db.execute(
+                select(Conversation).where(Conversation.room_name == room))).scalars()}
+            latest = max(rows.values(), key=lambda r: r.started_at)
+            if latest.status == "running" or latest.meta.get("ended_by") not in DEATHS:
+                continue  # it has a bot, or its last session ended on purpose
+            if not rejoin_due(latest, len(chain(rows, latest.id)), await _humans_in_room(room), False, now):
+                continue
+            meta = {k: v for k, v in latest.meta.items() if k != "ended_by"} | {"resumes": latest.id}
+            identity = f"bot_{_room_slug(room)}_{uuid.uuid4().hex[:10]}"
+            result = await _start_session(room, identity, meta, os.environ.get("BOT_DISPATCHER", ""))
+            if isinstance(result, dict) and not result.get("already_running"):
+                logger.warning(f"rejoin: the bot of session {latest.id} died; session {result['session_id']} resumes it")
+                started.append(result["session_id"])
+    return started
+
+
 async def reconcile_stale_conversations(min_age_seconds: int = 60) -> int:
     """Close conversations stuck on 'running' whose LiveKit room no longer exists.
 
@@ -1265,7 +1315,8 @@ async def _start_conversation_reconcile_loop() -> "asyncio.Task | None":
     # while the new one started). Each write below is conditional on 'running', so N
     # processes cost N LiveKit round-trips per tick, never a wrong status.
 
-    interval = int(os.environ.get("CONVERSATION_RECONCILE_INTERVAL_SECONDS", "120"))
+    # 30 s: a dead bot is replaced within about a minute (TTL 30 s + a tick + its start).
+    interval = int(os.environ.get("CONVERSATION_RECONCILE_INTERVAL_SECONDS", "30"))
 
     async def _loop() -> None:
         while True:
@@ -1273,6 +1324,7 @@ async def _start_conversation_reconcile_loop() -> "asyncio.Task | None":
             try:
                 await reconcile_stale_conversations()
                 await fail_silent_sessions(AsyncSessionLocal, stop=_stop_bot)
+                await rejoin_dead_sessions()
             except Exception as e:
                 logger.warning(f"conversation reconcile loop error: {e}")
 

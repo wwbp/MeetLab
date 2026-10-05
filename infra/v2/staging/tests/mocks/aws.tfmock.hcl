@@ -49,3 +49,10 @@ mock_resource "aws_lb_listener" {
     arn = "arn:aws:elasticloadbalancing:us-east-1:123456789012:listener/app/meetlab-v2-staging/0123456789abcdef/0123456789abcdef"
   }
 }
+
+# The node's address comes back after the cluster is created (egress_server.tf).
+mock_resource "aws_elasticache_cluster" {
+  defaults = {
+    cache_nodes = [{ address = "meetlab-v2-staging-redis.abc123.0001.use1.cache.amazonaws.com", port = 6379, id = "0001", availability_zone = "us-east-1a", outpost_arn = "" }]
+  }
+}

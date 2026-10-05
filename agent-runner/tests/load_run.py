@@ -259,7 +259,8 @@ def _fmt(v, f="{:.0f}"):
 
 def main() -> int:
     profile_name, shape = os.getenv("PROFILE", "ours"), os.getenv("SHAPE", "smoke")
-    profile = json.loads((PROFILES / f"{profile_name}.json").read_text())
+    # OVERRIDES: a few Bot Config fields on top of the profile, one experiment at a time (B4).
+    profile = {**json.loads((PROFILES / f"{profile_name}.json").read_text()), **json.loads(os.getenv("OVERRIDES") or "{}")}
     steps = schedule(shape, int(os.getenv("TARGET", "50")), int(os.getenv("HOLD_S", "0")))
     peak = max(s.rooms for s in steps)
     # Split runs (SHARD "i/n"): n generators share the run's id and start time (T0) and each runs

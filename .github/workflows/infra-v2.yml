@@ -35,7 +35,8 @@ permissions:
 
 # A deploy has its own group: GitHub keeps one pending run per group, so sharing one
 # with PR plans let a PR push silently cancel a queued deploy (2026-10-03, #138).
-# A PR's newer push supersedes its own plan; plans wait on the state lock (-lock-timeout).
+# A PR's newer push supersedes its own plan. A PR's plan only reads the state, so it takes no
+# lock (-lock=false): its lock once failed a deploy's drift check (2026-10-04).
 concurrency:
   group: ${{ github.event_name == 'push' && 'infra-v2-staging-deploy' || format('infra-v2-plan-{0}', github.ref) }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
@@ -75,7 +76,7 @@ jobs:
         run: |
           set -euo pipefail
           terraform init -input=false
-          terraform plan -input=false -no-color -lock-timeout=5m -out=tfplan \
+          terraform plan -input=false -no-color -lock=false -out=tfplan \
             -var="image_tag=${{ github.event.pull_request.head.sha }}"
           terraform show -no-color tfplan > plan.txt
       - name: Post plan on the PR
@@ -124,7 +125,7 @@ jobs:
           terraform apply -input=false -no-color tfplan
       - name: Verify no drift after apply
         working-directory: infra/v2/staging
-        run: terraform plan -input=false -no-color -detailed-exitcode -var="image_tag=${{ github.sha }}"
+        run: terraform plan -input=false -no-color -lock-timeout=5m -detailed-exitcode -var="image_tag=${{ github.sha }}"
       # Which LiveKit the live tests join (parameter names, never values), and whether it records video.
       - name: LiveKit for the live tests
         id: livekit

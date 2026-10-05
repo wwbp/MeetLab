@@ -634,6 +634,8 @@ async def _bot(runner_args: LiveKitRunnerArguments):
         tts = MockTTSService(text_aggregation_mode=_tts_mode)
     else:
         tts = _build_tts(bot_config, openai_api_key, elevenlabs_api_key, _tts_mode)
+        from clause_aggregator import install
+        install(tts, bot_config.tts_aggregation_mode)  # "clause": the first clause, then sentences
     logger.info(
         f"TTS: provider={bot_config.tts_provider} voice={bot_config.tts_voice}"
         f" aggregation={bot_config.tts_aggregation_mode}"

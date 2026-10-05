@@ -641,7 +641,10 @@ async def _bot(runner_args: LiveKitRunnerArguments):
         f" aggregation={bot_config.tts_aggregation_mode}"
     )
 
-    context = LLMContext()  # the system prompt is an LLM setting (_build_llm)
+    # The system prompt is an LLM setting (_build_llm). A resumed session (its bot died with
+    # people in the room, rejoin.py) starts from the conversation so far.
+    resume = runner_args.resume
+    context = LLMContext(messages=list(resume["messages"]) if resume else None)
     context_aggregator = LLMContextAggregatorPair(
         context,
         user_params=build_user_aggregator_params(bot_config),
@@ -1163,9 +1166,11 @@ async def _bot(runner_args: LiveKitRunnerArguments):
     async def on_first_participant_joined(transport, participant_id):
         logger.info(f"First participant joined: {participant_id}")
         await asyncio.sleep(1)
-        await say(bot_config.greeting)
+        if not resume:  # a resumed bot carries on: the room already heard its greeting
+            await say(bot_config.greeting)
         if bot_config.session_limit_minutes > 0:
-            close_task = asyncio.create_task(_announce_close(time.monotonic()))
+            # The session clock started with the conversation, not with this bot.
+            close_task = asyncio.create_task(_announce_close(time.monotonic() - (resume or {}).get("elapsed_s", 0)))
             _bg_tasks.add(close_task)
             close_task.add_done_callback(_bg_tasks.discard)
 

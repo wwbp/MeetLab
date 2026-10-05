@@ -21,10 +21,11 @@ def parse_args(argv):
     return p.parse_args(argv)
 
 
-def runner_args_for(row, url: str, token: str) -> LiveKitRunnerArguments:
+def runner_args_for(row, url: str, token: str, resume=None) -> LiveKitRunnerArguments:
     return LiveKitRunnerArguments(url=url, token=token, room_name=row.room_name,
                                   session_id=row.id, bot_identity=row.bot_identity,
-                                  handle_sigterm=True)  # ECS StopTask -> graceful end
+                                  handle_sigterm=True,  # ECS StopTask -> graceful end
+                                  resume=resume)
 
 
 async def main(session_id: str) -> int:
@@ -32,8 +33,11 @@ async def main(session_id: str) -> int:
     from db.engine import AsyncSessionLocal
     from db.models import Conversation
 
+    from rejoin import load_resume
+
     async with AsyncSessionLocal() as s:
         row = await s.get(Conversation, session_id)
+        resume = await load_resume(s, row) if row is not None else None
     if row is None:
         logger.error(f"bot_task: no session {session_id}")
         return 2
@@ -53,7 +57,10 @@ async def main(session_id: str) -> int:
     from bot import bot  # heavy (pipecat, models): only once the session is known to exist
 
     logger.info(f"bot_task: session {session_id} in room {row.room_name}")
-    await bot(runner_args_for(row, require(cfg.livekit_url, "LIVEKIT_URL"), token))
+    if resume:
+        logger.warning(f"bot_task: session {session_id} resumes {row.meta['resumes']} "
+                       f"with {len(resume['messages'])} turns ({resume['elapsed_s']:.0f} s in)")
+    await bot(runner_args_for(row, require(cfg.livekit_url, "LIVEKIT_URL"), token, resume))
     return 0
 
 

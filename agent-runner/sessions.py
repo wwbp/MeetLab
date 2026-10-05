@@ -7,7 +7,7 @@ a compare-and-set UPDATE, so the first writer wins and a late one changes nothin
 """
 from datetime import datetime, timezone
 
-from sqlalchemy import update
+from sqlalchemy import func, update
 
 from db.models import Conversation
 
@@ -40,6 +40,8 @@ async def end(db, ids: list[str], event: str) -> list[str]:
     result = await db.execute(
         update(Conversation)
         .where(Conversation.id.in_(ids), Conversation.status == RUNNING)
-        .values(status=transition(RUNNING, event), ended_at=datetime.now(timezone.utc))
+        .values(status=transition(RUNNING, event), ended_at=datetime.now(timezone.utc),
+                # why, too: a rejoin needs "the bot died", which "error" alone can't tell
+                meta=Conversation.meta.op("||")(func.jsonb_build_object("ended_by", event)))
         .returning(Conversation.id))
     return list(result.scalars())

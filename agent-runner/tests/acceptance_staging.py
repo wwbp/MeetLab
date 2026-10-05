@@ -9,7 +9,8 @@ room-gone cleanup can never be what closes a session and hide a failure.
   removed    the bot removed from the room: its task stops by itself, exit 0          (4c PR 4)
   kill9      kill -9 inside the task (ECS Exec): exit 137, and the heartbeat check
              fails the session within 60 s while the participant is still there, and
-             is able to stop its task (a hung bot must not keep running)              (4c PR 5)
+             is able to stop its task (a hung bot must not keep running)              (4c PR 5);
+             then a new bot rejoins with the conversation so far                      (rejoin)
   stop_early       Stop before the bot joins: it never joins, and its task stops
   audio_recording  per-speaker audio reaches the media bucket through the bot's role  (8a)
   video_recording  LiveKit egress uploads the room's mp4 with the egress key          (8b)
@@ -239,7 +240,26 @@ async def scenario_kill9():
             raise Fail("the reconciler failed the session but could not stop its bot (a hung bot would keep running)")
         if after > 60:
             raise Fail(f"failed by heartbeat only {after:.0f}s after the kill (limit 60 s)")
-        return f"exit 137, failed by heartbeat {after:.0f}s after the kill, participant still in the room"
+
+        # Rejoin with context (the user's decision, 2026-10-05): a new bot takes the room and
+        # continues the conversation (here: the greeting the dead bot stored).
+        def new_bot():
+            m.require_participant()
+            return any(p.identity.startswith("bot_") and p.identity != m.bot_identity
+                       for p in m.human.remote_participants.values())
+        await _until(new_bot, 150, "a new bot in the room after the death")
+        rejoined = time.time() - killed_at
+        line = next((l for l in _log_lines("/meetlab-v2/staging/agent-runner", m.session, killed_at)
+                     if "resumes it" in l), None)
+        if not line:
+            raise Fail("a bot joined, but the runner logged no rejoin of this session")
+        resumed = line.split("session ")[-1].split()[0]
+        loaded = next((l for l in _log_lines("/meetlab-v2/staging/bot", resumed, killed_at) if "turns (" in l), "")
+        turns = int(loaded.split(" with ")[1].split()[0]) if " with " in loaded else 0
+        if turns < 1:
+            raise Fail(f"the new bot ({resumed}) did not load the conversation so far: {loaded[:160]!r}")
+        return (f"exit 137, failed by heartbeat {after:.0f}s after the kill; a new bot resumed with "
+                f"{turns} turn(s) {rejoined:.0f}s after the kill, participant still in the room")
 
 
 async def scenario_stop_early():

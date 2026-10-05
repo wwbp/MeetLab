@@ -255,7 +255,11 @@ async def scenario_kill9():
         if not line:
             raise Fail("a bot joined, but the runner logged no rejoin of this session")
         resumed = line.split("session ")[-1].split()[0]
-        loaded = next((l for l in _log_lines("/meetlab-v2/staging/bot", resumed, killed_at) if "turns (" in l), "")
+        # CloudWatch delivers a log line seconds after it's written: wait for it (2026-10-05:
+        # the line was there, "with 2 turns", but read too early).
+        load_line = lambda: next((l for l in _log_lines("/meetlab-v2/staging/bot", resumed, killed_at) if "turns (" in l), "")  # noqa: E731
+        await _until(load_line, 60, "the new bot's log of the conversation it loaded")
+        loaded = load_line()
         turns = int(loaded.split(" with ")[1].split()[0]) if " with " in loaded else 0
         if turns < 1:
             raise Fail(f"the new bot ({resumed}) did not load the conversation so far: {loaded[:160]!r}")

@@ -118,6 +118,20 @@ is what lets you recompute and check it. One exception: someone who joins **with
 Prolific ID gets a code from their display name, so two people both called "Ana" in one room,
 neither with an ID, would share a code. Studies require the ID on the pre-join screen.
 
+## 3. Typed chat (how it behaves today)
+
+Participants can type in the meeting's chat panel as well as speak. Today:
+
+- **The bot receives every chat message**, including ones people send each other, and
+  treats it as that person's turn: it stops what it is saying and **answers aloud**.
+- **It's stored with the spoken turns**, in the same conversation, under the person who
+  typed it, and marked as typed: `source` is `chat` for a typed turn and `speech` for a
+  spoken one (from 2026-10-05; earlier turns have no mark). There is no separate chat log;
+  the stored turns are the record.
+
+**Open question for the team:** should the bot answer every chat message, only ones
+addressed to it, or none (store them only)? Nothing changes until that's decided.
+
 ## Verifying a code
 
 ```bash

@@ -6,7 +6,7 @@ import sys
 import time
 import uuid as _uuid_mod
 from dataclasses import replace
-from datetime import datetime
+from datetime import datetime, timezone
 
 from loguru import logger
 from PIL import Image
@@ -52,7 +52,6 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 import audio_tracks
 from config import load_config, require
 from db.config_loader import load_bot_config
-from chat import chat_message
 from heartbeat import beat_forever
 from livekit_input import LiveKitTransport  # one resampler per participant (F11)
 from presence import wait_until_empty
@@ -517,6 +516,10 @@ async def _bot(runner_args: LiveKitRunnerArguments):
     # Set in on_data_received before queueing frames so on_user_turn_stopped
     # can fall back to it when _sid_to_identity is not yet populated.
     _last_data_sender: list[str | None] = [None]
+    # Chat turns queued and not yet stored: the next stored user turn was typed (meta.source).
+    # ponytail: a spoken turn finishing between a chat's queueing and its storing would take
+    # the mark; a per-turn tag on the frame would close that if it ever matters.
+    _chat_turns_pending: list[int] = [0]
     # last utterance ids for reply_to chaining
     _last_user_utt_id: list[str | None] = [None]
     _last_bot_utt_id: list[str | None] = [None]
@@ -807,8 +810,45 @@ async def _bot(runner_args: LiveKitRunnerArguments):
         ]
     )
 
+    async def _chat_turn(participant_id, text: str) -> None:
+        """Typed chat (RTVI send-text, rtvi.py): the sender's turn, labelled and stored like speech."""
+        logger.info(f"chat from participant {participant_id} ({len(text)} chars)")
+        # Guard against race with on_participant_connected: if this sender isn't
+        # in our SID→identity map yet, look them up directly from the room now.
+        if participant_id not in _sid_to_identity:
+            room = transport._client.room
+            p = _find_participant(room.remote_participants, participant_id)
+            if p:
+                _sid_to_identity[participant_id] = p.identity
+                _sid_to_name[participant_id] = p.name or p.identity.split("__")[0]
+                logger.info(f"chat: self-registered {p.identity} (sid={participant_id})")
+                async with AsyncSessionLocal() as db:
+                    async with db.begin():
+                        await db.execute(
+                            pg_insert(Speaker)
+                            .values(id=p.identity, meta={
+                                "role": "participant",
+                                "display_name": _sid_to_name[participant_id],
+                            })
+                            .on_conflict_do_nothing(index_elements=["id"])
+                        )
+        _last_data_sender[0] = participant_id
+        _chat_turns_pending[0] += 1
+        await task.queue_frames(
+            [
+                InterruptionFrame(),
+                UserStartedSpeakingFrame(),
+                TranscriptionFrame(user_id=participant_id, timestamp=datetime.now(timezone.utc).isoformat(), text=text),
+                UserStoppedSpeakingFrame(),
+            ],
+        )
+
+    from rtvi import OBSERVER_PARAMS, RoomRTVIProcessor
     task = PipelineWorker(
         pipeline,
+        # RTVI to the room: bot ready and who is speaking only (rtvi.py); chat is send-text.
+        rtvi_processor=RoomRTVIProcessor(on_chat=_chat_turn),
+        rtvi_observer_params=OBSERVER_PARAMS,
         params=PipelineParams(
             enable_metrics=True,
             enable_usage_metrics=True,
@@ -945,10 +985,12 @@ async def _bot(runner_args: LiveKitRunnerArguments):
                         reply_to=_last_bot_utt_id[0],
                         ts=ts,
                         text=_spoken_text(message.content, {_sid_to_name.get(speaker_sid), identity.split("__")[0]}),
+                        meta={"source": "chat" if _chat_turns_pending[0] else "speech"},  # typed or said
                     )
                 )
                 await _set_root_utterance_if_needed(db, runner_args.session_id, utt_id)
         _last_user_utt_id[0] = utt_id
+        _chat_turns_pending[0] = max(0, _chat_turns_pending[0] - 1)
         # IDs only, never the words: participants' speech stays out of logs. Live
         # acceptance (transcript) waits for this line.
         logger.info(f"user utterance {utt_id} stored for session {runner_args.session_id}")
@@ -1173,47 +1215,6 @@ async def _bot(runner_args: LiveKitRunnerArguments):
             close_task = asyncio.create_task(_announce_close(time.monotonic() - (resume or {}).get("elapsed_s", 0)))
             _bg_tasks.add(close_task)
             close_task.add_done_callback(_bg_tasks.discard)
-
-    @transport.event_handler("on_data_received")
-    async def on_data_received(transport, data, participant_id):
-        logger.info(f"Received data from participant {participant_id} ({len(data)} bytes)")
-        # Guard against race with on_participant_connected: if this sender isn't
-        # in our SID→identity map yet, look them up directly from the room now.
-        if participant_id not in _sid_to_identity:
-            room = transport._client.room
-            p = _find_participant(room.remote_participants, participant_id)
-            if p:
-                _sid_to_identity[participant_id] = p.identity
-                _sid_to_name[participant_id] = p.name or p.identity.split("__")[0]
-                logger.info(f"on_data_received: self-registered {p.identity} (sid={participant_id})")
-                async with AsyncSessionLocal() as db:
-                    async with db.begin():
-                        await db.execute(
-                            pg_insert(Speaker)
-                            .values(id=p.identity, meta={
-                                "role": "participant",
-                                "display_name": _sid_to_name[participant_id],
-                            })
-                            .on_conflict_do_nothing(index_elements=["id"])
-                        )
-        chat = chat_message(data)
-        if chat is None:
-            logger.warning(f"on_data_received: not a chat message, ignored ({participant_id})")
-            return
-        text, timestamp = chat
-        _last_data_sender[0] = participant_id
-        await task.queue_frames(
-            [
-                InterruptionFrame(),
-                UserStartedSpeakingFrame(),
-                TranscriptionFrame(
-                    user_id=participant_id,
-                    timestamp=timestamp,
-                    text=text,
-                ),
-                UserStoppedSpeakingFrame(),
-            ],
-        )
 
     runner = WorkerRunner(handle_sigterm=runner_args.handle_sigterm)
     status = "error"

@@ -21,6 +21,9 @@ run "livekit_and_egress_meet_through_redis" {
   assert {
     condition = (
       aws_elasticache_cluster.redis[0].node_type == "cache.t4g.micro" &&
+      # Named, not left to AWS: unnamed, AWS checks parametergroup:* and the apply role may only
+      # use default.redis7 (bootstrap). #182-#184's applies were refused for exactly that.
+      aws_elasticache_cluster.redis[0].parameter_group_name == "default.redis7" &&
       anytrue([for r in aws_security_group.redis.ingress : r.from_port == 6379 &&
       toset(coalesce(r.security_groups, [])) == toset([aws_security_group.livekit.id, aws_security_group.egress.id])])
     )

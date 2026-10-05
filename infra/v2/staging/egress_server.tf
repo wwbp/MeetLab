@@ -27,15 +27,16 @@ resource "aws_elasticache_subnet_group" "redis" {
 }
 
 resource "aws_elasticache_cluster" "redis" {
-  count              = var.livekit_self_hosted ? 1 : 0
-  cluster_id         = "meetlab-v2-staging-redis"
-  engine             = "redis"
-  engine_version     = "7.1" # its default parameter group is the one CI may read (bootstrap)
-  node_type          = "cache.t4g.micro"
-  num_cache_nodes    = 1
-  port               = 6379
-  subnet_group_name  = aws_elasticache_subnet_group.redis[0].name
-  security_group_ids = [aws_security_group.redis.id]
+  count                = var.livekit_self_hosted ? 1 : 0
+  cluster_id           = "meetlab-v2-staging-redis"
+  engine               = "redis"
+  engine_version       = "7.1"
+  parameter_group_name = "default.redis7" # named: unnamed, AWS checks parametergroup:* (refused, bootstrap)
+  node_type            = "cache.t4g.micro"
+  num_cache_nodes      = 1
+  port                 = 6379
+  subnet_group_name    = aws_elasticache_subnet_group.redis[0].name
+  security_group_ids   = [aws_security_group.redis.id]
 }
 
 locals {

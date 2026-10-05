@@ -6,13 +6,13 @@ variable "image_tag" {
 variable "stt_nim_enabled" {
   description = "Run staging's Parakeet NIM (an on-demand g6.xlarge, $0.805/hour) and point bots at it; off = Deepgram"
   type        = bool
-  default     = false # off between test runs; on for L3, the comparisons, L6, B2/B3 (2026-10-02/04)
+  default     = true # on for the B4 session (2026-10-05); off after
 }
 
 variable "model_services" {
   description = "Our own models to run, each on an on-demand g6.xlarge ($0.805/hour): llm (Qwen on vLLM), tts (Kokoro)"
   type        = set(string)
-  default     = [] # off between test runs; on for L3, the comparisons, L6, B2/B3 (2026-10-02/04)
+  default     = ["llm", "tts"] # on for the B4 session (2026-10-05); off after
   validation {
     condition     = length(setsubtract(var.model_services, ["llm", "tts"])) == 0
     error_message = "model_services names llm and/or tts"
@@ -50,7 +50,7 @@ variable "tts_replicas" {
 variable "bot_pool_max" {
   description = "Most bot machines at once (c6i.large, about 3 sessions each); a load test raises it"
   type        = number
-  default     = 2 # a load test raises it (35 for B2/B3, 2026-10-04)
+  default     = 12 # raised for the B4 session (30 rooms, ~3 per machine); 2 after
 }
 
 variable "container_insights" {

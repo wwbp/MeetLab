@@ -4,23 +4,21 @@ A running record, updated in the PR that makes each change. Newest first within 
 section. Costs are on-demand us-east-1 list prices per month (730 h), before data
 transfer. Budget rule (2026-09-30): staging may cost up to v1 production's average.
 
-## Where we left off (2026-10-03, end of day)
+## Where we stand (2026-10-05)
 
-**Done and live on staging (all merged to `v2`, acceptance 12/12):**
-- L1 capacity guards, L2 self-hosted LiveKit, L3 our own models (NIM + Qwen2.5-7B **FP8** on vLLM + Kokoro), chosen per room in Bot Config.
-- L5 load harness: *Load test v2* workflow, six standard shapes × stack profiles, fixed SLOs, Fargate load generator; report with participant view, inside-staging view (stage timings, CPU/memory, database).
-- L4 quality, in every load test: hearing (word error rate, fragmented/missed sentences), reply length, answers judged 1–5 (`judge.py`), voice (intelligibility heard back, UTMOS naturalness).
-- One-machine GPU/LiveKit services: stop-first deploys, circuit breaker, zone rebalancing off, model caches on the machine (NIM ready in 0 s after its one build; was ~20 min every restart).
+**Live on staging, checked after every deploy (15 live scenarios):** our own models (Parakeet NIM, Qwen2.5-7B FP8, Kokoro) chosen per room in Bot Config; self-hosted LiveKit with TURN over TLS on 443 (D1); load testing with quality scores, split across load generators; the study flow (D2). **Capacity 84 rooms** (~140 people) inside every rule, everyone answered to 102 (B3). Parts, sizes and numbers: `docs/v2-infrastructure.md` (D3).
 
-**Unblocked by going public (Manual actions):** GitHub Actions had stopped starting jobs (*"recent account payments have failed or your spending limit needs to be increased"*). The repo is public for now; to return to private, a self-hosted runner or the org's spending limit.
+**In progress:** B4 latency on our models: the end-of-turn timer at 50 ms and Start speaking at the first clause, one change per run (`docs/latency-options.md` for the fastest providers per stage).
 
-**Running, costing money:** the three GPU services (NIM, Qwen, Kokoro) are on: ~$2.50/hour (~$60/day). Switching them off is a PR (`model_services = []`, `stt_nim_enabled = false`), which needs Actions.
+**Next, the user's decisions of 2026-10-05:**
+1. **Video recording (egress) on self-hosted LiveKit**: built and tested even if production picks LiveKit Cloud for cost or requirements. Every session needs video (2026-10-01).
+2. **RTVI** as the standard protocol between the bot and the browser over LiveKit (design plan iteration 10, F13).
+3. **A bot that dies mid-meeting rejoins with context**: a new bot takes the room and continues from the stored turns.
+4. Then the **production cutover** (v1 → v2): paid vendors (OpenAI, ElevenLabs) come back with it; production sizes per the Decisions table.
 
-**Next, in order:**
-1. The first like-for-like comparison: *Load test v2* `load`, target 3, `hold_s=180`, profile `ours`, then `v1` (both runs failed to start on the billing block).
-2. Decide reply length: replies run 83–105 words and the judge scores *suits speech* 1.7–2.5 (local rehearsal). A shorter-replies instruction is a product decision (the console config is shared with v1).
-3. Follow-ups found today (table below): first-turn speaker-label race; fragmentation of paused sentences.
-4. L6: ramp to 50–100 rooms (raise `bot_pool_max`), the report.
+**Settled:** users are the lab's researchers and the developer (one console login stays); utterances and audio are already per speaker (F11); prompting is the researchers' (C1 dropped from the plan).
+
+**Not running:** GPUs are off between test sessions (a PR switches them).
 
 ## Plan after L6 (2026-10-04, user's order)
 
@@ -28,9 +26,9 @@ transfer. Budget rule (2026-09-30): staging may cost up to v1 production's avera
 1b. 📌 **Signed join links** (F10's other half: today anyone who names a room can join it and get its token). Pinned by the user: today's start links (one participant, one bot) need rethinking first.
 2. ✅ **B2** spike: a study launching at once (50 rooms in 30 s passed, #160). 3. ✅ **B3** target 100 rooms: **capacity 84 rooms** inside every rule, everyone answered to 102 (2 load generators, #169–#172).
 4. **C2** every bot setting (STT, TTS, LLM, VAD or smart turn, prompts) chosen in Bot Config, piped through and tested: ✅ C2a audit (#164: one field was missing from the form; CI parity check); ✅ C2b smart turn as an add-on with its wait (#166, #168), C2c judged on pilot speech. ✅ **C3** the first speaker's name (#163; it also fixed the lost Prolific ID).
-5. 🟡 **D1** TURN server: LiveKit's own, over TLS on 443 (turn-staging.wwbp.org). 6. ✅ **D2** study-flow live tests (#167). 7. **D3** record the infra configuration with its capacity and latency numbers.
+5. ✅ **D1** TURN server: LiveKit's own, over TLS on 443 (turn-staging.wwbp.org), checked live by a relay-only Chromium (#173–#176). 6. ✅ **D2** study-flow live tests (#167). 7. ✅ **D3** the infra configuration with its capacity and latency numbers: `docs/v2-infrastructure.md`.
 
-Not now: **B1** soak (sessions last 5–20 min, the breakpoint run already kept rooms busy for over an hour). Pinned for the end: **A2** back to a private repo; **B4** bot join latency and other latency tweaks. The user's: **C1** the short-replies prompt line, per study; **C4** a human-rated sample of the quality scores.
+Not now: **B1** soak (sessions last 5–20 min, the breakpoint run already kept rooms busy for over an hour). Pinned for the end: **A2** back to a private repo; **B4** bot join latency and other latency tweaks. The user's: **C4** a human-rated sample of the quality scores. (**C1**, prompting, is the researchers': dropped 2026-10-05.) In progress: **B4** latency (timer, first clause).
 
 ## Cost
 

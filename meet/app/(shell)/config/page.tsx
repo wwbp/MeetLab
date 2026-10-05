@@ -362,13 +362,14 @@ export default function ConfigPage() {
                   required
                 />
               </Field>
-              <Field label="Start speaking" help="Whether the voice waits for a whole first sentence or starts as words arrive.">
+              <Field label="Start speaking" help="How much of the reply the voice waits for before it speaks: a whole sentence, the first clause (sooner, then whole sentences), or each word as it arrives (ElevenLabs only: other voices make one request per word).">
                 <select
                   value={form.tts_aggregation_mode}
                   onChange={(e) => setForm((f) => ({ ...f, tts_aggregation_mode: e.target.value }))}
                   className={sel}
                 >
                   <option value="sentence">after the first full sentence (default)</option>
+                  <option value="clause">after the first clause (sooner; then whole sentences)</option>
                   <option value="token">as words arrive (sooner, may sound choppier)</option>
                 </select>
               </Field>

@@ -71,3 +71,23 @@ run "public_routes_to_the_igw_private_to_the_nat" {
     error_message = "every subnet must be associated with its route table"
   }
 }
+
+# AWS accepts only these characters in a security group's description, and the mock provider
+# doesn't check: "LiveKit's" (an apostrophe) failed D1's first apply (2026-10-04).
+run "security_group_descriptions_use_only_what_aws_accepts" {
+  command = plan
+
+  variables {
+    livekit_self_hosted = true
+  }
+
+  assert {
+    condition = alltrue([for d in concat([
+      aws_security_group.alb.description, aws_security_group.app.description, aws_security_group.db.description,
+      aws_security_group.livekit.description, aws_security_group.turn_lb.description, aws_security_group.loadgen.description,
+      aws_security_group.stt_nim_lb.description, aws_security_group.stt_nim.description,
+      ], [for g in aws_security_group.model_lb : g.description], [for g in aws_security_group.model : g.description]) :
+    can(regex("^[a-zA-Z0-9. _:/()#,@\\[\\]+=&;{}!$*-]*$", d))])
+    error_message = "a security group description has a character AWS refuses (e.g. an apostrophe)"
+  }
+}

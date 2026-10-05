@@ -128,6 +128,12 @@ class TestServerSide(unittest.TestCase):
         self.assertEqual(s["replies"], 20)
         self.assertNotIn("tts_ttfb_ms", s)
 
+    def test_the_wait_for_the_first_sentence_is_reported(self):
+        # The LLM's first sentence, before the voice can start: logged by the bot, missing from
+        # the report until 2026-10-05 (B4: ~700 ms of the reply time was unaccounted for).
+        s = stage_summary([{"latency_ms": 1500.0, "sentence_agg_ms": float(ms)} for ms in range(100, 2100, 100)])
+        self.assertEqual(s["sentence_agg_ms"]["p95"], 1900.0)
+
 
 class TestShards(unittest.TestCase):
     """Two load generators, half the rooms each (one 16-vCPU generator tops out at ~75 rooms)."""

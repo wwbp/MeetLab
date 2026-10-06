@@ -86,6 +86,54 @@ class SyncTest(Fixture):
         sync.assert_awaited_once()
 
 
+class LoopTest(unittest.TestCase):
+    def test_startup_starts_the_background_loop(self):
+        """#206 slid reconcile_tick between the startup decorator and the loop: startup ran one
+        tick and never started the loop, so dead bots went undetected (staging, 2026-10-06)."""
+        startup = runner.app.router.on_startup
+        self.assertIn(runner._start_conversation_reconcile_loop, startup)
+        self.assertNotIn(runner.reconcile_tick, startup)
+
+
+class ForgottenRecordingTest(Fixture):
+    """A recording LiveKit no longer knows (a restarted LiveKit forgets them) is resolved once,
+    from the file itself, instead of being asked about, and warned about, every tick."""
+
+    def add(self, eg, hours_ago):
+        async def add():
+            from datetime import datetime, timedelta, timezone
+            from db.engine import AsyncSessionLocal
+            from db.models import MediaFile
+            async with AsyncSessionLocal() as db, db.begin():
+                db.add(MediaFile(id=str(uuid.uuid4()), conv_id=self.conv, type="recording", status="pending",
+                                 path=f"recordings/{eg}.mp4", meta={"egress_id": eg},
+                                 created_at=datetime.now(timezone.utc) - timedelta(hours=hours_ago)))
+        _run(add())
+
+    def sync(self, stored):
+        lk = mock.MagicMock()
+        lk.__aenter__.return_value = lk
+        lk.egress.list_egress = mock.AsyncMock(side_effect=Exception("TwirpError(code=not_found, message=egress not found)"))
+        with mock.patch.object(runner.api, "LiveKitAPI", return_value=lk), \
+             mock.patch.object(runner.storage, "exists", side_effect=lambda p: p in stored):
+            _run(runner.sync_pending_recordings())
+
+    def test_its_file_is_there_so_it_is_available(self):
+        self.add("EG_kept", 1)
+        self.sync({"recordings/EG_kept.mp4"})
+        self.assertEqual(self.recordings(), {"EG_kept": "available"})
+
+    def test_no_file_after_six_hours_so_it_failed(self):
+        self.add("EG_lost", 7)
+        self.sync(set())
+        self.assertEqual(self.recordings(), {"EG_lost": "failed"})
+
+    def test_no_file_yet_so_it_may_still_be_uploading(self):
+        self.add("EG_young", 1)
+        self.sync(set())
+        self.assertEqual(self.recordings(), {"EG_young": "pending"})
+
+
 class AutoRecordTest(Fixture):
     def test_a_busy_recorder_is_waited_for(self):
         calls = iter([BUSY, BUSY, (200, {"egress_id": "EG_ok"})])

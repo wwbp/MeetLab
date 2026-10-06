@@ -10,9 +10,10 @@ variables {
   image_tag = "test"
 }
 
-# The user's minimum (2026-10-06): production holds 20 rooms at any time, with nobody
-# pressing Prepare for study. Numbers from the load tests (docs/v2-infrastructure.md).
-run "production_holds_20_rooms_unprepared_and_grows_to_100" {
+# Production is sized to use, not to a peak (user's decision after the cost audit, 2026-10-06:
+# v1's busiest month was 31 session-hours). Scheduled studies get their capacity from Prepare
+# for study; anything bigger is a profile change, every limit having been measured.
+run "production_is_lean_and_scales_on_request" {
   command = plan
 
   variables {
@@ -21,33 +22,23 @@ run "production_holds_20_rooms_unprepared_and_grows_to_100" {
   }
 
   assert {
-    condition     = aws_autoscaling_group.bots.min_size * 3 >= 20
-    error_message = "bot machines always warm for 20 rooms (3 sessions each, BOTS_PER_INSTANCE)"
+    condition     = aws_autoscaling_group.bots.min_size == 1 && aws_autoscaling_group.bots.max_size * 3 >= 100
+    error_message = "one warm bot machine (3 rooms at once, unprepared); Prepare grows the pool to 100 rooms"
   }
   assert {
-    condition     = aws_autoscaling_group.bots.max_size * 3 >= 100
-    error_message = "Prepare for study can grow the pool to 100 rooms (the spike's size)"
+    condition     = !local.livekit_self_hosted && local.egress_count == 0
+    error_message = "media and video recording on LiveKit Cloud (Ship: 100 recordings at once): no LiveKit machine or recorder of our own"
   }
   assert {
-    condition     = contains(["c6i.large", "c6i.xlarge"], aws_launch_template.livekit.instance_type)
-    error_message = "LiveKit: c6i.large ran 60 rooms at 57% CPU (L6), c6i.xlarge 100 at 51% (spike)"
+    condition     = aws_db_instance.this.multi_az && aws_db_instance.this.instance_class == "db.t4g.small"
+    error_message = "a standby in a second zone (no data loss); t4g.small took 165 connections at 102 rooms (B3)"
   }
   assert {
-    condition     = aws_db_instance.this.multi_az && aws_db_instance.this.instance_class == "db.t4g.medium"
-    error_message = "the database across two zones (user's decision); 100 rooms used 135 connections, medium allows ~400"
-  }
-  assert {
-    condition     = local.stt_nim_enabled && length(local.model_services) == 0
-    error_message = "like v1: Parakeet NIM always on, OpenAI and ElevenLabs (no self-hosted model GPUs)"
-  }
-  assert {
-    condition     = local.egress_count >= 1
-    error_message = "every session is recorded: a recording machine is always up (sized for 20 rooms once measured)"
+    condition     = !local.stt_nim_enabled && length(local.model_services) == 0
+    error_message = "no GPU kept on: speech-to-text GPU only when a study needs it (switch point measured); paid LLM and voice"
   }
 }
 
-# A test session raises staging's profile for a run (GPUs, recorders, a bigger pool), so only
-# what must never be on staging is pinned: always-warm machines and a second database zone.
 run "staging_keeps_nothing_warm" {
   command = plan
 

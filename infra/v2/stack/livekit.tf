@@ -14,8 +14,8 @@ locals {
   livekit_host = "livekit${var.hostname_suffix}.wwbp.org"
   turn_host    = "turn${var.hostname_suffix}.wwbp.org"
   # What meet, the runner and the bots connect with: ours when switched on, LiveKit Cloud otherwise.
-  livekit_environment = var.livekit_self_hosted ? [{ name = "LIVEKIT_URL", value = "wss://${local.livekit_host}" }] : []
-  livekit_secrets = var.livekit_self_hosted ? [
+  livekit_environment = local.livekit_self_hosted ? [{ name = "LIVEKIT_URL", value = "wss://${local.livekit_host}" }] : []
+  livekit_secrets = local.livekit_self_hosted ? [
     { name = "LIVEKIT_API_KEY", valueFrom = "${local.parameters}/SELFHOSTED_LIVEKIT_API_KEY" },
     { name = "LIVEKIT_API_SECRET", valueFrom = "${local.parameters}/SELFHOSTED_LIVEKIT_API_SECRET" },
     ] : [for n in ["LIVEKIT_URL", "LIVEKIT_API_KEY", "LIVEKIT_API_SECRET"] :
@@ -24,7 +24,7 @@ locals {
 
 output "livekit" {
   description = "Which LiveKit the live tests use, and whether it records video"
-  value = var.livekit_self_hosted ? {
+  value = local.livekit_self_hosted ? {
     url = "wss://${local.livekit_host}", key_parameter = "SELFHOSTED_LIVEKIT_API_KEY", secret_parameter = "SELFHOSTED_LIVEKIT_API_SECRET", video = local.egress_count > 0
     } : {
     url = null, key_parameter = "LIVEKIT_API_KEY", secret_parameter = "LIVEKIT_API_SECRET", video = true
@@ -188,7 +188,7 @@ resource "aws_ecs_task_definition" "livekit" {
 }
 
 resource "aws_lb_target_group" "livekit" {
-  count       = var.livekit_self_hosted ? 1 : 0
+  count       = local.livekit_self_hosted ? 1 : 0
   name        = "${local.name}-livekit"
   port        = 7880
   protocol    = "HTTP"
@@ -200,7 +200,7 @@ resource "aws_lb_target_group" "livekit" {
 }
 
 resource "aws_lb_listener_rule" "livekit" {
-  count        = var.livekit_self_hosted ? 1 : 0
+  count        = local.livekit_self_hosted ? 1 : 0
   listener_arn = aws_lb_listener.https.arn
   priority     = 10
   action {
@@ -215,7 +215,7 @@ resource "aws_lb_listener_rule" "livekit" {
 }
 
 resource "aws_route53_record" "livekit" {
-  count   = var.livekit_self_hosted ? 1 : 0
+  count   = local.livekit_self_hosted ? 1 : 0
   zone_id = data.aws_route53_zone.wwbp.zone_id
   name    = local.livekit_host
   type    = "A"
@@ -227,7 +227,7 @@ resource "aws_route53_record" "livekit" {
 }
 
 resource "aws_ecs_service" "livekit" {
-  count           = var.livekit_self_hosted ? 1 : 0
+  count           = local.livekit_self_hosted ? 1 : 0
   name            = "${local.name}-livekit"
   cluster         = aws_ecs_cluster.this.id
   task_definition = aws_ecs_task_definition.livekit.arn
@@ -276,7 +276,7 @@ resource "aws_security_group" "turn_lb" {
 }
 
 resource "aws_lb" "turn" {
-  count              = var.livekit_self_hosted ? 1 : 0
+  count              = local.livekit_self_hosted ? 1 : 0
   name               = "${local.name}-turn"
   internal           = false
   load_balancer_type = "network"
@@ -285,7 +285,7 @@ resource "aws_lb" "turn" {
 }
 
 resource "aws_lb_target_group" "turn" {
-  count              = var.livekit_self_hosted ? 1 : 0
+  count              = local.livekit_self_hosted ? 1 : 0
   name               = "${local.name}-turn"
   port               = 5349
   protocol           = "TCP"
@@ -295,7 +295,7 @@ resource "aws_lb_target_group" "turn" {
 }
 
 resource "aws_lb_listener" "turn" {
-  count             = var.livekit_self_hosted ? 1 : 0
+  count             = local.livekit_self_hosted ? 1 : 0
   load_balancer_arn = aws_lb.turn[0].arn
   port              = 443
   protocol          = "TLS"
@@ -308,7 +308,7 @@ resource "aws_lb_listener" "turn" {
 }
 
 resource "aws_route53_record" "turn" {
-  count   = var.livekit_self_hosted ? 1 : 0
+  count   = local.livekit_self_hosted ? 1 : 0
   zone_id = data.aws_route53_zone.wwbp.zone_id
   name    = local.turn_host
   type    = "A"

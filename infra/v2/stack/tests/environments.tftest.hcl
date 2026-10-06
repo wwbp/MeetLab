@@ -33,8 +33,9 @@ run "production_has_its_own_names" {
   command = plan
 
   variables {
-    env             = "prod"
-    hostname_suffix = "-v2"
+    env                 = "prod"
+    hostname_suffix     = "-v2"
+    livekit_self_hosted = true # production uses LiveKit Cloud; its own names if it ever self-hosts
   }
 
   assert {

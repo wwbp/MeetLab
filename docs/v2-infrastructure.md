@@ -75,6 +75,16 @@ environment. Staging's is raised by a pull request for a test and lowered after,
 always-on cost stays the same; production's holds 20 rooms at any time (the user's
 minimum, 2026-10-06), and Prepare for study grows the bots to 100 rooms.
 
+## Video recording
+
+Measured 2026-10-06 (`infra/v2/LEDGER.md`, Measurements): on our own recorders a recorded room
+uses about 1.6 CPU (a `c6i.2xlarge`: 36% at 2 rooms, 64% at 3, saturated at 5); booking 2 CPU per
+recording makes a full recorder refuse rather than degrade. Production records on LiveKit Cloud
+(Ship: 100 at once, $0.02 a minute after 600) instead: at our use that costs far less than
+recorders of our own (decided 2026-10-06). Staging keeps the self-hosted recorder, off between tests.
+When no recorder is free, auto-record waits up to 10 minutes, then marks the session's recording
+`failed`, so the console shows it has no video.
+
 ## Caveats
 
 - **One run per configuration.** Repeat a run before a decision rests on a small difference.

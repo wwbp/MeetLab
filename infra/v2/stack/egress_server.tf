@@ -21,13 +21,13 @@ resource "aws_security_group" "redis" {
 }
 
 resource "aws_elasticache_subnet_group" "redis" {
-  count      = var.livekit_self_hosted ? 1 : 0
+  count      = local.livekit_self_hosted ? 1 : 0
   name       = "${local.name}-redis"
   subnet_ids = [for s in aws_subnet.private : s.id]
 }
 
 resource "aws_elasticache_cluster" "redis" {
-  count                = var.livekit_self_hosted ? 1 : 0
+  count                = local.livekit_self_hosted ? 1 : 0
   cluster_id           = "${local.name}-redis"
   engine               = "redis"
   engine_version       = "7.1"
@@ -40,7 +40,7 @@ resource "aws_elasticache_cluster" "redis" {
 }
 
 locals {
-  redis_address = var.livekit_self_hosted ? "${aws_elasticache_cluster.redis[0].cache_nodes[0].address}:6379" : ""
+  redis_address = local.livekit_self_hosted ? "${aws_elasticache_cluster.redis[0].cache_nodes[0].address}:6379" : ""
 }
 
 resource "aws_security_group" "egress" {
@@ -189,7 +189,7 @@ resource "aws_ecs_capacity_provider" "egress" {
 }
 
 resource "aws_ecs_service" "egress" {
-  count           = var.livekit_self_hosted ? 1 : 0
+  count           = local.livekit_self_hosted ? 1 : 0
   name            = "${local.name}-egress"
   cluster         = aws_ecs_cluster.this.id
   task_definition = aws_ecs_task_definition.egress.arn

@@ -200,7 +200,7 @@ resource "aws_iam_role_policy" "execution_ngc" {
 }
 
 resource "aws_lb" "stt_nim" {
-  count              = var.stt_nim_enabled ? 1 : 0
+  count              = local.stt_nim_enabled ? 1 : 0
   name               = "${local.name}-stt-nim"
   internal           = true
   load_balancer_type = "network"
@@ -209,7 +209,7 @@ resource "aws_lb" "stt_nim" {
 }
 
 resource "aws_lb_target_group" "stt_nim" {
-  count              = var.stt_nim_enabled ? 1 : 0
+  count              = local.stt_nim_enabled ? 1 : 0
   name               = "${local.name}-stt-nim"
   port               = 9000
   protocol           = "TCP"
@@ -223,7 +223,7 @@ resource "aws_lb_target_group" "stt_nim" {
 }
 
 resource "aws_lb_listener" "stt_nim" {
-  count             = var.stt_nim_enabled ? 1 : 0
+  count             = local.stt_nim_enabled ? 1 : 0
   load_balancer_arn = aws_lb.stt_nim[0].arn
   port              = 9000
   protocol          = "TCP"
@@ -234,7 +234,7 @@ resource "aws_lb_listener" "stt_nim" {
 }
 
 resource "aws_ecs_service" "stt_nim" {
-  count           = var.stt_nim_enabled ? 1 : 0
+  count           = local.stt_nim_enabled ? 1 : 0
   name            = "${local.name}-stt-nim"
   cluster         = aws_ecs_cluster.this.id
   task_definition = aws_ecs_task_definition.stt_nim.arn

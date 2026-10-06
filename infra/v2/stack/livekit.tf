@@ -25,7 +25,7 @@ locals {
 output "livekit" {
   description = "Which LiveKit the live tests use, and whether it records video"
   value = var.livekit_self_hosted ? {
-    url = "wss://${local.livekit_host}", key_parameter = "SELFHOSTED_LIVEKIT_API_KEY", secret_parameter = "SELFHOSTED_LIVEKIT_API_SECRET", video = var.egress_count > 0
+    url = "wss://${local.livekit_host}", key_parameter = "SELFHOSTED_LIVEKIT_API_KEY", secret_parameter = "SELFHOSTED_LIVEKIT_API_SECRET", video = local.egress_count > 0
     } : {
     url = null, key_parameter = "LIVEKIT_API_KEY", secret_parameter = "LIVEKIT_API_SECRET", video = true
   }
@@ -70,7 +70,7 @@ resource "aws_security_group" "livekit" {
 resource "aws_launch_template" "livekit" {
   name          = "${local.name}-livekit"
   image_id      = data.aws_ssm_parameter.ecs_ami.value
-  instance_type = var.livekit_instance_type # c6i.large; raised for big load tests
+  instance_type = local.livekit_instance_type # c6i.large; raised for big load tests
   network_interfaces {
     associate_public_ip_address = true
     security_groups             = [aws_security_group.livekit.id]

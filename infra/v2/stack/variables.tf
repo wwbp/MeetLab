@@ -22,15 +22,15 @@ variable "image_tag" {
 variable "stt_nim_enabled" {
   description = "Run staging's Parakeet NIM (an on-demand g6.xlarge, $0.805/hour) and point bots at it; off = Deepgram"
   type        = bool
-  default     = false # off between test runs; on for L3, the comparisons, L6, B2/B3, B4, the 100-room spike (2026-10-02/05)
+  default     = null # the profile (profiles.tf); a load test switches it on
 }
 
 variable "model_services" {
   description = "Our own models to run, each on an on-demand g6.xlarge ($0.805/hour): llm (Qwen on vLLM), tts (Kokoro)"
   type        = set(string)
-  default     = [] # off between test runs; on for L3, the comparisons, L6, B2/B3, B4, the 100-room spike (2026-10-02/05)
+  default     = null # the profile (profiles.tf); a load test switches them on
   validation {
-    condition     = length(setsubtract(var.model_services, ["llm", "tts"])) == 0
+    condition     = var.model_services == null || length(setsubtract(coalesce(var.model_services, []), ["llm", "tts"])) == 0
     error_message = "model_services names llm and/or tts"
   }
 }
@@ -38,27 +38,27 @@ variable "model_services" {
 variable "bot_pool_min" {
   description = "Bot machines kept warm at all times (each $62/month); 0 on staging: tests and studies use Prepare for study"
   type        = number
-  default     = 0
+  default     = null # the profile (profiles.tf)
 }
 
 variable "livekit_instance_type" {
   description = "Self-hosted LiveKit's machine; a big load test raises it (57% CPU on c6i.large at 60 rooms)"
   type        = string
-  default     = "c6i.large" # c6i.xlarge for B2/B3 and the 100-room spike
+  default     = null # the profile (profiles.tf); c6i.xlarge for B2/B3 and the 100-room spike
 }
 
 variable "db_instance_class" {
   description = "The database's size; a big load test raises it (101 of ~180 connections at 60 rooms on db.t4g.small)"
   type        = string
-  default     = "db.t4g.small" # db.t3.medium for B3 and the 100-room spike
+  default     = null # the profile (profiles.tf); db.t3.medium for B3 and the 100-room spike
 }
 
 variable "tts_replicas" {
   description = "Voice (Kokoro) GPUs behind its load balancer, each a g6.xlarge; a big load test raises it (first audio 116 -> 260 ms from 24 to 60 rooms)"
   type        = number
-  default     = 1 # 2 for B2/B3 and the 100-room spike
+  default     = null # the profile (profiles.tf); 2 for B2/B3 and the 100-room spike
   validation {
-    condition     = var.tts_replicas >= 1 && var.tts_replicas <= 3
+    condition     = var.tts_replicas == null || (coalesce(var.tts_replicas, 1) >= 1 && coalesce(var.tts_replicas, 1) <= 3)
     error_message = "tts_replicas is 1 to 3"
   }
 }
@@ -66,7 +66,7 @@ variable "tts_replicas" {
 variable "bot_pool_max" {
   description = "Most bot machines at once (c6i.large, about 3 sessions each); a load test raises it"
   type        = number
-  default     = 2 # a load test raises it (40 for the 100-room spike, 2026-10-05)
+  default     = null # the profile (profiles.tf); 40 for the 100-room spike
 }
 
 variable "container_insights" {
@@ -84,5 +84,11 @@ variable "livekit_self_hosted" {
 variable "egress_count" {
   description = "Egress machines recording video on our own LiveKit (egress_server.tf); 0 between studies"
   type        = number
-  default     = 0 # on for a study or a video test (first test passed 2026-10-05, #191)
+  default     = null # the profile (profiles.tf); first video test passed 2026-10-05, #191
+}
+
+variable "db_multi_az" {
+  description = "A standby database in a second zone, taking over in 1-2 minutes if one fails"
+  type        = bool
+  default     = null # the profile (profiles.tf)
 }

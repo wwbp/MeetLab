@@ -152,7 +152,7 @@ resource "aws_launch_template" "egress" {
 resource "aws_autoscaling_group" "egress" {
   name                  = "${local.name}-egress"
   min_size              = 0
-  max_size              = max(var.egress_count, 1)
+  max_size              = max(local.egress_count, 1)
   vpc_zone_identifier   = [for s in aws_subnet.private : s.id]
   protect_from_scale_in = true
   launch_template {
@@ -191,7 +191,7 @@ resource "aws_ecs_service" "egress" {
   name            = "${local.name}-egress"
   cluster         = aws_ecs_cluster.this.id
   task_definition = aws_ecs_task_definition.egress.arn
-  desired_count   = var.egress_count
+  desired_count   = local.egress_count
   # A recording in progress is lost if its task stops: stop old tasks only once new ones run.
   deployment_minimum_healthy_percent = 100
   deployment_maximum_percent         = 200

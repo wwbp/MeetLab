@@ -29,8 +29,8 @@ resource "aws_ecs_task_definition" "meet_app" {
     name              = "meet"
     image             = "${aws_ecr_repository.this["meet"].repository_url}:${var.image_tag}"
     essential         = true
-    cpu               = 256
-    memoryReservation = 512
+    cpu               = 512 # peak ~315 units at 100 rooms joining at once (spike, 2026-10-05)
+    memoryReservation = 512 # peak ~175 MB
     portMappings      = [{ containerPort = 3000, hostPort = 0, protocol = "tcp" }]
     environment = concat(local.livekit_environment, [
       { name = "MEET_BASE_URL", value = "https://meet-staging.wwbp.org" },

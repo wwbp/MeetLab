@@ -97,6 +97,10 @@ run "meet_deploys_safely" {
     condition     = jsondecode(aws_ecs_task_definition.meet_app.container_definitions)[0].image == "${aws_ecr_repository.this["meet"].repository_url}:0123abc"
     error_message = "meet runs the image the pipeline just pushed, by SHA"
   }
+  assert {
+    condition     = jsondecode(aws_ecs_task_definition.meet_app.container_definitions)[0].cpu >= 512
+    error_message = "meet reserves its measured peak: ~315 CPU units when 100 rooms joined at once (spike, 2026-10-05)"
+  }
 }
 
 run "staging_has_its_own_name_and_logs_expire" {

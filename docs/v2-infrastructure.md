@@ -53,7 +53,7 @@ From the 84-room run (big-study configuration) at its capacity, and where each p
 | Voice, time to first sound p95 | 181 ms | 220 ms | doubles from light load (108 ms): the first to grow |
 | Speech to text p95 | 367 ms | 367 ms | flat: far from its limit |
 | LiveKit CPU | ~46% | 49% | about half used on c6i.xlarge (57% at 60 rooms on c6i.large) |
-| meet CPU | 17% | **106%** (a burst) | **the next limit** on a shared t3.medium |
+| meet CPU (% of its reservation) | 17% | 106% (a burst) | not a limit: ~0.3 vCPU at most (123% at the 100-room spike), host under 15%; reservation now 512 |
 | Bot machines CPU | ~45% | 46% | not near |
 | Database connections | 142 | 165 | ~180 on db.t4g.small (enough for ~100 rooms); about twice that on the 4 GB sizes |
 

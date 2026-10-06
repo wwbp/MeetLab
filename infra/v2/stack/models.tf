@@ -31,13 +31,13 @@ locals {
       cache   = null # the image carries the model
     }
   }
-  running_models = { for k, m in local.models : k => m if contains(var.model_services, k) }
+  running_models = { for k, m in local.models : k => m if contains(local.model_services, k) }
   model_environment = concat(
-    contains(var.model_services, "llm") ? [
+    contains(local.model_services, "llm") ? [
       { name = "SELFHOSTED_LLM_URL", value = "http://${aws_lb.model["llm"].dns_name}:8000/v1" },
       { name = "SELFHOSTED_LLM_MODEL", value = local.models.llm.model },
     ] : [],
-    contains(var.model_services, "tts") ? [
+    contains(local.model_services, "tts") ? [
       { name = "KOKORO_TTS_URL", value = "http://${aws_lb.model["tts"].dns_name}:8880/v1" },
     ] : [],
   )
@@ -117,7 +117,7 @@ resource "aws_autoscaling_group" "model" {
   for_each              = local.models
   name                  = "${local.name}-${each.key}"
   min_size              = 0
-  max_size              = each.key == "tts" ? var.tts_replicas : 1 # one task per machine (fixed host port)
+  max_size              = each.key == "tts" ? local.tts_replicas : 1 # one task per machine (fixed host port)
   vpc_zone_identifier   = [for s in aws_subnet.private : s.id]
   protect_from_scale_in = true
   launch_template {
@@ -239,7 +239,7 @@ resource "aws_ecs_service" "model" {
   name            = "${local.name}-${each.key}"
   cluster         = aws_ecs_cluster.this.id
   task_definition = aws_ecs_task_definition.model[each.key].arn
-  desired_count   = each.key == "tts" ? var.tts_replicas : 1
+  desired_count   = each.key == "tts" ? local.tts_replicas : 1
   # One machine (max_size 1): stop the old task first, or the new one can never be placed
   # and the deploy waits forever (FP8, 2026-10-03).
   deployment_minimum_healthy_percent = 0

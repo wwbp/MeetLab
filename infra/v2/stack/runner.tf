@@ -14,7 +14,7 @@ locals {
     { name = "STORAGE_BACKEND", value = "s3" },
     { name = "S3_BUCKET", value = aws_s3_bucket.media.bucket },
     { name = "S3_REGION", value = "us-east-1" },
-    ], var.stt_nim_enabled ? [
+    ], local.stt_nim_enabled ? [
     # Staging's own Parakeet NIM (stt_nim.tf), as v1 runs.
     { name = "NEMOTRON_STT_URL", value = "http://${aws_lb.stt_nim[0].dns_name}:9000" },
     { name = "STT_MODEL_OVERRIDE", value = "parakeet-tdt-0.6b-v2" },
@@ -56,7 +56,7 @@ resource "aws_ecs_task_definition" "runner_app" {
       { name = "BOT_TASK_DEFINITION", value = aws_ecs_task_definition.bot.family },
       { name = "BOT_CAPACITY_PROVIDER", value = aws_ecs_capacity_provider.bots.name },
       { name = "BOT_ASG_NAME", value = aws_autoscaling_group.bots.name }, # Prepare for study
-      { name = "BOT_POOL_MIN", value = tostring(var.bot_pool_min) },
+      { name = "BOT_POOL_MIN", value = tostring(local.bot_pool_min) },
       # heartbeat.py: a session silent for 30 s is failed; look every 10 s.
       { name = "CONVERSATION_RECONCILE_INTERVAL_SECONDS", value = "10" },
     ])

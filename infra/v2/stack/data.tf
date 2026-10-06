@@ -40,14 +40,15 @@ resource "aws_db_subnet_group" "this" {
   subnet_ids = [for s in aws_subnet.private : s.id]
 }
 
-# ponytail: t4g.small, single AZ. Enough for staging (100 sessions heartbeating every
-# 10 s is ~10 writes/s); size up and turn on multi_az before this carries a study.
+# Sized by environment (profiles.tf): staging db.t4g.small in one zone; production
+# db.t4g.medium across two zones.
 resource "aws_db_instance" "this" {
   identifier                  = local.name
   engine                      = "postgres"
   engine_version              = "17"
-  instance_class              = var.db_instance_class # db.t4g.small; raised for big load tests
-  apply_immediately           = true                  # a size change applies on merge, not next week (a few minutes' restart)
+  instance_class              = local.db_instance_class
+  multi_az                    = local.db_multi_az
+  apply_immediately           = true # a size change applies on merge, not next week (a few minutes' restart)
   allocated_storage           = 20
   storage_type                = "gp3"
   storage_encrypted           = true
@@ -65,6 +66,14 @@ resource "aws_db_instance" "this" {
 
 resource "aws_s3_bucket" "media" {
   bucket = "${local.name}-media-${data.aws_caller_identity.current.account_id}"
+}
+
+# Recordings are study data: an overwrite or a delete keeps the earlier version.
+resource "aws_s3_bucket_versioning" "media" {
+  bucket = aws_s3_bucket.media.id
+  versioning_configuration {
+    status = "Enabled"
+  }
 }
 
 resource "aws_s3_bucket_public_access_block" "media" {

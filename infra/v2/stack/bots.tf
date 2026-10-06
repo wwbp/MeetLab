@@ -67,8 +67,8 @@ resource "aws_launch_template" "bots" {
 
 resource "aws_autoscaling_group" "bots" {
   name                  = "${local.name}-bots"
-  min_size              = var.bot_pool_min
-  max_size              = var.bot_pool_max
+  min_size              = local.bot_pool_min
+  max_size              = local.bot_pool_max
   vpc_zone_identifier   = [for s in aws_subnet.private : s.id]
   protect_from_scale_in = true
   launch_template {

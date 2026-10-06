@@ -43,6 +43,8 @@ PROFILES = Path(__file__).parent.parent / "load_profiles"
 SAMPLE_RATE, FRAME_MS = 24000, 20
 GRACE_S = 15      # a step is judged this long after it ends: its last turns' replies arrive late
 MAX_LAG_MS = 500  # a worker's event loop late by more: its microphones were not real time
+VIDEO = os.getenv("VIDEO") == "1"  # every participant also publishes a camera (recording is measured on video)
+CAMERA_W, CAMERA_H, CAMERA_FPS = 640, 480, 15
 
 
 CLIPS = Path("/tmp/load-clips")
@@ -129,6 +131,23 @@ async def _sleep_until(t: float, abort) -> bool:
     return not abort.is_set()
 
 
+_FRAMES: list[bytes] = []
+
+
+async def _camera(source, offset: int, stop):
+    """A participant's camera: the shared looping frames, from its own point in the loop."""
+    if not _FRAMES:
+        from load_plan import camera_frames
+        frames = await asyncio.to_thread(camera_frames, CAMERA_W, CAMERA_H, 2 * CAMERA_FPS)  # off the loop
+        if not _FRAMES:
+            _FRAMES.extend(frames)
+    k = offset
+    while not stop():
+        source.capture_frame(rtc.VideoFrame(CAMERA_W, CAMERA_H, rtc.VideoBufferType.I420, _FRAMES[k % len(_FRAMES)]))
+        k += 1
+        await asyncio.sleep(1 / CAMERA_FPS)
+
+
 async def run_room(i: int, run_id: str, steps, t0: float, profile: dict, console: Console, q, abort):
     from conversation_soak import BotListener, load_turn_audio
 
@@ -147,6 +166,7 @@ async def run_room(i: int, run_id: str, steps, t0: float, profile: dict, console
     leave = window[1]
     name = f"load-{run_id}-{i:03d}"
     rooms, listener, closing = [rtc.Room() for _ in range(people)], BotListener(), {"intentional": False}
+    cameras: list[asyncio.Task] = []
     room = rooms[0]  # the first person also listens for the bot, for everyone
     recorder, recording = ClipRecorder(), None  # recording: where the current clip goes
 
@@ -174,6 +194,11 @@ async def run_room(i: int, run_id: str, steps, t0: float, profile: dict, console
             await r.connect(os.environ["LIVEKIT_URL"], token(name, who, ttl_minutes=24 * 60))
             sources.append(rtc.AudioSource(SAMPLE_RATE, 1, queue_size_ms=120))  # paces capture_frame to real time
             await r.local_participant.publish_track(rtc.LocalAudioTrack.create_audio_track("mic", sources[-1]))
+            if VIDEO:
+                camera = rtc.VideoSource(CAMERA_W, CAMERA_H)
+                await r.local_participant.publish_track(rtc.LocalVideoTrack.create_video_track("camera", camera),
+                                                        rtc.TrackPublishOptions(source=rtc.TrackSource.SOURCE_CAMERA))
+                cameras.append(asyncio.create_task(_camera(camera, 7 * i + p, lambda: closing["intentional"] or abort.is_set())))
         asked = time.time()
         started = await asyncio.to_thread(console.call, "POST", f"/api/concierge/rooms/{name}/bots", {})
         q.put(("session", asked, i, started["request"]["runnerSessionId"]))  # its stored turns, for quality
@@ -352,6 +377,16 @@ def main() -> int:
                 turns, _ = [], print(f"no turns for room {i}: {e}")
             result["rooms"].append({"room": i, "session": session, "turns": turns,
                                     "said": [[t, text] for kind, t, j, text in events if kind == "said" and j == i]})
+        # Video: how many rooms got a finished recording (newest meetings first; the run's are among them).
+        if VIDEO or profile.get("auto_record"):
+            from load_plan import recordings_summary
+            sessions, meetings = [r["session"] for r in result["rooms"]], []
+            for page in range(10):
+                got = console.call("GET", f"/api/meetings?limit=200&offset={200 * page}")["conversations"]
+                meetings += got
+                if not got or set(sessions) <= {m["id"] for m in meetings}:
+                    break
+            result["recordings"] = recordings_summary(meetings, sessions)
         # How good the answers were, per step (judge.py): a sample of replies, each with the
         # conversation before it, scored by a fixed judge model. Skipped without a key.
         if os.getenv("OPENAI_API_KEY"):

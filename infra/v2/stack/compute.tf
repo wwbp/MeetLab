@@ -8,7 +8,8 @@ data "aws_caller_identity" "current" {}
 
 locals {
   # Created by infra/v2/bootstrap. CI can only create roles that carry it.
-  boundary = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:policy/meetlab-v2-boundary"
+  # Each environment's ceiling (infra/v2/bootstrap); staging's predates the second environment.
+  boundary = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:policy/${var.env == "staging" ? "meetlab-v2-boundary" : "${local.name}-boundary"}"
 }
 
 resource "aws_ecs_cluster" "this" {

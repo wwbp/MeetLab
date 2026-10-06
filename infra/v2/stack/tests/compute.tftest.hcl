@@ -94,7 +94,7 @@ run "meet_deploys_safely" {
     error_message = "meet's health route"
   }
   assert {
-    condition     = jsondecode(aws_ecs_task_definition.meet_app.container_definitions)[0].image == "${aws_ecr_repository.this["meet"].repository_url}:0123abc"
+    condition     = jsondecode(aws_ecs_task_definition.meet_app.container_definitions)[0].image == "${data.aws_ecr_repository.this["meet"].repository_url}:0123abc"
     error_message = "meet runs the image the pipeline just pushed, by SHA"
   }
   assert {

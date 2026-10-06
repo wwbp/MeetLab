@@ -44,7 +44,7 @@ resource "aws_ecs_task_definition" "runner_app" {
   task_role_arn            = aws_iam_role.runner_task.arn
   container_definitions = jsonencode([{
     name              = "agent-runner"
-    image             = "${aws_ecr_repository.this["agent-runner"].repository_url}:${var.image_tag}"
+    image             = "${data.aws_ecr_repository.this["agent-runner"].repository_url}:${var.image_tag}"
     essential         = true
     cpu               = 1024
     memoryReservation = 1536

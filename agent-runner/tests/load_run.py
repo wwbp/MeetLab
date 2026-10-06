@@ -136,7 +136,11 @@ async def run_room(i: int, run_id: str, steps, t0: float, profile: dict, console
     from quality import record_turn
 
     library = _library()
-    people = participants_for(i) if library else 1  # 1-3 people, as in studies (library runs)
+    mix = os.getenv("PEOPLE_MIX", "study")  # "equal": as many rooms of 1, 2 and 3 (the 100-room spike)
+    people = participants_for(i, mix) if library else 1  # 1-3 people, as in studies (library runs)
+    # Each room its own share of the library, back to back: a long hold hears whole conversations,
+    # not one repeated (280 Topical-Chat conversations over 100 rooms: 2 each, 4 for one person, ~10 min).
+    per_room = max(1, len(library) // (max(s.rooms for s in steps) * 4 // 3)) if library else 1  # a third of rooms take double
     window = room_window(i, steps, t0)
     if not window or not await _sleep_until(window[0], abort):
         return
@@ -191,7 +195,7 @@ async def run_room(i: int, run_id: str, steps, t0: float, profile: dict, console
         n = SAMPLE_RATE * FRAME_MS // 1000
         # (who speaks, what, their audio, how long the bot has to answer, the pause after)
         if library:
-            script = [(p, line["text"], LIBRARY_DIR / line["audio"], 8.0, 3.0) for p, line in room_plan(i, library)]
+            script = [(p, line["text"], LIBRARY_DIR / line["audio"], 8.0, 3.0) for p, line in room_plan(i, library, per_room, mix)]
         else:
             script = [(0, t.text, None, t.expect_reply_within_s, t.pause_after_s) for t in conversation_for(i)]
         for turn_no, (speaker, text, wav, expect_s, pause_s) in enumerate(t for _ in iter(int, 1) for t in script):

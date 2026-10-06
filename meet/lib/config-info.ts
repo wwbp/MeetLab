@@ -70,10 +70,10 @@ export const CONFIG_INFO: Record<string, Info> = {
     title: 'Speech-to-text model',
     about: 'Turns each person’s speech into text.',
     key: { value: '2.3–2.9%', label: 'words misheard by Parakeet, 6 to 102 rooms' },
-    default: 'parakeet-tdt-0.6b-v2',
+    default: 'Parakeet (our own server)',
     results: [
       { text: 'Parakeet heard 2.3–2.9% of words wrong at every load from 6 to 102 rooms.', source: LOAD },
-      { text: 'Pipecat’s benchmark: Parakeet 1.95% words wrong, final text 221 ms (typical) after speech ends; OpenAI gpt-4o-transcribe 637 ms typical, 1.66 s worst case.', source: 'Pipecat stt-benchmark, Sept 2026' },
+      { text: 'Pipecat’s benchmark: Parakeet 1.95% words wrong, final text 221 ms (typical) after speech ends; OpenAI Transcribe 637 ms typical, 1.66 s worst case.', source: 'Pipecat stt-benchmark, Sept 2026' },
     ],
   },
   stt_delay: {
@@ -124,7 +124,7 @@ export const CONFIG_INFO: Record<string, Info> = {
     about: 'Writes the bot’s replies.',
     key: { value: '0.1 s', label: 'Qwen starts answering (OpenAI: 0.75 s)' },
     results: [
-      { text: 'Qwen starts answering after about 0.1 s; OpenAI’s gpt-5.4-nano after about 0.75 s. Judged answers on a par (4.0–4.2 vs 4.2–4.8 out of 5).', source: VS_V1 },
+      { text: 'Qwen starts answering after about 0.1 s; OpenAI’s GPT nano after about 0.75 s. Judged answers on a par (4.0–4.2 vs 4.2–4.8 out of 5).', source: VS_V1 },
       { text: 'Qwen’s first word: 117 ms at light load, 198 ms at 102 rooms (slowest 1 in 20).', source: LOAD },
     ],
   },

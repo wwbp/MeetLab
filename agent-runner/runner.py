@@ -230,24 +230,21 @@ class _NullableSelectField(SelectField):
 
 
 _LLM_CHOICES = [
-    ("gpt-5.4-nano", "gpt-5.4-nano"),
-    ("gpt-5.4-mini", "gpt-5.4-mini"),
-    ("gpt-4.1-nano", "gpt-4.1-nano"),
-    ("gpt-4.1-mini", "gpt-4.1-mini"),
-    ("gpt-4o-mini", "gpt-4o-mini"),
-    ("Qwen/Qwen2.5-7B-Instruct", "Qwen2.5-7B-Instruct (ours)"),
+    # Named as the console names them (meet/lib/model-choices.ts): plain name, who runs it.
+    ("gpt-5.4-nano", "GPT nano — paid service: OpenAI (default)"),
+    ("gpt-5.4-mini", "GPT mini — paid service: OpenAI"),
+    ("Qwen/Qwen2.5-7B-Instruct", "Qwen — our own server (staging only)"),
+    ("gpt-4.1-nano", "GPT nano, older — paid service: OpenAI"),
+    ("gpt-4.1-mini", "GPT mini, older — paid service: OpenAI"),
+    ("gpt-4o-mini", "GPT-4o mini, older — paid service: OpenAI"),
 ]
 
 _STT_MODEL_CHOICES = [
-    ("parakeet-tdt-0.6b-v2", "parakeet-tdt-0.6b-v2 (Parakeet NIM) (default)"),
-    ("parakeet-unified-en-0.6b", "parakeet-unified-en-0.6b (Parakeet NIM, offline)"),
-    ("nova-3-general", "nova-3-general (Deepgram)"),
-    ("gpt-realtime-whisper", "gpt-realtime-whisper (OpenAI)"),
-    ("gpt-4o-transcribe", "gpt-4o-transcribe (OpenAI)"),
-    ("gpt-4o-mini-transcribe", "gpt-4o-mini-transcribe (OpenAI)"),
-    ("whisper-turbo", "whisper-turbo (local faster-whisper, CPU)"),
-    ("whisper-base", "whisper-base (local faster-whisper, CPU)"),
-    ("whisper-small", "whisper-small (local faster-whisper, CPU)"),
+    ("parakeet-tdt-0.6b-v2", "Parakeet — our own server (default)"),
+    ("nova-3-general", "Deepgram Nova 3 — paid service: Deepgram"),
+    ("gpt-4o-mini-transcribe", "OpenAI Transcribe (mini) — paid service: OpenAI"),
+    ("gpt-4o-transcribe", "OpenAI Transcribe — paid service: OpenAI"),
+    ("gpt-realtime-whisper", "OpenAI Realtime Whisper — paid service: OpenAI"),
 ]
 
 
@@ -282,7 +279,7 @@ class BotConfigAdmin(ModelView, model=BotConfig):
         "stt_model": {"choices": _STT_MODEL_CHOICES},
         "stt_vad_mode": {"choices": [("local", "local")]},
         "stt_delay": {"choices": [("", "— (none)")]},
-        "tts_provider": {"choices": [("elevenlabs", "elevenlabs"), ("openai", "openai"), ("kokoro", "kokoro (ours)")]},
+        "tts_provider": {"choices": [("elevenlabs", "ElevenLabs — paid service: ElevenLabs (default)"), ("openai", "OpenAI voices — paid service: OpenAI"), ("kokoro", "Kokoro — our own server (staging only)")]},
         "tts_aggregation_mode": {"choices": [("sentence", "sentence (default)"), ("clause", "first clause, then sentences"), ("token", "token (lower latency)")]},
         "turn_detection": {"choices": [("silence", "after a silence (default)"), ("smart_turn", "when the speaker sounds finished (smart turn)")]},
         # These two ADD together to form the turn-end window; 450+300=750ms is

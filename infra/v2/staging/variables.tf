@@ -6,13 +6,13 @@ variable "image_tag" {
 variable "stt_nim_enabled" {
   description = "Run staging's Parakeet NIM (an on-demand g6.xlarge, $0.805/hour) and point bots at it; off = Deepgram"
   type        = bool
-  default     = false # off between test runs; on for L3, the comparisons, L6, B2/B3, B4 (2026-10-02/05)
+  default     = true # on for the 100-room spike (2026-10-05); off after
 }
 
 variable "model_services" {
   description = "Our own models to run, each on an on-demand g6.xlarge ($0.805/hour): llm (Qwen on vLLM), tts (Kokoro)"
   type        = set(string)
-  default     = [] # off between test runs; on for L3, the comparisons, L6, B2/B3, B4 (2026-10-02/05)
+  default     = ["llm", "tts"] # on for the 100-room spike (2026-10-05); off after
   validation {
     condition     = length(setsubtract(var.model_services, ["llm", "tts"])) == 0
     error_message = "model_services names llm and/or tts"
@@ -28,19 +28,19 @@ variable "bot_pool_min" {
 variable "livekit_instance_type" {
   description = "Self-hosted LiveKit's machine; a big load test raises it (57% CPU on c6i.large at 60 rooms)"
   type        = string
-  default     = "c6i.large" # c6i.xlarge for the B2/B3 sessions (2026-10-04)
+  default     = "c6i.xlarge" # raised for the 100-room spike (2026-10-05); c6i.large after
 }
 
 variable "db_instance_class" {
   description = "The database's size; a big load test raises it (101 of ~180 connections at 60 rooms on db.t4g.small)"
   type        = string
-  default     = "db.t4g.small" # db.t4g.medium (B2) or db.t3.medium (B3, when t4g had no capacity) for sessions (2026-10-04)
+  default     = "db.t3.medium" # raised for the 100-room spike (2026-10-05); db.t4g.small after
 }
 
 variable "tts_replicas" {
   description = "Voice (Kokoro) GPUs behind its load balancer, each a g6.xlarge; a big load test raises it (first audio 116 -> 260 ms from 24 to 60 rooms)"
   type        = number
-  default     = 1 # 2 for the B2/B3 sessions (2026-10-04)
+  default     = 2 # raised for the 100-room spike (2026-10-05); 1 after
   validation {
     condition     = var.tts_replicas >= 1 && var.tts_replicas <= 3
     error_message = "tts_replicas is 1 to 3"
@@ -50,7 +50,7 @@ variable "tts_replicas" {
 variable "bot_pool_max" {
   description = "Most bot machines at once (c6i.large, about 3 sessions each); a load test raises it"
   type        = number
-  default     = 2 # a load test raises it (35 for B2/B3, 12 for B4, 2026-10-04/05)
+  default     = 40 # raised for the 100-room spike (100 rooms, ~3 per machine); 2 after
 }
 
 variable "container_insights" {

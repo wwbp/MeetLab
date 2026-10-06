@@ -13,7 +13,7 @@ run "the_stack_reads_the_shared_repositories_and_owns_none" {
   command = plan
 
   assert {
-    condition     = toset([for r in data.aws_ecr_repository.this : r.name]) == toset(["meetlab-v2/meet", "meetlab-v2/agent-runner"])
-    error_message = "one repository per image, the shared meetlab-v2/ ones"
+    condition     = toset([for r in data.aws_ecr_repository.this : r.name]) == toset(["meetlab-v2/meet", "meetlab-v2/agent-runner", "meetlab-v2/stt-cpu"])
+    error_message = "one repository per image (stt-cpu: speech-to-text on CPU), the shared meetlab-v2/ ones"
   }
 }

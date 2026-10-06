@@ -14,7 +14,7 @@ BENCHMARK_PARALLEL ?= 3
 
 MSG ?= migration
 
-.PHONY: test-config-parity up down start stop logs migrate migration test test-unit test-integration test-bot-longevity test-multi-speaker test-multi-speaker-audio test-session-lifecycle setup-livekit-cloud revert-livekit-local test-livekit-tooling test-infra scan scan-agent-runner scan-meet benchmark benchmark-audio benchmark-audio-long benchmark-audio-paused benchmark-full benchmark-exp2 benchmark-report simulate soak soak-sanity bench-stt-concurrency bench-idle-room
+.PHONY: test-config-parity up down start stop logs migrate migration test test-unit test-integration test-bot-longevity test-multi-speaker test-multi-speaker-audio test-session-lifecycle setup-livekit-cloud revert-livekit-local test-livekit-tooling test-infra test-stt-cpu scan scan-agent-runner scan-meet benchmark benchmark-audio benchmark-audio-long benchmark-audio-paused benchmark-full benchmark-exp2 benchmark-report simulate soak soak-sanity bench-stt-concurrency bench-idle-room
 
 up:
 	$(COMPOSE) up --build -d
@@ -61,6 +61,12 @@ test-unit:
 # services' own tests can't see each other, so this runs on the host from the repo root.
 test-config-parity:
 	python3 agent-runner/tests/config_parity_check.py
+
+# Speech-to-text on CPU (stt-cpu/): the server against recorded fixture clips. Downloads the
+# model once (~650 MB) into the Hugging Face cache; no AWS, no Docker.
+test-stt-cpu:
+	cd stt-cpu && uv run --no-project --with "onnx-asr[cpu,hub]==0.12.*" --with soundfile --with fastapi \
+		--with httpx --with python-multipart python -m unittest test_app -v
 
 # Offline: fmt, validate and `terraform test` (mock provider) for every infra/v2 stack.
 # No AWS credentials needed, so it runs in CI and before any plan.

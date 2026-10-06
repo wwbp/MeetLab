@@ -112,7 +112,9 @@ resource "aws_ecs_task_definition" "egress" {
     command = [join("", [
       "export EGRESS_CONFIG_BODY=\"$(printf 'api_key: %s\\napi_secret: %s\\nws_url: wss://${local.livekit_host}\\n",
       "redis:\\n  address: ${local.redis_address}\\nhealth_port: 8080\\n",
-      "storage:\\n  s3:\\n    bucket: ${aws_s3_bucket.media.bucket}\\n    region: us-east-1\\n' \"$KEY\" \"$SECRET\")\"; ",
+      "storage:\\n  s3:\\n    bucket: ${aws_s3_bucket.media.bucket}\\n    region: us-east-1\\n",
+      local.egress_room_cpu == null ? "" : "cpu_cost:\\n  room_composite_cpu_cost: ${local.egress_room_cpu}\\n",
+      "' \"$KEY\" \"$SECRET\")\"; ",
       "exec /entrypoint.sh", # the image's own start: PulseAudio (Chrome's audio), then egress
     ])]
     logConfiguration = {

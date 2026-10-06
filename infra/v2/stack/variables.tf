@@ -92,3 +92,9 @@ variable "db_multi_az" {
   type        = bool
   default     = null # the profile (profiles.tf)
 }
+
+variable "egress_room_cpu" {
+  description = "CPU the recorder books per room recording (LiveKit's default 4); lowered only to measure how many recordings one machine really holds"
+  type        = number
+  default     = null # the profile (profiles.tf): LiveKit's default
+}

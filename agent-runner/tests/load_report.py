@@ -26,7 +26,7 @@ from quality import clip_reply, reply_for, score_rooms, voice  # noqa: E402
 
 REGION, CLUSTER, DB = "us-east-1", "meetlab-v2-staging", "meetlab-v2-staging"
 SERVICES = ["meet", "agent-runner", "livekit"]          # ECS services with their own CPU/memory
-GROUPS = ["bots", "ecs", "livekit", "llm", "tts", "stt-nim"]  # machine groups (CPU)
+GROUPS = ["bots", "ecs", "livekit", "llm", "tts", "stt-nim", "egress"]  # machine groups (CPU)
 
 
 def _queries():
@@ -138,8 +138,8 @@ def markdown(r: dict) -> str:
     if any("server" in m for m in r["steps"]):
         lines += ["", "**Inside staging** (p95 of the bot's own stage timings; maximum CPU/memory %)", "",
                   "| step | rooms | turn-end wait ms | LLM first token ms | first sentence ms | TTS first audio ms | meet CPU/mem | runner CPU/mem | "
-                  "LiveKit CPU | bot machines CPU | LLM / TTS / STT machine CPU | DB CPU / connections |",
-                  "|---|---|---|---|---|---|---|---|---|---|---|---|"]
+                  "LiveKit CPU | bot machines CPU | LLM / TTS / STT machine CPU | recording machines CPU | DB CPU / connections |",
+                  "|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
         for k, m in enumerate(r["steps"]):
             s, x = m.get("server", {}).get("stages", {}), m.get("server", {}).get("max", {})
             p95 = lambda st: _ms(s.get(st, {}).get("p95"))  # noqa: E731
@@ -147,7 +147,8 @@ def markdown(r: dict) -> str:
             lines.append(f"| {k} | {m['rooms']} | {p95('stt_ms')} | {p95('llm_ttft_ms')} | {p95('sentence_agg_ms')} | {p95('tts_ttfb_ms')} | "
                          f"{g('meet_cpu')}/{g('meet_mem')} | {g('agent-runner_cpu')}/{g('agent-runner_mem')} | "
                          f"{g('livekit_hosts_cpu')} | {g('bots_hosts_cpu')} | "
-                         f"{g('llm_hosts_cpu')} / {g('tts_hosts_cpu')} / {g('stt-nim_hosts_cpu')} | {g('db_cpu')} / {g('db_connections')} |")
+                         f"{g('llm_hosts_cpu')} / {g('tts_hosts_cpu')} / {g('stt-nim_hosts_cpu')} | {g('egress_hosts_cpu')} | "
+                         f"{g('db_cpu')} / {g('db_connections')} |")
     if r.get("rooms"):
         lines += ["", "**Quality** (what the bot heard against what was said; how long it talked)", "",
                   "| step | rooms | sentences | word error rate | fragmented | missed | replies | words p50 / p95 / max | over 40 words "
@@ -170,6 +171,10 @@ def markdown(r: dict) -> str:
                   "| clips scored | skipped (held parts of several replies) | intelligibility: word error rate heard back | naturalness (UTMOS, 1-5) |",
                   "|---|---|---|---|",
                   f"| {v['clips']} | {v.get('skipped', 0)} | {wer} | {natural} |"]
+    if r.get("recordings"):
+        rec = r["recordings"]
+        lines += ["", f"**Recordings**: {rec['available']} of {rec['rooms']} rooms recorded "
+                  f"(failed {rec['failed']}, still pending {rec['pending']}, none asked {rec['none']})"]
     generators = r.get("generators", 1)
     split = f" ({generators} load generators)" if generators > 1 else ""
     lines += ["", f"**Capacity** (largest passing step): {r.get('capacity_rooms')} rooms{split}. "

@@ -177,3 +177,34 @@ def merge_results(results: list[dict], steps: list[Step]) -> dict:
     merged["harness_valid"] = all(m["harness_lag_ms"] == 0 for m in merged["steps"])
     merged["pass"] = all(m["pass"] for m in merged["steps"]) and not merged["sessions_left_running"]
     return merged
+
+
+def camera_frames(width: int = 640, height: int = 480, count: int = 30) -> list[bytes]:
+    """A looping synthetic camera in I420 (the encoder's own format, so no conversion per
+    frame): a drifting gradient, a moving block and fixed grain, so the encoder works about as
+    hard as on a webcam (a still picture costs almost nothing). Made once, shared by everyone."""
+    import numpy as np
+    y, x = np.mgrid[0:height, 0:width]
+    grain = np.random.default_rng(0).integers(0, 12, (height, width), dtype=np.uint8)
+    cy, cx = np.mgrid[0:height // 2, 0:width // 2]
+    frames = []
+    for k in range(count):
+        luma = ((x + y + 4 * k) % 200 + grain).astype(np.uint8)
+        bx, by = k * width // count, height // 3
+        luma[by:by + height // 4, bx:bx + width // 6] = 235
+        u = ((cx + 2 * k) % 256).astype(np.uint8)
+        v = ((cy + k) % 256).astype(np.uint8)
+        frames.append(luma.tobytes() + u.tobytes() + v.tobytes())
+    return frames
+
+
+def recordings_summary(meetings: list[dict], sessions: list[str]) -> dict:
+    """Each room of this run, counted once by its video recording: available, failed, pending,
+    or none asked for."""
+    by_id = {m["id"]: m for m in meetings}
+    out = {"rooms": len(sessions), "available": 0, "failed": 0, "pending": 0, "none": 0}
+    for s in sessions:
+        statuses = [f.get("status") for f in by_id.get(s, {}).get("media_files", []) if f.get("type") == "recording"]
+        key = "available" if "available" in statuses else "failed" if "failed" in statuses else "pending" if statuses else "none"
+        out[key] += 1
+    return out

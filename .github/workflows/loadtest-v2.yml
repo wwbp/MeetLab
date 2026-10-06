@@ -40,6 +40,10 @@ on:
       overrides:
         description: 'Bot Config fields on top of the profile, as JSON, e.g. {"user_speech_timeout_ms": 50}'
         default: "{}"
+      video:
+        description: "Every participant also publishes a camera (640x480, 15 fps), to measure recording; record with overrides {\"auto_record\": true}"
+        type: boolean
+        default: false
       generators:
         description: "Load generators sharing the rooms (one tops out at ~75 rooms); 2 for 100+ rooms"
         type: choice
@@ -88,6 +92,7 @@ jobs:
           GENERATORS: ${{ inputs.generators }}
           OVERRIDES: ${{ inputs.overrides }}
           PEOPLE_MIX: ${{ inputs.mix }}
+          VIDEO: ${{ inputs.video && '1' || '0' }}
         run: |
           set -euo pipefail
           account="$(aws sts get-caller-identity --query Account --output text)"
@@ -107,13 +112,13 @@ jobs:
             overrides="$(jq -n --arg cpu "$CPU" --arg mem "$((CPU * 2))" \
               --arg p "$PROFILE" --arg s "$SHAPE" --arg t "$TARGET" --arg h "$HOLD_S" \
               --arg r "s3://$bucket/$key" --arg g "$GITHUB_SHA" --arg w "$((CPU / 1024))" --arg l "$library" \
-              --arg sh "$i/$GENERATORS" --arg t0 "$t0" --arg id "$run_id" --arg o "$OVERRIDES" --arg mx "$PEOPLE_MIX" \
+              --arg sh "$i/$GENERATORS" --arg t0 "$t0" --arg id "$run_id" --arg o "$OVERRIDES" --arg mx "$PEOPLE_MIX" --arg v "$VIDEO" \
               '{cpu: $cpu, memory: $mem, containerOverrides: [{name: "loadgen", environment: [
                 {name: "PROFILE", value: $p}, {name: "SHAPE", value: $s}, {name: "TARGET", value: $t},
                 {name: "HOLD_S", value: $h}, {name: "RESULTS", value: $r}, {name: "GIT_SHA", value: $g},
                 {name: "WORKERS", value: $w}, {name: "LIBRARY", value: $l},
                 {name: "SHARD", value: $sh}, {name: "T0", value: $t0}, {name: "RUN_ID", value: $id},
-                {name: "OVERRIDES", value: $o}, {name: "PEOPLE_MIX", value: $mx}]}]}')"
+                {name: "OVERRIDES", value: $o}, {name: "PEOPLE_MIX", value: $mx}, {name: "VIDEO", value: $v}]}]}')"
             task="$(aws ecs run-task --cluster "$CLUSTER" --task-definition meetlab-v2-staging-loadgen \
               --launch-type FARGATE --started-by loadtest --network-configuration "$network" \
               --overrides "$overrides" --query 'tasks[0].taskArn' --output text)"

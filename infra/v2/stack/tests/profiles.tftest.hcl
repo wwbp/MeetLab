@@ -46,16 +46,14 @@ run "production_holds_20_rooms_unprepared_and_grows_to_100" {
   }
 }
 
-run "staging_keeps_its_small_sizes" {
+# A test session raises staging's profile for a run (GPUs, recorders, a bigger pool), so only
+# what must never be on staging is pinned: always-warm machines and a second database zone.
+run "staging_keeps_nothing_warm" {
   command = plan
 
   assert {
-    condition = alltrue([
-      aws_autoscaling_group.bots.min_size == 0, aws_autoscaling_group.bots.max_size == 2,
-      !aws_db_instance.this.multi_az, aws_db_instance.this.instance_class == "db.t4g.small",
-      !local.stt_nim_enabled, length(local.model_services) == 0, local.egress_count == 0,
-    ])
-    error_message = "staging between test runs: nothing warm, the smallest sizes"
+    condition     = aws_autoscaling_group.bots.min_size == 0 && !aws_db_instance.this.multi_az
+    error_message = "staging: no always-warm bot machines, one database zone"
   }
 }
 

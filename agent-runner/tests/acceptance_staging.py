@@ -250,10 +250,15 @@ async def scenario_kill9():
                        for p in m.human.remote_participants.values())
         await _until(new_bot, 150, "a new bot in the room after the death")
         rejoined = time.time() - killed_at
-        line = next((l for l in _log_lines("/meetlab-v2/staging/agent-runner", m.session, killed_at)
-                     if "resumes it" in l), None)
-        if not line:
+        # CloudWatch delivers a log line seconds after it's written (2026-10-06: the rejoin was
+        # logged, but read the moment the new bot appeared): wait for it, as below.
+        rejoin_line = lambda: next((l for l in _log_lines("/meetlab-v2/staging/agent-runner", m.session, killed_at)  # noqa: E731
+                                    if "resumes it" in l), None)
+        try:
+            await _until(rejoin_line, 60, "the runner's log of the rejoin")
+        except Fail:
             raise Fail("a bot joined, but the runner logged no rejoin of this session")
+        line = rejoin_line()
         resumed = line.split("session ")[-1].split()[0]
         # CloudWatch delivers a log line seconds after it's written: wait for it (2026-10-05:
         # the line was there, "with 2 turns", but read too early).

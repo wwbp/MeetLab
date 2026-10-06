@@ -86,3 +86,28 @@ run "off_between_studies" {
     error_message = "no egress machine unless switched on; the live tests then skip video"
   }
 }
+
+# Sizing video (2026-10-06): the egress server takes a recording only while its CPU budget
+# lasts (LiveKit's default books 4 CPU per room recording). A measurement lowers the booking
+# so one machine takes more, and watches real CPU; unset, LiveKit's default stands.
+run "the_recording_cpu_booking_is_lowered_only_when_set" {
+  command = plan
+
+  assert {
+    condition     = !strcontains(join("", jsondecode(aws_ecs_task_definition.egress.container_definitions)[0].command), "cpu_cost")
+    error_message = "unset: LiveKit's own booking per recording"
+  }
+}
+
+run "a_measurement_can_lower_the_recording_cpu_booking" {
+  command = plan
+
+  variables {
+    egress_room_cpu = 0.5
+  }
+
+  assert {
+    condition     = strcontains(join("", jsondecode(aws_ecs_task_definition.egress.container_definitions)[0].command), "cpu_cost:\\n  room_composite_cpu_cost: 0.5\\n")
+    error_message = "the egress config books 0.5 CPU per room recording"
+  }
+}

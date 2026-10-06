@@ -14,7 +14,7 @@ import uuid
 import asyncpg
 
 from db.url import database_url
-from migration_check import V1_TO_V2 as ALLOWED, compare, compare_files, fingerprint
+from migration_check import V1_TO_V2 as ALLOWED, compare, compare_files, fingerprint, pilot_rows, prune_to_pilot, restrict
 
 V1_HEAD = "e7c4b9a13d02"  # v1's (main's) last migration; v2 adds six on top
 AGENT_RUNNER = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -105,6 +105,64 @@ class MigrationTest(unittest.TestCase):
         problems = compare(before, after, allowed=ALLOWED).problems
         self.assertIn("utterances: 1 row(s) missing: u2", problems)
         self.assertIn("speakers: 1 row(s) changed: p1", problems)
+
+    def test_the_check_catches_a_row_that_should_not_be_there(self):
+        before = asyncio.run(self._fingerprint())
+        asyncio.run(self._sql("INSERT INTO speakers (id, meta) VALUES ('stray', '{}');"))
+        after = asyncio.run(self._fingerprint(like=before))
+        self.assertIn("speakers: 1 row(s) that should not be there: stray", compare(before, after, allowed=ALLOWED).problems)
+
+
+class PilotOnlyTest(MigrationTest):
+    """v2 production keeps only the pilot (user, 2026-10-06): sessions from start links
+    (`link-*` rooms) and what belongs to them; Bot Config (the study conditions) stays.
+    Load tests, benches and developer tests stay in v1 and its snapshot only."""
+
+    PILOT = """
+    INSERT INTO speakers (id, meta) VALUES ('p-pilot', '{"prolific_id": "5f0c0ffee0000000000000b2"}');
+    INSERT INTO conversations (id, room_name, bot_identity, started_at, ended_at, status, meta) VALUES
+      ('c-pilot', 'link-mubrfzcb-b79ceb1d', 'bot_x', '2026-09-21 14:00+00', '2026-09-21 14:06+00', 'ended', '{}');
+    INSERT INTO utterances (id, speaker_id, conv_id, ts, text, meta) VALUES
+      ('u-pilot', 'p-pilot', 'c-pilot', 1790000000.0, 'I think the second option.', '{}'),
+      ('u-pilot-bot', 'bot_x', 'c-pilot', 1790000001.5, 'Why that one?', '{}');
+    INSERT INTO media_files (id, conv_id, type, status, path, created_at, meta) VALUES
+      ('m-pilot', 'c-pilot', 'audio_track', 'available', 'recordings/pilot.wav', '2026-09-21 14:06+00', '{}');
+    INSERT INTO events (conv_id, type, severity, room_name, payload, created_at) VALUES
+      ('c-pilot', 'room_finished', 'info', 'link-mubrfzcb-b79ceb1d', '{}', '2026-09-21 14:06+00'),
+      (NULL, 'admin_action', 'info', NULL, '{}', '2026-09-21 13:00+00');
+    """
+
+    def test_only_the_pilot_and_bot_config_arrive_and_every_pilot_row_is_whole(self):
+        asyncio.run(self._sql(self.PILOT))
+        before = asyncio.run(self._fingerprint())
+
+        async def keep():
+            c = await asyncpg.connect(self.db.url)
+            try:
+                return await pilot_rows(c)
+            finally:
+                await c.close()
+        kept = asyncio.run(keep())
+        self.assertEqual(kept["conversations"], {"c-pilot"})
+        self.assertEqual(kept["utterances"], {"u-pilot", "u-pilot-bot"})
+        self.assertEqual(kept["speakers"], {"p-pilot", "bot_x"}, "the speakers of kept turns, the bot included")
+
+        self.db.alembic("head")
+
+        async def prune():
+            c = await asyncpg.connect(self.db.url)
+            try:
+                await prune_to_pilot(c)
+            finally:
+                await c.close()
+        asyncio.run(prune())
+        after = asyncio.run(self._fingerprint(like=before))
+
+        report = compare(restrict(before, kept), after, allowed=ALLOWED)
+        self.assertEqual(report.problems, [], "a pilot row lost or changed")
+        self.assertEqual({t: set(v["rows"]) for t, v in after.items() if t != "bot_config"},
+                         {t: kept[t] for t in kept if t != "bot_config"}, "nothing but the pilot remains")
+        self.assertEqual(len(after["bot_config"]["rows"]), 3, "every Bot Config row stays (study conditions)")
 
 
 class FileCheckTest(unittest.TestCase):

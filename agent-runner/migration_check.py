@@ -4,7 +4,7 @@ A fingerprint is one hash per row, keyed by primary key, over the source's colum
 columns a later schema adds don't count as differences. `compare` lists what is missing or
 changed; changes to `allowed` columns are reported apart (they're expected, but are counted).
 
-    uv run python migration_check.py SOURCE_DATABASE_URL TARGET_DATABASE_URL
+    uv run python migration_check.py SOURCE_DATABASE_URL TARGET_DATABASE_URL [--pilot]
 """
 import asyncio
 import hashlib
@@ -19,6 +19,40 @@ import asyncpg
 #  - end-of-turn timer 300 -> 50 ms (c4d2e7f1a9b3): every Bot Config row at 300, the study
 #    conditions included (user's decision, 2026-10-06; all 55 of v1's rows were at 300)
 V1_TO_V2 = {"conversations": {"status", "ended_at"}, "bot_config": {"user_speech_timeout_ms"}}
+
+
+# v2 production keeps only the pilot (user, 2026-10-06): sessions participants joined through
+# start links, and what belongs to them. Bot Config is kept whole (the study conditions).
+PILOT_ROOMS = "link-%"
+_KEPT = f"SELECT id FROM conversations WHERE room_name LIKE '{PILOT_ROOMS}'"
+
+
+async def pilot_rows(conn) -> dict[str, set[str]]:
+    """The primary keys to keep, per table (bot_config: absent = all of it)."""
+    q = {
+        "conversations": _KEPT,
+        "utterances": f"SELECT id FROM utterances WHERE conv_id IN ({_KEPT})",
+        "speakers": f"SELECT DISTINCT speaker_id FROM utterances WHERE conv_id IN ({_KEPT})",
+        "media_files": f"SELECT id FROM media_files WHERE conv_id IN ({_KEPT})",
+        "events": f"SELECT id::text FROM events WHERE conv_id IN ({_KEPT})",
+    }
+    return {t: {r[0] for r in await conn.fetch(sql)} for t, sql in q.items()}
+
+
+async def prune_to_pilot(conn) -> None:
+    """Delete everything but the pilot from a copy (never from v1), children before parents."""
+    async with conn.transaction():
+        await conn.execute(f"DELETE FROM events WHERE conv_id IS NULL OR conv_id NOT IN ({_KEPT})")
+        await conn.execute(f"DELETE FROM media_files WHERE conv_id NOT IN ({_KEPT})")
+        await conn.execute(f"DELETE FROM utterances WHERE conv_id NOT IN ({_KEPT})")
+        await conn.execute(f"DELETE FROM conversations WHERE id NOT IN ({_KEPT})")
+        await conn.execute("DELETE FROM speakers WHERE id NOT IN (SELECT speaker_id FROM utterances)")
+
+
+def restrict(source: dict, keep: dict[str, set[str]]) -> dict:
+    """The source's fingerprint narrowed to the rows that should arrive."""
+    return {t: {**spec, "rows": {pk: v for pk, v in spec["rows"].items() if t not in keep or pk in keep[t]}}
+            for t, spec in source.items()}
 
 
 @dataclass
@@ -71,6 +105,9 @@ def compare(source: dict, target: dict, allowed: dict[str, set[str]] | None = No
         missing = src.keys() - dst.keys()
         if missing:
             report.problems.append(f"{table}: {len(missing)} row(s) missing: {_sample(missing)}")
+        extra = dst.keys() - src.keys()
+        if extra:  # a copy holds what its source held (a pilot copy: the pilot), nothing else
+            report.problems.append(f"{table}: {len(extra)} row(s) that should not be there: {_sample(extra)}")
         changed, expected = [], []
         for pk in src.keys() & dst.keys():
             diff = {c for c in spec["columns"] if src[pk][c] != dst[pk][c]}
@@ -111,10 +148,12 @@ def manifest(bucket: str, s3=None) -> dict[str, tuple]:
     return out
 
 
-async def _main(source_url: str, target_url: str) -> int:
+async def _main(source_url: str, target_url: str, pilot: bool = False) -> int:
     src, dst = await asyncpg.connect(source_url), await asyncpg.connect(target_url)
     try:
         before = await fingerprint(src)
+        if pilot:  # the target was pruned to the pilot (prune_to_pilot): compare just that
+            before = restrict(before, await pilot_rows(src))
         report = compare(before, await fingerprint(dst, like=before), allowed=V1_TO_V2)
     finally:
         await src.close()
@@ -130,4 +169,4 @@ async def _main(source_url: str, target_url: str) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(asyncio.run(_main(sys.argv[1], sys.argv[2])))
+    sys.exit(asyncio.run(_main(sys.argv[1], sys.argv[2], pilot="--pilot" in sys.argv[3:])))

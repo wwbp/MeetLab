@@ -417,28 +417,30 @@ async def _play_wav(room: rtc.Room, path: str, seconds: float):
 
 
 async def scenario_transcript():
-    """Someone speaks; the bot stores their turn. With the NIM on, the transcript comes
-    from staging's own Parakeet NIM, not Deepgram, and the NIM returns no errors."""
-    nim = _service_on("stt-nim")
-    if nim:  # a cold NIM builds its model first (~20 min, v1 docs)
-        waited = await _until(lambda: _service_ready("stt-nim"), 2700, "the STT NIM healthy behind its load balancer")
+    """Someone speaks; the bot stores their turn, transcribed by whichever speech server is on
+    (infra/v2/stack/runner.tf): the GPU NIM if on, else Parakeet on CPU (stt_cpu.tf), else
+    Deepgram. Ours must be the one used, with no errors."""
+    server = "stt-nim" if _service_on("stt-nim") else "stt-cpu" if _service_on("stt-cpu") else None
+    if server:  # a cold NIM builds its model first (~20 min); the CPU server is up in ~1 min
+        waited = await _until(lambda: _service_ready(server), 2700 if server == "stt-nim" else 600,
+                              f"{server} healthy behind its load balancer")
     async with Meeting() as m:
         await asyncio.sleep(5)  # the greeting
         await _play_wav(m.human, SPEECH, 8)
         await _until(lambda: any("user utterance" in l for l in _log_lines("/meetlab-v2/staging/bot", m.session, m.started)),
                      120, "the participant's turn transcribed and stored")
-        if not nim:
-            return "a user turn stored (Deepgram; the NIM is off)"
+        if not server:
+            return "a user turn stored (Deepgram; no speech server of ours is on)"
         stream = f"bot/bot/{m.task.rsplit('/', 1)[-1]}"
         lines = [e["message"] for e in logs.filter_log_events(
             logGroupName="/meetlab-v2/staging/bot", logStreamNames=[stream], startTime=int(m.started * 1000))["events"]]
         # Logged for every session ("override" is only logged when it differs from the
         # stored config, and staging's stored default is already Parakeet).
         if not any("STT: model=parakeet-" in l for l in lines):
-            raise Fail("the bot did not use the NIM's model")
+            raise Fail(f"the bot did not use Parakeet ({server})")
         if any("NemotronHTTPSTTService error" in l for l in lines):
-            raise Fail("the NIM returned errors")
-        return f"a user turn stored, transcribed by staging's NIM (ready after {waited:.0f} s)"
+            raise Fail(f"{server} returned errors")
+        return f"a user turn stored, transcribed by {server} (ready after {waited:.0f} s)"
 
 
 def _capacity(method="GET", body=None):

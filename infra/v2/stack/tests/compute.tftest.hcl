@@ -119,6 +119,10 @@ run "staging_has_its_own_name_and_logs_expire" {
 run "per_task_metrics_are_off_unless_a_test_needs_them" {
   command = apply
 
+  variables {
+    container_insights = false # stated, not assumed: a test session may switch it on
+  }
+
   assert {
     condition     = one([for s in aws_ecs_cluster.this.setting : s.value if s.name == "containerInsights"]) == "disabled"
     error_message = "Container Insights is billed per task; off by default"

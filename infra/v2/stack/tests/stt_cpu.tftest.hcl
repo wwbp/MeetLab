@@ -13,6 +13,10 @@ variables {
 run "off_bots_use_deepgram_and_nothing_runs" {
   command = plan
 
+  variables {
+    stt_cpu_enabled = false # stated, not assumed: a test session may switch it on
+  }
+
   assert {
     condition     = length(aws_ecs_service.stt_cpu) == 0 && length(aws_lb.stt_cpu) == 0
     error_message = "off costs nothing"

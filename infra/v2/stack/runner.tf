@@ -31,12 +31,12 @@ locals {
 }
 
 resource "aws_cloudwatch_log_group" "runner" {
-  name              = "/meetlab-v2/staging/agent-runner"
+  name              = "/meetlab-v2/${var.env}/agent-runner"
   retention_in_days = 30
 }
 
 resource "aws_ecs_task_definition" "runner_app" {
-  family                   = "meetlab-v2-staging-agent-runner"
+  family                   = "${local.name}-agent-runner"
   requires_compatibilities = ["EC2"]
   network_mode             = "bridge"
   skip_destroy             = true # see tests/runner.tftest.hcl
@@ -85,7 +85,7 @@ resource "aws_ecs_task_definition" "runner_app" {
 }
 
 resource "aws_ecs_service" "runner" {
-  name                  = "meetlab-v2-staging-agent-runner"
+  name                  = "${local.name}-agent-runner"
   cluster               = aws_ecs_cluster.this.id
   task_definition       = aws_ecs_task_definition.runner_app.arn
   desired_count         = 1

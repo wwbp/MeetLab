@@ -13,7 +13,7 @@
 locals {
   stt_nim_image = "nvcr.io/nim/nvidia/parakeet-0.6b-tdt:latest" # same as v1
   # Stored by a person (docs/v2-deployment.md): {"username":"$oauthtoken","password":"<NGC key>"}.
-  ngc_secret = "arn:aws:secretsmanager:us-east-1:${data.aws_caller_identity.current.account_id}:secret:meetlab-v2/staging/ngc"
+  ngc_secret = "arn:aws:secretsmanager:us-east-1:${data.aws_caller_identity.current.account_id}:secret:meetlab-v2/${var.env}/ngc"
 }
 
 data "aws_ssm_parameter" "ecs_gpu_ami" {
@@ -21,7 +21,7 @@ data "aws_ssm_parameter" "ecs_gpu_ami" {
 }
 
 resource "aws_security_group" "stt_nim_lb" {
-  name        = "meetlab-v2-staging-stt-nim-lb"
+  name        = "${local.name}-stt-nim-lb"
   description = "STT NIM load balancer: app tasks in, the NIM out"
   vpc_id      = aws_vpc.this.id
   ingress {
@@ -39,7 +39,7 @@ resource "aws_security_group" "stt_nim_lb" {
 }
 
 resource "aws_security_group" "stt_nim" {
-  name        = "meetlab-v2-staging-stt-nim"
+  name        = "${local.name}-stt-nim"
   description = "STT NIM instances: the load balancer in; out for the NGC image and model"
   vpc_id      = aws_vpc.this.id
   ingress {
@@ -57,7 +57,7 @@ resource "aws_security_group" "stt_nim" {
 }
 
 resource "aws_launch_template" "stt_nim" {
-  name                   = "meetlab-v2-staging-stt-nim"
+  name                   = "${local.name}-stt-nim"
   image_id               = data.aws_ssm_parameter.ecs_gpu_ami.value
   instance_type          = "g6.xlarge" # smallest GPU that fits Parakeet (LEDGER)
   vpc_security_group_ids = [aws_security_group.stt_nim.id]
@@ -79,16 +79,16 @@ resource "aws_launch_template" "stt_nim" {
   user_data = base64encode("#!/bin/bash\necho ECS_CLUSTER=${aws_ecs_cluster.this.name} >> /etc/ecs/ecs.config\n")
   tag_specifications {
     resource_type = "instance"
-    tags          = { Name = "meetlab-v2-staging-stt-nim", Project = "meetlab-v2", Environment = "staging" }
+    tags          = { Name = "${local.name}-stt-nim", Project = "meetlab-v2", Environment = var.env }
   }
   tag_specifications {
     resource_type = "volume"
-    tags          = { Project = "meetlab-v2", Environment = "staging" }
+    tags          = { Project = "meetlab-v2", Environment = var.env }
   }
 }
 
 resource "aws_autoscaling_group" "stt_nim" {
-  name                  = "meetlab-v2-staging-stt-nim"
+  name                  = "${local.name}-stt-nim"
   min_size              = 0
   max_size              = 1
   vpc_zone_identifier   = [for s in aws_subnet.private : s.id]
@@ -113,7 +113,7 @@ resource "aws_autoscaling_group" "stt_nim" {
 }
 
 resource "aws_ecs_capacity_provider" "stt_nim" {
-  name = "meetlab-v2-staging-stt-nim"
+  name = "${local.name}-stt-nim"
   auto_scaling_group_provider {
     auto_scaling_group_arn         = aws_autoscaling_group.stt_nim.arn
     managed_termination_protection = "ENABLED"
@@ -125,12 +125,12 @@ resource "aws_ecs_capacity_provider" "stt_nim" {
 }
 
 resource "aws_cloudwatch_log_group" "stt_nim" {
-  name              = "/meetlab-v2/staging/stt-nim"
+  name              = "/meetlab-v2/${var.env}/stt-nim"
   retention_in_days = 30
 }
 
 resource "aws_ecs_task_definition" "stt_nim" {
-  family                   = "meetlab-v2-staging-stt-nim"
+  family                   = "${local.name}-stt-nim"
   requires_compatibilities = ["EC2"]
   network_mode             = "bridge"
   skip_destroy             = true # see tests/runner.tftest.hcl
@@ -201,7 +201,7 @@ resource "aws_iam_role_policy" "execution_ngc" {
 
 resource "aws_lb" "stt_nim" {
   count              = var.stt_nim_enabled ? 1 : 0
-  name               = "meetlab-v2-staging-stt-nim"
+  name               = "${local.name}-stt-nim"
   internal           = true
   load_balancer_type = "network"
   subnets            = [for s in aws_subnet.private : s.id]
@@ -210,7 +210,7 @@ resource "aws_lb" "stt_nim" {
 
 resource "aws_lb_target_group" "stt_nim" {
   count              = var.stt_nim_enabled ? 1 : 0
-  name               = "meetlab-v2-staging-stt-nim"
+  name               = "${local.name}-stt-nim"
   port               = 9000
   protocol           = "TCP"
   target_type        = "instance"
@@ -235,7 +235,7 @@ resource "aws_lb_listener" "stt_nim" {
 
 resource "aws_ecs_service" "stt_nim" {
   count           = var.stt_nim_enabled ? 1 : 0
-  name            = "meetlab-v2-staging-stt-nim"
+  name            = "${local.name}-stt-nim"
   cluster         = aws_ecs_cluster.this.id
   task_definition = aws_ecs_task_definition.stt_nim.arn
   desired_count   = 1

@@ -4,7 +4,7 @@
 # never by Terraform, so it is never in state (docs/v2-deployment.md).
 
 resource "aws_iam_user" "egress" {
-  name                 = "meetlab-v2-staging-egress-writer"
+  name                 = "${local.name}-egress-writer"
   permissions_boundary = local.boundary
 }
 

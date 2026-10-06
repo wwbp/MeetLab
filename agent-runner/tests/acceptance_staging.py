@@ -349,7 +349,7 @@ SPEECH = os.path.join(os.path.dirname(__file__), "fixtures", "benchmark_prompt.w
 
 
 def _service_on(name):
-    """A GPU service runs only while switched on (infra/v2/staging: stt_nim.tf, models.tf)."""
+    """A GPU service runs only while switched on (infra/v2/stack: stt_nim.tf, models.tf)."""
     svc = ecs.describe_services(cluster=CLUSTER, services=[f"meetlab-v2-staging-{name}"])["services"]
     return bool(svc) and svc[0]["status"] == "ACTIVE" and svc[0]["desiredCount"] > 0
 
@@ -631,7 +631,7 @@ async def scenario_session_limit():
         await person.disconnect()
 
 
-OUR_LLM = "Qwen/Qwen2.5-7B-Instruct"  # infra/v2/staging/models.tf
+OUR_LLM = "Qwen/Qwen2.5-7B-Instruct"  # infra/v2/stack/models.tf
 
 
 async def scenario_our_models():

@@ -45,7 +45,7 @@ locals {
 
 resource "aws_security_group" "model_lb" {
   for_each    = local.models
-  name        = "meetlab-v2-staging-${each.key}-lb"
+  name        = "${local.name}-${each.key}-lb"
   description = "${each.key} load balancer: app tasks in, the model out"
   vpc_id      = aws_vpc.this.id
   ingress {
@@ -64,7 +64,7 @@ resource "aws_security_group" "model_lb" {
 
 resource "aws_security_group" "model" {
   for_each    = local.models
-  name        = "meetlab-v2-staging-${each.key}"
+  name        = "${local.name}-${each.key}"
   description = "${each.key} instances: the load balancer in; out for the image and weights"
   vpc_id      = aws_vpc.this.id
   ingress {
@@ -83,7 +83,7 @@ resource "aws_security_group" "model" {
 
 resource "aws_launch_template" "model" {
   for_each               = local.models
-  name                   = "meetlab-v2-staging-${each.key}"
+  name                   = "${local.name}-${each.key}"
   image_id               = data.aws_ssm_parameter.ecs_gpu_ami.value
   instance_type          = "g6.xlarge"
   vpc_security_group_ids = [aws_security_group.model[each.key].id]
@@ -105,17 +105,17 @@ resource "aws_launch_template" "model" {
   user_data = base64encode("#!/bin/bash\necho ECS_CLUSTER=${aws_ecs_cluster.this.name} >> /etc/ecs/ecs.config\n")
   tag_specifications {
     resource_type = "instance"
-    tags          = { Name = "meetlab-v2-staging-${each.key}", Project = "meetlab-v2", Environment = "staging" }
+    tags          = { Name = "${local.name}-${each.key}", Project = "meetlab-v2", Environment = var.env }
   }
   tag_specifications {
     resource_type = "volume"
-    tags          = { Project = "meetlab-v2", Environment = "staging" }
+    tags          = { Project = "meetlab-v2", Environment = var.env }
   }
 }
 
 resource "aws_autoscaling_group" "model" {
   for_each              = local.models
-  name                  = "meetlab-v2-staging-${each.key}"
+  name                  = "${local.name}-${each.key}"
   min_size              = 0
   max_size              = each.key == "tts" ? var.tts_replicas : 1 # one task per machine (fixed host port)
   vpc_zone_identifier   = [for s in aws_subnet.private : s.id]
@@ -141,7 +141,7 @@ resource "aws_autoscaling_group" "model" {
 
 resource "aws_ecs_capacity_provider" "model" {
   for_each = local.models
-  name     = "meetlab-v2-staging-${each.key}"
+  name     = "${local.name}-${each.key}"
   auto_scaling_group_provider {
     auto_scaling_group_arn         = aws_autoscaling_group.model[each.key].arn
     managed_termination_protection = "ENABLED"
@@ -154,13 +154,13 @@ resource "aws_ecs_capacity_provider" "model" {
 
 resource "aws_cloudwatch_log_group" "model" {
   for_each          = local.models
-  name              = "/meetlab-v2/staging/${each.key}"
+  name              = "/meetlab-v2/${var.env}/${each.key}"
   retention_in_days = 30
 }
 
 resource "aws_ecs_task_definition" "model" {
   for_each                 = local.models
-  family                   = "meetlab-v2-staging-${each.key}"
+  family                   = "${local.name}-${each.key}"
   requires_compatibilities = ["EC2"]
   network_mode             = "bridge"
   skip_destroy             = true # see tests/runner.tftest.hcl
@@ -202,7 +202,7 @@ resource "aws_ecs_task_definition" "model" {
 
 resource "aws_lb" "model" {
   for_each           = local.running_models
-  name               = "meetlab-v2-staging-${each.key}"
+  name               = "${local.name}-${each.key}"
   internal           = true
   load_balancer_type = "network"
   subnets            = [for s in aws_subnet.private : s.id]
@@ -211,7 +211,7 @@ resource "aws_lb" "model" {
 
 resource "aws_lb_target_group" "model" {
   for_each           = local.running_models
-  name               = "meetlab-v2-staging-${each.key}"
+  name               = "${local.name}-${each.key}"
   port               = each.value.port
   protocol           = "TCP"
   target_type        = "instance"
@@ -236,7 +236,7 @@ resource "aws_lb_listener" "model" {
 
 resource "aws_ecs_service" "model" {
   for_each        = local.running_models
-  name            = "meetlab-v2-staging-${each.key}"
+  name            = "${local.name}-${each.key}"
   cluster         = aws_ecs_cluster.this.id
   task_definition = aws_ecs_task_definition.model[each.key].arn
   desired_count   = each.key == "tts" ? var.tts_replicas : 1

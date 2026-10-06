@@ -1,4 +1,4 @@
-# The v2 staging pipeline: Terraform for infra/v2/staging, then the images.
+# The v2 staging pipeline: Terraform for infra/v2/stack, then the images.
 #
 #   PR into v2  -> offline tests + plan, posted on the PR (read-only role);
 #                  images built but not pushed
@@ -72,10 +72,10 @@ jobs:
           role-to-assume: ${{ vars.TF_PLAN_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
       - name: Plan
-        working-directory: infra/v2/staging
+        working-directory: infra/v2/stack
         run: |
           set -euo pipefail
-          terraform init -input=false
+          terraform init -input=false -backend-config=key=v2/staging/terraform.tfstate
           terraform plan -input=false -no-color -lock=false -out=tfplan \
             -var="image_tag=${{ github.event.pull_request.head.sha }}"
           terraform show -no-color tfplan > plan.txt
@@ -85,14 +85,14 @@ jobs:
         run: |
           set -euo pipefail
           {
-            echo "### Terraform plan — infra/v2/staging"
+            echo "### Terraform plan — infra/v2/stack"
             echo
-            grep -E '^(Plan:|No changes)' infra/v2/staging/plan.txt || true
+            grep -E '^(Plan:|No changes)' infra/v2/stack/plan.txt || true
             echo
             echo '<details><summary>Full plan</summary>'
             echo
             echo '```'
-            head -c 60000 infra/v2/staging/plan.txt
+            head -c 60000 infra/v2/stack/plan.txt
             echo '```'
             echo '</details>'
           } > comment.md
@@ -117,19 +117,19 @@ jobs:
           role-to-assume: ${{ vars.TF_APPLY_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
       - name: Apply
-        working-directory: infra/v2/staging
+        working-directory: infra/v2/stack
         run: |
           set -euo pipefail
-          terraform init -input=false
+          terraform init -input=false -backend-config=key=v2/staging/terraform.tfstate
           terraform plan -input=false -no-color -lock-timeout=5m -out=tfplan -var="image_tag=${{ github.sha }}"
           terraform apply -input=false -no-color tfplan
       - name: Verify no drift after apply
-        working-directory: infra/v2/staging
+        working-directory: infra/v2/stack
         run: terraform plan -input=false -no-color -lock-timeout=5m -detailed-exitcode -var="image_tag=${{ github.sha }}"
       # Which LiveKit the live tests join (parameter names, never values), and whether it records video.
       - name: LiveKit for the live tests
         id: livekit
-        working-directory: infra/v2/staging
+        working-directory: infra/v2/stack
         run: echo "livekit=$(terraform output -json livekit | jq -c .)" >> "$GITHUB_OUTPUT"
 
   # PRs: prove both images still build. No credentials.

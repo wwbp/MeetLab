@@ -9,7 +9,7 @@
 # right-size from a measured recording when studies need many at once (LEDGER).
 
 resource "aws_security_group" "redis" {
-  name        = "meetlab-v2-staging-redis"
+  name        = "${local.name}-redis"
   description = "Redis for LiveKit and its egress"
   vpc_id      = aws_vpc.this.id
   ingress {
@@ -22,13 +22,13 @@ resource "aws_security_group" "redis" {
 
 resource "aws_elasticache_subnet_group" "redis" {
   count      = var.livekit_self_hosted ? 1 : 0
-  name       = "meetlab-v2-staging-redis"
+  name       = "${local.name}-redis"
   subnet_ids = [for s in aws_subnet.private : s.id]
 }
 
 resource "aws_elasticache_cluster" "redis" {
   count                = var.livekit_self_hosted ? 1 : 0
-  cluster_id           = "meetlab-v2-staging-redis"
+  cluster_id           = "${local.name}-redis"
   engine               = "redis"
   engine_version       = "7.1"
   parameter_group_name = "default.redis7" # named: unnamed, AWS checks parametergroup:* (refused, bootstrap)
@@ -44,7 +44,7 @@ locals {
 }
 
 resource "aws_security_group" "egress" {
-  name        = "meetlab-v2-staging-egress"
+  name        = "${local.name}-egress"
   description = "LiveKit egress: outbound only (joins rooms, uploads to S3)"
   vpc_id      = aws_vpc.this.id
   egress {
@@ -56,12 +56,12 @@ resource "aws_security_group" "egress" {
 }
 
 resource "aws_cloudwatch_log_group" "egress" {
-  name              = "/meetlab-v2/staging/egress"
+  name              = "/meetlab-v2/${var.env}/egress"
   retention_in_days = 30
 }
 
 resource "aws_iam_role" "egress_task" {
-  name                 = "meetlab-v2-staging-egress-task"
+  name                 = "${local.name}-egress-task"
   permissions_boundary = local.boundary
   assume_role_policy = jsonencode({
     Version   = "2012-10-17"
@@ -83,7 +83,7 @@ resource "aws_iam_role_policy" "egress_recordings" {
 }
 
 resource "aws_ecs_task_definition" "egress" {
-  family                   = "meetlab-v2-staging-egress"
+  family                   = "${local.name}-egress"
   requires_compatibilities = ["EC2"]
   network_mode             = "bridge"
   skip_destroy             = true # see tests/runner.tftest.hcl
@@ -127,7 +127,7 @@ resource "aws_ecs_task_definition" "egress" {
 }
 
 resource "aws_launch_template" "egress" {
-  name                   = "meetlab-v2-staging-egress"
+  name                   = "${local.name}-egress"
   image_id               = data.aws_ssm_parameter.ecs_ami.value
   instance_type          = "c6i.2xlarge"
   vpc_security_group_ids = [aws_security_group.egress.id]
@@ -141,16 +141,16 @@ resource "aws_launch_template" "egress" {
   user_data = base64encode("#!/bin/bash\necho ECS_CLUSTER=${aws_ecs_cluster.this.name} >> /etc/ecs/ecs.config\n")
   tag_specifications {
     resource_type = "instance"
-    tags          = { Name = "meetlab-v2-staging-egress", Project = "meetlab-v2", Environment = "staging" }
+    tags          = { Name = "${local.name}-egress", Project = "meetlab-v2", Environment = var.env }
   }
   tag_specifications {
     resource_type = "volume"
-    tags          = { Project = "meetlab-v2", Environment = "staging" }
+    tags          = { Project = "meetlab-v2", Environment = var.env }
   }
 }
 
 resource "aws_autoscaling_group" "egress" {
-  name                  = "meetlab-v2-staging-egress"
+  name                  = "${local.name}-egress"
   min_size              = 0
   max_size              = max(var.egress_count, 1)
   vpc_zone_identifier   = [for s in aws_subnet.private : s.id]
@@ -175,7 +175,7 @@ resource "aws_autoscaling_group" "egress" {
 }
 
 resource "aws_ecs_capacity_provider" "egress" {
-  name = "meetlab-v2-staging-egress"
+  name = "${local.name}-egress"
   auto_scaling_group_provider {
     auto_scaling_group_arn         = aws_autoscaling_group.egress.arn
     managed_termination_protection = "ENABLED"
@@ -188,7 +188,7 @@ resource "aws_ecs_capacity_provider" "egress" {
 
 resource "aws_ecs_service" "egress" {
   count           = var.livekit_self_hosted ? 1 : 0
-  name            = "meetlab-v2-staging-egress"
+  name            = "${local.name}-egress"
   cluster         = aws_ecs_cluster.this.id
   task_definition = aws_ecs_task_definition.egress.arn
   desired_count   = var.egress_count

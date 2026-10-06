@@ -1,5 +1,5 @@
 # Load test v2: run one standard load-test shape against staging, on one stack profile,
-# from inside AWS (infra/v2/staging/loadgen.tf). How to run and read it: docs/load-testing.md
+# from inside AWS (infra/v2/stack/loadgen.tf). How to run and read it: docs/load-testing.md
 name: Load test v2
 
 on:

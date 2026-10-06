@@ -1,4 +1,4 @@
-# ECS, load balancer, autoscaling, logs, DNS and IAM for infra/v2/staging, plus the
+# ECS, load balancer, autoscaling, logs, DNS and IAM for infra/v2/stack, plus the
 # permissions boundary every CI-created role must carry.
 
 data "aws_route53_zone" "wwbp" {

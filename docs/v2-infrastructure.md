@@ -70,7 +70,7 @@ In order of what gives first:
 3. **Database connections**: a connection pooler, or a larger database.
 4. **LiveKit**: a larger machine; beyond one machine, a second server needs Redis.
 
-Every size above is a single setting in `infra/v2/staging/variables.tf`, raised by a pull
+Every size above is a single setting in `infra/v2/stack/variables.tf`, raised by a pull
 request for a test or study and lowered after, so the always-on cost stays the same.
 
 ## Caveats

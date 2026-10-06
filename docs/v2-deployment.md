@@ -125,7 +125,7 @@ NVIDIA's free developer program; production needs a licence (ledger).
 ## Switching staging's speech-to-text server on and off
 
 Off by default: bots use Deepgram and the GPU costs nothing. To turn it on, open a PR
-that sets `default = true` on `stt_nim_enabled` in `infra/v2/staging/variables.tf`,
+that sets `default = true` on `stt_nim_enabled` in `infra/v2/stack/variables.tf`,
 and merge it (merge = deploy). What happens:
 
 - An on-demand `g6.xlarge` starts, downloads the server and **builds the model: about
@@ -142,7 +142,7 @@ memory, and the fractional-GPU machines top out at 11.4 GB (ledger).
 ## Switching our own LLM and voice on and off
 
 Same idea, for the language model (Qwen, on vLLM) and the voice (Kokoro): set
-`default = ["llm", "tts"]` on `model_services` in `infra/v2/staging/variables.tf` (or
+`default = ["llm", "tts"]` on `model_services` in `infra/v2/stack/variables.tf` (or
 just one of them) and merge. Each starts its own `g6.xlarge` ($0.805/hour) and
 downloads its model first (minutes). Then, in the console's Bot Config, a room uses
 them by choosing `Qwen/Qwen2.5-7B-Instruct` as its model and `kokoro` as its voice
@@ -152,9 +152,9 @@ then checks a bot answers and speaks on them. Turn them off with `default = []`.
 ## Switching video recording on and off
 
 Our own LiveKit records rooms as video with LiveKit's egress server
-(`infra/v2/staging/egress_server.tf`). It's off between studies. Switch it on **before** a
+(`infra/v2/stack/egress_server.tf`). It's off between studies. Switch it on **before** a
 study or a video test: set `default = 1` on `egress_count` in
-`infra/v2/staging/variables.tf` and merge. That starts one `c6i.2xlarge` ($0.34/hour),
+`infra/v2/stack/variables.tf` and merge. That starts one `c6i.2xlarge` ($0.34/hour),
 which records one room at a time; raise the number for more rooms at once.
 
 A recording asked for while no egress machine is up fails straight away (LiveKit doesn't

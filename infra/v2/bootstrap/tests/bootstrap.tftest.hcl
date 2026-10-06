@@ -412,7 +412,7 @@ run "acceptance_role_is_staging_only_and_least_privilege" {
 }
 
 # The "Load test v2" workflow uses the same role to start the load generator
-# (infra/v2/staging/loadgen.tf) and read its results; a soak outlasts an hour.
+# (infra/v2/stack/loadgen.tf) and read its results; a soak outlasts an hour.
 run "acceptance_can_start_the_load_generator_and_nothing_else" {
   command = plan
 

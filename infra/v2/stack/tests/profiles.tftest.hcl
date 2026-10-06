@@ -71,3 +71,39 @@ run "recordings_are_versioned" {
     error_message = "the media bucket keeps earlier versions"
   }
 }
+
+# Right-sizing bots is a sweep (docs/load-testing.md): a bot's reservation, how many share a
+# machine and the machine type are profile values, and the runner packs by the same number.
+run "bot_size_and_packing_come_from_the_profile" {
+  command = apply
+
+  variables {
+    bot_cpu           = 256
+    bot_memory        = 640
+    bots_per_instance = 6
+    bot_instance_type = "c7i.large"
+  }
+
+  assert {
+    condition = (
+      jsondecode(aws_ecs_task_definition.bot.container_definitions)[0].cpu == 256 &&
+      jsondecode(aws_ecs_task_definition.bot.container_definitions)[0].memoryReservation == 640 &&
+      aws_launch_template.bots.instance_type == "c7i.large" &&
+      contains(local.runner_environment, { name = "BOTS_PER_INSTANCE", value = "6" })
+    )
+    error_message = "the sweep sets a bot's size, the machine, and how many the runner packs on one"
+  }
+}
+
+run "todays_bot_sizes_stay_the_default" {
+  command = apply
+
+  assert {
+    condition = (
+      jsondecode(aws_ecs_task_definition.bot.container_definitions)[0].cpu == 512 &&
+      aws_launch_template.bots.instance_type == "c6i.large" &&
+      contains(local.runner_environment, { name = "BOTS_PER_INSTANCE", value = "3" })
+    )
+    error_message = "until the sweep says otherwise: 512 units, c6i.large, 3 per machine"
+  }
+}

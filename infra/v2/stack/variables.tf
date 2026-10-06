@@ -110,3 +110,27 @@ variable "stt_cpu_instance_type" {
   type        = string
   default     = null # the profile (profiles.tf)
 }
+
+variable "bot_cpu" {
+  description = "CPU units each bot reserves (1024 = 1 vCPU); set by the right-sizing sweep"
+  type        = number
+  default     = null # the profile (profiles.tf)
+}
+
+variable "bot_memory" {
+  description = "Memory each bot reserves, MB; set by the right-sizing sweep"
+  type        = number
+  default     = null # the profile (profiles.tf)
+}
+
+variable "bots_per_instance" {
+  description = "Bots Prepare for study packs onto one bot machine; must fit the machine at the bot's reservation"
+  type        = number
+  default     = null # the profile (profiles.tf)
+}
+
+variable "bot_instance_type" {
+  description = "The bot machines' type; set by the right-sizing sweep"
+  type        = string
+  default     = null # the profile (profiles.tf)
+}

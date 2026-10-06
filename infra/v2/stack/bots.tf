@@ -21,8 +21,8 @@ resource "aws_ecs_task_definition" "bot" {
     name              = "bot"
     image             = "${data.aws_ecr_repository.this["agent-runner"].repository_url}:${var.image_tag}"
     essential         = true
-    cpu               = 512
-    memoryReservation = 1024
+    cpu               = local.bot_cpu # sized by measurement (profiles.tf)
+    memoryReservation = local.bot_memory
     stopTimeout       = 120 # the ECS maximum: SIGTERM, then this long to flush and write ended
     # A bot needs few connections (heartbeat, turn writes); a bounded pool keeps
     # 100 bots inside db.t4g.small's ~180 (db/url.py pool_options).
@@ -45,7 +45,7 @@ resource "aws_ecs_task_definition" "bot" {
 resource "aws_launch_template" "bots" {
   name                   = "${local.name}-bots"
   image_id               = data.aws_ssm_parameter.ecs_ami.value
-  instance_type          = "c6i.large"
+  instance_type          = local.bot_instance_type
   vpc_security_group_ids = [aws_security_group.app.id]
   iam_instance_profile {
     arn = aws_iam_instance_profile.instance.arn

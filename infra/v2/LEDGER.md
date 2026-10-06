@@ -6,9 +6,9 @@ transfer. Budget rule (2026-09-30): staging may cost up to v1 production's avera
 
 ## Where we stand (2026-10-05)
 
-**Live on staging, checked after every deploy (15 live scenarios):** our own models (Parakeet NIM, Qwen2.5-7B FP8, Kokoro) chosen per room in Bot Config; self-hosted LiveKit with TURN over TLS on 443 (D1); load testing with quality scores, split across load generators; the study flow (D2). **Capacity 84 rooms** (~140 people) inside every rule, everyone answered to 102 (B3). Parts, sizes and numbers: `docs/v2-infrastructure.md` (D3).
+**Live on staging, checked after every deploy (15 live scenarios):** our own models (Parakeet NIM, Qwen2.5-7B FP8, Kokoro) chosen per room in Bot Config; self-hosted LiveKit with TURN over TLS on 443 (D1); load testing with quality scores, split across load generators; the study flow (D2). **Capacity 84 rooms** (~140 people) inside every rule, everyone answered to 102 (B3). **100 rooms at once, held 10 min** (~200 people, real long chats): passed, p95 1.87 s (spike, 2026-10-05). Parts, sizes and numbers: `docs/v2-infrastructure.md` (D3).
 
-**In progress:** B4 latency on our models: the end-of-turn timer at 50 ms and Start speaking at the first clause, one change per run (`docs/latency-options.md` for the fastest providers per stage).
+**Done:** B4 latency on our models (end-of-turn timer 50 ms; Start speaking can begin at the first clause; `docs/latency-options.md` for the fastest providers per stage). Staging is back to its small sizes between runs.
 
 **Next, the user's decisions of 2026-10-05:**
 1. **Video recording (egress) on self-hosted LiveKit**: built and tested even if production picks LiveKit Cloud for cost or requirements. Every session needs video (2026-10-01).
@@ -125,6 +125,14 @@ $7.1k in September, all lab projects). So this is priced from what runs:
 | Unclear (2–4 s) | 17 | — | not scored |
 
 On our synthetic Kokoro speech it held only 2 of 9 mid-sentence pauses: synthetic voices can't judge it; on people it removes about three quarters of splits, at the cost of a wait on ~40% of real ends. The backstop wait is the dial between the two.
+
+**100-room spike, 2026-10-05** (`spike`, 100 rooms at once, each held 10 min; profile `ours-short` with B4's defaults (end-of-turn timer 50 ms); conversation library **v2** (Topical-Chat, real long chats), rooms of 1, 2 and 3 people in equal shares (`mix = equal`, ~200 people); 2 load generators; session headroom as B3 (LiveKit c6i.xlarge, database db.t3.medium, 2 voice GPUs, bot pool 40); run 37415166153). **PASS: 100 rooms inside every rule**; harness valid; 0 sessions left.
+
+| Rooms | Turns | Answered | p50 / p95 / p99 | Turn-end wait p95 | LLM first token p95 | First sentence p95 | TTS first audio p95 | LiveKit CPU | meet CPU | Bot machines CPU | DB connections |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| 100 | 3,529 | 100% | 1.25 / 1.87 / 2.18 s | 117 ms | 212 ms | 793 ms | 311 ms | 51% | **123%** | 48% | 135 |
+
+Quality: word error rate 4.7% (B3 2.3–2.9%: longer, topical lines), judged overall 3.9 (n=40), suits speech 4.8; replies p50 10 words, max 34, none over 40; voice 0.6% heard back, UTMOS 4.38. Against B3 at 84 rooms (1.55 / 2.00 s): about 0.3 s faster at p50 and 0.1 s at p95, from B4's timer. Three things to watch: **fragmented sentences 40%** (1,430 of 3,573; B3 ~19%): v2's lines are longer and run several sentences, and silence turn-taking splits them at Kokoro's sentence pauses; smart turn is the fix on real speech (above). **Bot join p95 80 s**: 100 bots starting at once on a pool scaling from 2 to ~34 machines (image pulls), not the bot itself. **meet CPU 123%** (t3.medium bursting, shared with the runner; 106% at B3's 102 rooms): meet is the first part to size up for production.
 
 **B2 spike and B3 climb, 2026-10-04** (profile `ours-short`, conversation library; session headroom: LiveKit c6i.xlarge, database db.t4g.medium, 2 voice GPUs; runs 37173343495, 37173982533):
 

@@ -12,8 +12,8 @@ comparable and costs nothing per run.
 
     make conversation-audio
 
-Fixtures land in tests/fixtures/conversations/ and are deliberately not
-committed: they are generated artefacts, and regenerating them is one command.
+Fixtures land in tests/fixtures/conversations/ and are committed, so every run hears the
+same speech (data/README.md lists every test dataset).
 """
 import asyncio
 import hashlib

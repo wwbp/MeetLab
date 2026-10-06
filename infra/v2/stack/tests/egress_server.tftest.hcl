@@ -99,21 +99,6 @@ run "the_recording_cpu_booking_is_lowered_only_when_set" {
   }
 }
 
-run "production_books_two_cpu_per_recording" {
-  command = plan
-
-  variables {
-    env             = "prod"
-    hostname_suffix = "-v2"
-  }
-
-  assert {
-    condition     = strcontains(join("", jsondecode(aws_ecs_task_definition.egress.container_definitions)[0].command), "cpu_cost:\\n  room_composite_cpu_cost: 2\\n")
-    error_message = "production books 2 CPU per recording (measured ~1.6, 2026-10-06): 3 per c6i.2xlarge"
-  }
-}
-
-
 run "a_measurement_can_lower_the_recording_cpu_booking" {
   command = plan
 

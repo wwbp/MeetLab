@@ -64,7 +64,7 @@ resource "aws_ecs_task_definition" "runner_app" {
     # each request (egress.tf); our own egress uploads with its task role, so then no key at
     # all (egress_server.tf). Bots never hold it. Minted by a person into SSM:
     # docs/v2-deployment.md.
-    secrets = concat(local.bot_secrets, var.livekit_self_hosted ? [] : [for n in ["EGRESS_S3_KEY_ID", "EGRESS_S3_KEY_SECRET"] :
+    secrets = concat(local.bot_secrets, local.livekit_self_hosted ? [] : [for n in ["EGRESS_S3_KEY_ID", "EGRESS_S3_KEY_SECRET"] :
     { name = n, valueFrom = "${local.parameters}/${n}" }])
     healthCheck = {
       command     = ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:7860/health')\""]

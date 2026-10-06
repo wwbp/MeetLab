@@ -94,8 +94,22 @@ run "the_recording_cpu_booking_is_lowered_only_when_set" {
   command = plan
 
   assert {
+    condition     = strcontains(join("", jsondecode(aws_ecs_task_definition.egress.container_definitions)[0].command), "cpu_cost") == (local.egress_room_cpu != null)
+    error_message = "the booking is in the config exactly when the profile (or a run) sets it; unset, LiveKit's own"
+  }
+}
+
+run "production_books_livekits_default" {
+  command = plan
+
+  variables {
+    env             = "prod"
+    hostname_suffix = "-v2"
+  }
+
+  assert {
     condition     = !strcontains(join("", jsondecode(aws_ecs_task_definition.egress.container_definitions)[0].command), "cpu_cost")
-    error_message = "unset: LiveKit's own booking per recording"
+    error_message = "production keeps LiveKit's booking until a measurement says otherwise"
   }
 }
 

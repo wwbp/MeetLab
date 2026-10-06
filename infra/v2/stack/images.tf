@@ -3,7 +3,7 @@
 # The bot task reuses agent-runner with another command.
 
 data "aws_ecr_repository" "this" {
-  for_each = toset(["meet", "agent-runner"])
+  for_each = toset(["meet", "agent-runner", "stt-cpu"])
   name     = "meetlab-v2/${each.key}"
 }
 

@@ -54,6 +54,8 @@ jobs:
         with: { terraform_version: "1.15.1" }
       - run: make test-infra
       - run: make test-config-parity
+      - uses: astral-sh/setup-uv@v6
+      - run: make test-stt-cpu
 
   plan:
     if: github.event_name == 'pull_request'
@@ -142,6 +144,7 @@ jobs:
         include:
           - { name: meet, context: meet, target: runner }
           - { name: agent-runner, context: agent-runner, target: "" }
+          - { name: stt-cpu, context: stt-cpu, target: "" }
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
@@ -167,6 +170,7 @@ jobs:
         include:
           - { name: meet, context: meet, target: runner }
           - { name: agent-runner, context: agent-runner, target: "" }
+          - { name: stt-cpu, context: stt-cpu, target: "" }
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3

@@ -98,3 +98,15 @@ variable "egress_room_cpu" {
   type        = number
   default     = null # the profile (profiles.tf): LiveKit's default
 }
+
+variable "stt_cpu_enabled" {
+  description = "Run speech-to-text on CPU (stt_cpu.tf, Parakeet int8) and point bots at it; the GPU NIM wins when also on"
+  type        = bool
+  default     = null # the profile (profiles.tf)
+}
+
+variable "stt_cpu_instance_type" {
+  description = "The CPU speech-to-text machine; sized by the switch-point run"
+  type        = string
+  default     = null # the profile (profiles.tf)
+}

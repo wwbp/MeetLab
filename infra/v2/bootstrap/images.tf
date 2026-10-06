@@ -7,7 +7,7 @@
 # deploy tags v2.x.y; release images never expire, other builds keep the last 30.
 
 resource "aws_ecr_repository" "this" {
-  for_each             = toset(["meet", "agent-runner"])
+  for_each             = toset(["meet", "agent-runner", "stt-cpu"])
   name                 = "meetlab-v2/${each.key}"
   image_tag_mutability = "IMMUTABLE"
   image_scanning_configuration {

@@ -544,7 +544,7 @@ run "release_images_never_expire" {
   command = plan
 
   assert {
-    condition     = toset(keys(aws_ecr_repository.this)) == toset(["meet", "agent-runner"]) && alltrue([for r in aws_ecr_repository.this : r.image_tag_mutability == "IMMUTABLE"])
+    condition     = toset(keys(aws_ecr_repository.this)) == toset(["meet", "agent-runner", "stt-cpu"]) && alltrue([for r in aws_ecr_repository.this : r.image_tag_mutability == "IMMUTABLE"])
     error_message = "one repository per image, tags immutable"
   }
   assert {

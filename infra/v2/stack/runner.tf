@@ -18,8 +18,12 @@ locals {
     # Staging's own Parakeet NIM (stt_nim.tf), as v1 runs.
     { name = "NEMOTRON_STT_URL", value = "http://${aws_lb.stt_nim[0].dns_name}:9000" },
     { name = "STT_MODEL_OVERRIDE", value = "parakeet-tdt-0.6b-v2" },
+    ] : local.stt_cpu_enabled ? [
+    # Parakeet on CPU (stt_cpu.tf): the same endpoint as the NIM, no GPU.
+    { name = "NEMOTRON_STT_URL", value = "http://${aws_lb.stt_cpu[0].dns_name}:8000" },
+    { name = "STT_MODEL_OVERRIDE", value = "parakeet-tdt-0.6b-v2" },
     ] : [
-    # NIM off: Deepgram, so a staging bot never needs a GPU running.
+    # No speech server of ours: Deepgram, so a staging bot never needs one running.
     { name = "STT_MODEL_OVERRIDE", value = "nova-3-general" },
   ], local.model_environment) # our LLM and voice, when running (models.tf)
   bot_secrets = concat(

@@ -9,19 +9,20 @@ locals {
       bot_pool_min        = 0, bot_pool_max = 2, livekit_instance_type = "c6i.large",
       db_instance_class   = "db.t4g.small", db_multi_az = false, egress_count = 0,
       egress_room_cpu     = null, # LiveKit's default booking per recording; lowered only to measure
-      livekit_self_hosted = true,
+      livekit_self_hosted = true, stt_cpu_enabled = false, stt_cpu_instance_type = "c6i.large",
     }
     # Production (user's decisions, 2026-10-06, after the cost audit: docs/v2-infrastructure.md):
     # sized to use, scaled on request. One warm bot machine (3 rooms at once unprepared); Prepare
     # for study grows the pool to 40 machines (100 rooms). Media and video recording on LiveKit
     # Cloud (Ship: 100 recordings at once), so no LiveKit machine or recorder of our own. Speech-
-    # to-text GPU off: switched on only for studies that need it. Database t4g.small (165
+    # to-text on CPU (Parakeet int8); the GPU only for studies past the measured switch point. Database t4g.small (165
     # connections at 102 rooms) with a standby in a second zone. Paid LLM and voice.
     prod = {
       stt_nim_enabled   = false, model_services = [], tts_replicas = 1,
       bot_pool_min      = 1, bot_pool_max = 40, livekit_instance_type = "c6i.large",
       db_instance_class = "db.t4g.small", db_multi_az = true, egress_count = 0,
       egress_room_cpu   = null, livekit_self_hosted = false,
+      stt_cpu_enabled   = true, stt_cpu_instance_type = "c6i.large", # speech-to-text for unscheduled sessions
     }
   }
   profile = local.profiles[var.env]
@@ -37,4 +38,6 @@ locals {
   egress_count          = coalesce(var.egress_count, local.profile.egress_count)
   egress_room_cpu       = var.egress_room_cpu != null ? var.egress_room_cpu : local.profile.egress_room_cpu
   livekit_self_hosted   = coalesce(var.livekit_self_hosted, local.profile.livekit_self_hosted)
+  stt_cpu_enabled       = coalesce(var.stt_cpu_enabled, local.profile.stt_cpu_enabled)
+  stt_cpu_instance_type = coalesce(var.stt_cpu_instance_type, local.profile.stt_cpu_instance_type)
 }

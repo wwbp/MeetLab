@@ -507,12 +507,12 @@ async def scenario_chat():
         utterances = lambda: [l for l in _log_lines("/meetlab-v2/staging/bot", m.session, m.started)  # noqa: E731
                               if "user utterance" in l]
         await _until(utterances, 60, "the chat message stored as a user turn")
-        await asyncio.sleep(5)
-        if len(utterances()) != 1:
-            raise Fail(f"the chat message became {len(utterances())} turns, not one")
+        await asyncio.sleep(5)  # time for a duplicate to land, if there were one
+        # Counted in the database, the record of truth: the log is only the signal to look
+        # (a CloudWatch read once miscounted, 2026-10-06).
         typed = [u for u in _meeting_get(m.session, "utterances") if not u["bot"]]
         if [u.get("source") for u in typed] != ["chat"]:
-            raise Fail(f"the typed turn isn't marked as chat: {[u.get('source') for u in typed]}")
+            raise Fail(f"the chat message should be one user turn marked chat, got: {[u.get('source') for u in typed]}")
         return "a non-RTVI packet ignored; RTVI chat stored as the sender's turn, once, marked as chat"
 
 

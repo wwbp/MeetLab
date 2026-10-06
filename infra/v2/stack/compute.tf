@@ -16,7 +16,7 @@ resource "aws_ecs_cluster" "this" {
   name = local.name
   setting {
     name  = "containerInsights"
-    value = var.container_insights ? "enabled" : "disabled" # billed per task; on for load tests
+    value = local.container_insights ? "enabled" : "disabled" # billed per task; on for load tests
   }
   service_connect_defaults {
     namespace = aws_service_discovery_http_namespace.this.arn

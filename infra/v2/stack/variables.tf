@@ -72,7 +72,7 @@ variable "bot_pool_max" {
 variable "container_insights" {
   description = "Per-task CPU and memory metrics (billed per task); on for load tests"
   type        = bool
-  default     = false
+  default     = null # the profile (profiles.tf)
 }
 
 variable "livekit_self_hosted" {

@@ -109,6 +109,7 @@ run "staging_bots_can_hear_without_a_nim" {
   command = apply
 
   variables {
+    stt_cpu_enabled = false # stated, not assumed: a test session may switch it on
     stt_nim_enabled = false # the default is the on/off switch (variables.tf)
   }
 

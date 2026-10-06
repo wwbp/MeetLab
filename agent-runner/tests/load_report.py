@@ -36,6 +36,10 @@ def _queries():
             q.append((f"{s}_{m[:3].lower()}", "AWS/ECS", m, {"ClusterName": CLUSTER, "ServiceName": f"{CLUSTER}-{s}"}))
     for g in GROUPS:
         q.append((f"{g}_hosts_cpu", "AWS/EC2", "CPUUtilization", {"AutoScalingGroupName": f"{CLUSTER}-{g}"}))
+    # Right-sizing bots: the heaviest bot task (Container Insights, on for load tests), against
+    # its reservation in bots.tf (512 CPU units, 1024 MB).
+    for label, m in (("bot_task_cpu", "CpuUtilized"), ("bot_task_mem", "MemoryUtilized")):
+        q.append((label, "ECS/ContainerInsights", m, {"ClusterName": CLUSTER, "TaskDefinitionFamily": f"{CLUSTER}-bot"}))
     q.append(("db_cpu", "AWS/RDS", "CPUUtilization", {"DBInstanceIdentifier": DB}))
     q.append(("db_connections", "AWS/RDS", "DatabaseConnections", {"DBInstanceIdentifier": DB}))
     return [{"Id": i.replace("-", "_"), "Label": i, "ReturnData": True, "MetricStat": {
@@ -138,15 +142,16 @@ def markdown(r: dict) -> str:
     if any("server" in m for m in r["steps"]):
         lines += ["", "**Inside staging** (p95 of the bot's own stage timings; maximum CPU/memory %)", "",
                   "| step | rooms | turn-end wait ms | LLM first token ms | first sentence ms | TTS first audio ms | meet CPU/mem | runner CPU/mem | "
-                  "LiveKit CPU | bot machines CPU | LLM / TTS / STT machine CPU | recording machines CPU | DB CPU / connections |",
-                  "|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
+                  "LiveKit CPU | bot machines CPU | heaviest bot task CPU units / MB (reserved 512 / 1024) | "
+                  "LLM / TTS / STT machine CPU | recording machines CPU | DB CPU / connections |",
+                  "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
         for k, m in enumerate(r["steps"]):
             s, x = m.get("server", {}).get("stages", {}), m.get("server", {}).get("max", {})
             p95 = lambda st: _ms(s.get(st, {}).get("p95"))  # noqa: E731
             g = lambda key: "-" if key not in x else f"{x[key]:.0f}"  # noqa: E731
             lines.append(f"| {k} | {m['rooms']} | {p95('stt_ms')} | {p95('llm_ttft_ms')} | {p95('sentence_agg_ms')} | {p95('tts_ttfb_ms')} | "
                          f"{g('meet_cpu')}/{g('meet_mem')} | {g('agent-runner_cpu')}/{g('agent-runner_mem')} | "
-                         f"{g('livekit_hosts_cpu')} | {g('bots_hosts_cpu')} | "
+                         f"{g('livekit_hosts_cpu')} | {g('bots_hosts_cpu')} | {g('bot_task_cpu')} / {g('bot_task_mem')} | "
                          f"{g('llm_hosts_cpu')} / {g('tts_hosts_cpu')} / {g('stt-nim_hosts_cpu')} | {g('egress_hosts_cpu')} | "
                          f"{g('db_cpu')} / {g('db_connections')} |")
     if r.get("rooms"):

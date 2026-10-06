@@ -26,6 +26,19 @@ locals {
     # No speech server of ours: Deepgram, so a staging bot never needs one running.
     { name = "STT_MODEL_OVERRIDE", value = "nova-3-general" },
   ], local.model_environment) # our LLM and voice, when running (models.tf)
+  runner_environment = concat(local.bot_environment, [
+    # Step 4c: each meeting's bot is its own ECS task (dispatch.py), not a coroutine here.
+    { name = "BOT_DISPATCHER", value = "ecs" },
+    { name = "ECS_CLUSTER", value = aws_ecs_cluster.this.name },
+    { name = "BOT_TASK_DEFINITION", value = aws_ecs_task_definition.bot.family },
+    { name = "BOT_CAPACITY_PROVIDER", value = aws_ecs_capacity_provider.bots.name },
+    { name = "BOT_ASG_NAME", value = aws_autoscaling_group.bots.name }, # Prepare for study
+    { name = "BOT_POOL_MIN", value = tostring(local.bot_pool_min) },
+    # Prepare packs this many bots per machine; matches the bot's reservation (profiles.tf).
+    { name = "BOTS_PER_INSTANCE", value = tostring(local.bots_per_instance) },
+    # heartbeat.py: a session silent for 30 s is failed; look every 10 s.
+    { name = "CONVERSATION_RECONCILE_INTERVAL_SECONDS", value = "10" },
+  ])
   bot_secrets = concat(
     [for n in ["OPENAI_API_KEY", "ELEVENLABS_API_KEY", "DEEPGRAM_API_KEY", "BOT_RUNNER_SECRET", "CONSOLE_PASSWORD"] :
     { name = n, valueFrom = "${local.parameters}/${n}" }],
@@ -53,17 +66,7 @@ resource "aws_ecs_task_definition" "runner_app" {
     cpu               = 1024
     memoryReservation = 1536
     portMappings      = [{ name = "http", containerPort = 7860, hostPort = 0, protocol = "tcp", appProtocol = "http" }]
-    environment = concat(local.bot_environment, [
-      # Step 4c: each meeting's bot is its own ECS task (dispatch.py), not a coroutine here.
-      { name = "BOT_DISPATCHER", value = "ecs" },
-      { name = "ECS_CLUSTER", value = aws_ecs_cluster.this.name },
-      { name = "BOT_TASK_DEFINITION", value = aws_ecs_task_definition.bot.family },
-      { name = "BOT_CAPACITY_PROVIDER", value = aws_ecs_capacity_provider.bots.name },
-      { name = "BOT_ASG_NAME", value = aws_autoscaling_group.bots.name }, # Prepare for study
-      { name = "BOT_POOL_MIN", value = tostring(local.bot_pool_min) },
-      # heartbeat.py: a session silent for 30 s is failed; look every 10 s.
-      { name = "CONVERSATION_RECONCILE_INTERVAL_SECONDS", value = "10" },
-    ])
+    environment       = local.runner_environment
     # The runner requests video egress. LiveKit Cloud gets the write-only egress key with
     # each request (egress.tf); our own egress uploads with its task role, so then no key at
     # all (egress_server.tf). Bots never hold it. Minted by a person into SSM:

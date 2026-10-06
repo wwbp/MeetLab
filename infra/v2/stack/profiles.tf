@@ -10,6 +10,7 @@ locals {
       db_instance_class   = "db.t4g.small", db_multi_az = false, egress_count = 0,
       egress_room_cpu     = null, # LiveKit's default booking per recording; lowered only to measure
       livekit_self_hosted = true, stt_cpu_enabled = false, stt_cpu_instance_type = "c6i.large",
+      bot_cpu             = 512, bot_memory = 1024, bots_per_instance = 3, bot_instance_type = "c6i.large",
     }
     # Production (user's decisions, 2026-10-06, after the cost audit: docs/v2-infrastructure.md):
     # sized to use, scaled on request. One warm bot machine (3 rooms at once unprepared); Prepare
@@ -23,6 +24,7 @@ locals {
       db_instance_class = "db.t4g.small", db_multi_az = true, egress_count = 0,
       egress_room_cpu   = null, livekit_self_hosted = false,
       stt_cpu_enabled   = true, stt_cpu_instance_type = "c6i.large", # speech-to-text for unscheduled sessions
+      bot_cpu           = 512, bot_memory = 1024, bots_per_instance = 3, bot_instance_type = "c6i.large",
     }
   }
   profile = local.profiles[var.env]
@@ -40,4 +42,8 @@ locals {
   livekit_self_hosted   = coalesce(var.livekit_self_hosted, local.profile.livekit_self_hosted)
   stt_cpu_enabled       = coalesce(var.stt_cpu_enabled, local.profile.stt_cpu_enabled)
   stt_cpu_instance_type = coalesce(var.stt_cpu_instance_type, local.profile.stt_cpu_instance_type)
+  bot_cpu               = coalesce(var.bot_cpu, local.profile.bot_cpu)
+  bot_memory            = coalesce(var.bot_memory, local.profile.bot_memory)
+  bots_per_instance     = coalesce(var.bots_per_instance, local.profile.bots_per_instance)
+  bot_instance_type     = coalesce(var.bot_instance_type, local.profile.bot_instance_type)
 }

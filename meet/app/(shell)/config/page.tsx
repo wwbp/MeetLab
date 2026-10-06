@@ -3,35 +3,21 @@
 import { createContext, useContext, useEffect, useState, type FormEvent } from 'react';
 import { EMPTY_CONFIG, type BotConfig } from '@/lib/bot-config';
 import { CONFIG_INFO, SECTIONS } from '@/lib/config-info';
+import { LLM_MODELS, STT_MODELS, TTS_PROVIDERS, label } from '@/lib/model-choices';
 import { KeyStat, Label, PageHeader, SectionHeading, inputClass } from '@/components/console/swiss';
 
 // Which setting (or category) the info panel explains: the one hovered or focused last.
 const Explain = createContext<(key: string) => void>(() => {});
 
-const STT_MODELS = [
-  { value: 'parakeet-tdt-0.6b-v2',   label: 'parakeet-tdt-0.6b-v2 (self-hosted GPU) (default)' },
-  { value: 'parakeet-unified-en-0.6b', label: 'parakeet-unified-en-0.6b (self-hosted, offline)' },
-  { value: 'nova-3-general',         label: 'nova-3-general (Deepgram)' },
-  { value: 'gpt-realtime-whisper',   label: 'gpt-realtime-whisper (OpenAI)' },
-  { value: 'gpt-4o-transcribe',      label: 'gpt-4o-transcribe (OpenAI)' },
-  { value: 'gpt-4o-mini-transcribe', label: 'gpt-4o-mini-transcribe (OpenAI)' },
-];
+
 
 // Settings that only some speech-to-text models use (agent-runner/bot.py _build_stt).
 const isOpenAiStt = (model: string) => model.startsWith('gpt-');
 // Smart turn needs a per-speaker segmenting recogniser (smart_turn.py): Parakeet or Whisper.
 const isSegmentedStt = (model: string) => model.startsWith('parakeet-') || model.startsWith('whisper-');
 
-const LLM_MODELS = [
-  'gpt-5.4-nano',
-  'Qwen/Qwen2.5-7B-Instruct', // ours (vLLM), when staging runs it
-  'gpt-5.4-mini',
-  'gpt-4.1-nano',
-  'gpt-4.1-mini',
-  'gpt-4o-mini',
-];
 
-const TTS_PROVIDERS = ['elevenlabs', 'openai', 'kokoro']; // kokoro: our server, OpenAI voice names
+
 
 export default function ConfigPage() {
   const [scope, setScope] = useState('global');
@@ -60,7 +46,7 @@ export default function ConfigPage() {
         system_prompt: data.system_prompt ?? '',
         greeting: data.greeting ?? '',
         stt_model: STT_MODELS.some((m) => m.value === loadedStt) ? loadedStt : 'parakeet-tdt-0.6b-v2',
-        llm_model: LLM_MODELS.includes(loadedLlm) ? loadedLlm : LLM_MODELS[0],
+        llm_model: LLM_MODELS.some((m) => m.value === loadedLlm) ? loadedLlm : EMPTY_CONFIG.llm_model,
         tts_provider: data.tts_provider ?? 'elevenlabs',
         tts_voice: data.tts_voice ?? '',
         tts_aggregation_mode: data.tts_aggregation_mode ?? 'sentence',
@@ -189,14 +175,14 @@ export default function ConfigPage() {
           {/* ── Speech-to-Text and turn-taking: when someone has finished depends on the model ── */}
           <Section id="stt">
             <div className="grid gap-4 sm:grid-cols-2">
-              <Field name="stt_model" label="Speech-to-text model" help="The speech-to-text model that turns what people say into text.">
+              <Field name="stt_model" label="Speech-to-text" help="Turns what people say into text for the bot. Our own server keeps audio with us; a paid service receives it.">
                 <select
                   value={form.stt_model}
                   onChange={(e) => setForm((f) => ({ ...f, stt_model: e.target.value }))}
                   className={sel}
                 >
                   {STT_MODELS.map((m) => (
-                    <option key={m.value} value={m.value}>{m.label}</option>
+                    <option key={m.value} value={m.value}>{label(m)}</option>
                   ))}
                 </select>
               </Field>
@@ -288,14 +274,14 @@ export default function ConfigPage() {
 
           {/* ── LLM ── */}
           <Section id="llm">
-            <Field name="llm_model" label="Model" help="The language model that writes the bot’s replies.">
+            <Field name="llm_model" label="Language model" help="Writes the bot’s replies. A paid service receives the conversation; our own server keeps it with us.">
               <select
                 value={form.llm_model}
                 onChange={(e) => setForm((f) => ({ ...f, llm_model: e.target.value }))}
                 className={sel}
               >
                 {LLM_MODELS.map((m) => (
-                  <option key={m} value={m}>{m}</option>
+                  <option key={m.value} value={m.value}>{label(m)}</option>
                 ))}
               </select>
             </Field>
@@ -304,14 +290,14 @@ export default function ConfigPage() {
           {/* ── TTS ── */}
           <Section id="voice">
             <div className="grid gap-4 sm:grid-cols-2">
-              <Field name="tts_provider" label="Voice provider" help="The service that speaks the bot’s replies aloud.">
+              <Field name="tts_provider" label="Voice" help="Speaks the bot’s replies aloud.">
                 <select
                   value={form.tts_provider}
                   onChange={(e) => setForm((f) => ({ ...f, tts_provider: e.target.value }))}
                   className={sel}
                 >
                   {TTS_PROVIDERS.map((p) => (
-                    <option key={p} value={p}>{p}</option>
+                    <option key={p.value} value={p.value}>{label(p)}</option>
                   ))}
                 </select>
               </Field>

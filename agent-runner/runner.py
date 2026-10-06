@@ -230,24 +230,21 @@ class _NullableSelectField(SelectField):
 
 
 _LLM_CHOICES = [
-    ("gpt-5.4-nano", "gpt-5.4-nano"),
-    ("gpt-5.4-mini", "gpt-5.4-mini"),
-    ("gpt-4.1-nano", "gpt-4.1-nano"),
-    ("gpt-4.1-mini", "gpt-4.1-mini"),
-    ("gpt-4o-mini", "gpt-4o-mini"),
-    ("Qwen/Qwen2.5-7B-Instruct", "Qwen2.5-7B-Instruct (ours)"),
+    # Named as the console names them (meet/lib/model-choices.ts): plain name, who runs it.
+    ("gpt-5.4-nano", "GPT nano — paid service: OpenAI (default)"),
+    ("gpt-5.4-mini", "GPT mini — paid service: OpenAI"),
+    ("Qwen/Qwen2.5-7B-Instruct", "Qwen — our own server (staging only)"),
+    ("gpt-4.1-nano", "GPT nano, older — paid service: OpenAI"),
+    ("gpt-4.1-mini", "GPT mini, older — paid service: OpenAI"),
+    ("gpt-4o-mini", "GPT-4o mini, older — paid service: OpenAI"),
 ]
 
 _STT_MODEL_CHOICES = [
-    ("parakeet-tdt-0.6b-v2", "parakeet-tdt-0.6b-v2 (Parakeet NIM) (default)"),
-    ("parakeet-unified-en-0.6b", "parakeet-unified-en-0.6b (Parakeet NIM, offline)"),
-    ("nova-3-general", "nova-3-general (Deepgram)"),
-    ("gpt-realtime-whisper", "gpt-realtime-whisper (OpenAI)"),
-    ("gpt-4o-transcribe", "gpt-4o-transcribe (OpenAI)"),
-    ("gpt-4o-mini-transcribe", "gpt-4o-mini-transcribe (OpenAI)"),
-    ("whisper-turbo", "whisper-turbo (local faster-whisper, CPU)"),
-    ("whisper-base", "whisper-base (local faster-whisper, CPU)"),
-    ("whisper-small", "whisper-small (local faster-whisper, CPU)"),
+    ("parakeet-tdt-0.6b-v2", "Parakeet — our own server (default)"),
+    ("nova-3-general", "Deepgram Nova 3 — paid service: Deepgram"),
+    ("gpt-4o-mini-transcribe", "OpenAI Transcribe (mini) — paid service: OpenAI"),
+    ("gpt-4o-transcribe", "OpenAI Transcribe — paid service: OpenAI"),
+    ("gpt-realtime-whisper", "OpenAI Realtime Whisper — paid service: OpenAI"),
 ]
 
 
@@ -282,7 +279,7 @@ class BotConfigAdmin(ModelView, model=BotConfig):
         "stt_model": {"choices": _STT_MODEL_CHOICES},
         "stt_vad_mode": {"choices": [("local", "local")]},
         "stt_delay": {"choices": [("", "— (none)")]},
-        "tts_provider": {"choices": [("elevenlabs", "elevenlabs"), ("openai", "openai"), ("kokoro", "kokoro (ours)")]},
+        "tts_provider": {"choices": [("elevenlabs", "ElevenLabs — paid service: ElevenLabs (default)"), ("openai", "OpenAI voices — paid service: OpenAI"), ("kokoro", "Kokoro — our own server (staging only)")]},
         "tts_aggregation_mode": {"choices": [("sentence", "sentence (default)"), ("clause", "first clause, then sentences"), ("token", "token (lower latency)")]},
         "turn_detection": {"choices": [("silence", "after a silence (default)"), ("smart_turn", "when the speaker sounds finished (smart turn)")]},
         # These two ADD together to form the turn-end window; 450+300=750ms is
@@ -1341,7 +1338,6 @@ async def _install_event_log_sink() -> None:
 _RECONCILER_SESSION: list = []
 
 
-@app.on_event("startup")
 async def reconcile_tick() -> None:
     """One pass of the background loop: sessions, then recordings (a finished recording was
     marked available only when someone opened the Meetings page, 2026-10-06)."""
@@ -1351,6 +1347,7 @@ async def reconcile_tick() -> None:
     await sync_pending_recordings()
 
 
+@app.on_event("startup")
 async def _start_conversation_reconcile_loop() -> "asyncio.Task | None":
     if os.environ.get("DISABLE_CONVERSATION_RECONCILE", "").lower() in ("1", "true", "yes"):
         return
@@ -1415,6 +1412,23 @@ async def sync_pending_recordings() -> None:
         await _reconcile_pending_recordings(pending)
 
 
+FORGOTTEN_RECORDING_FAILS_AFTER = timedelta(hours=6)  # well past LiveKit's 3-hour file limit
+
+
+def _forgotten_recording_status(mf) -> "str | None":
+    """For a recording LiveKit no longer knows: its file decides. None = ask again later."""
+    if mf.path and storage.exists(mf.path):
+        return "available"
+    if datetime.now(timezone.utc) - mf.created_at > FORGOTTEN_RECORDING_FAILS_AFTER:
+        return "failed"
+    return None
+
+
+async def _set_media_status(media_file_id: str, status: str) -> None:
+    async with AsyncSessionLocal() as db, db.begin():
+        await db.execute(update(MediaFile).where(MediaFile.id == media_file_id).values(status=status))
+
+
 async def _reconcile_pending_recordings(pending: list) -> None:
     """Background task: compare pending MediaFiles against LiveKit egress state."""
     from livekit.protocol.egress import ListEgressRequest
@@ -1433,14 +1447,21 @@ async def _reconcile_pending_recordings(pending: list) -> None:
                 if not egress_id:
                     continue
                 try:
-                    resp = await lk.egress.list_egress(
-                        ListEgressRequest(egress_id=egress_id)
-                    )
-                    if not resp.items:
-                        logger.warning(
-                            f"reconcile: egress {egress_id} not found on LiveKit "
-                            f"(media_file={mf.id})"
+                    try:
+                        resp = await lk.egress.list_egress(
+                            ListEgressRequest(egress_id=egress_id)
                         )
+                        forgotten = not resp.items
+                    except Exception as exc:
+                        if "not_found" not in str(exc):
+                            raise
+                        forgotten = True
+                    if forgotten:
+                        # A restarted LiveKit forgets its recordings: decide once, from the file.
+                        new_status = _forgotten_recording_status(mf)
+                        if new_status:
+                            await _set_media_status(mf.id, new_status)
+                            logger.info(f"reconcile: media_file={mf.id} → {new_status} (egress {egress_id} unknown to LiveKit)")
                         continue
 
                     egress = resp.items[0]

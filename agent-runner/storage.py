@@ -138,6 +138,21 @@ def get_download_url(path: str) -> str:
     return url
 
 
+def exists(path: str) -> bool:
+    """Whether a stored file is there (the runner's recording reconcile asks)."""
+    cfg = _cfg()
+    if cfg["backend"] != "s3":
+        return Path(path).exists()
+    _require(cfg, "S3 exists")
+    try:
+        _s3(cfg).head_object(Bucket=cfg["bucket"], Key=path)
+        return True
+    except Exception as exc:
+        if getattr(exc, "response", {}).get("Error", {}).get("Code") in ("404", "NoSuchKey", "NotFound"):
+            return False
+        raise
+
+
 def is_local() -> bool:
     return _cfg()["backend"] != "s3"
 

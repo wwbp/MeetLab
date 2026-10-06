@@ -44,23 +44,49 @@ def select(dialogues: list[dict], n: int = 100) -> list[dict]:
     return out
 
 
-MIX = [1, 2, 1, 3, 1, 2, 1, 2, 1, 3]  # every 10 rooms: five of 1, three of 2, two of 3, interleaved
+MIXES = {
+    "study": [1, 2, 1, 3, 1, 2, 1, 2, 1, 3],  # every 10 rooms: five of 1, three of 2, two of 3 (the user's study mix)
+    "equal": [1, 2, 3],                       # as many of each (the 100-room spike, 2026-10-05)
+}
 
 
-def participants_for(room: int) -> int:
-    """People in a room: 1 in half of them, 2 in 30%, 3 in 20% (the user's study mix),
-    interleaved so even a 4-room run has every size."""
-    return MIX[room % len(MIX)]
+def participants_for(room: int, mix: str = "study") -> int:
+    """People in a room, interleaved so even a small run has every size."""
+    sizes = MIXES[mix]
+    return sizes[room % len(sizes)]
 
 
-def room_plan(room: int, library: list[dict]) -> list[tuple[int, dict]]:
-    """(participant, line) in speaking order. One person speaks one side and the bot answers
-    in place of the other; two people speak the two sides; three take the lines in turn."""
-    d = library[room % len(library)]
-    people = participants_for(room)
-    if people == 1:
-        return [(0, line) for line in d["lines"] if line["side"] == 0]
-    return [(k % people, line) for k, line in enumerate(d["lines"])]
+def room_plan(room: int, library: list[dict], per_room: int = 1, mix: str = "study") -> list[tuple[int, dict]]:
+    """(participant, line) in speaking order, through the room's own dialogues back to back (no two
+    rooms share one while the library lasts). One person speaks one side and the bot answers in
+    place of the other, so they get twice the dialogues to fill the same time; two speak the two
+    sides; three take the lines in turn."""
+    def need(r):
+        return per_room * (2 if participants_for(r, mix) == 1 else 1)
+    start = sum(need(r) for r in range(room))
+    people = participants_for(room, mix)
+    plan = []
+    for j in range(need(room)):
+        d = library[(start + j) % len(library)]
+        if people == 1:
+            plan += [(0, line) for line in d["lines"] if line["side"] == 0]
+        else:
+            plan += [(k % people, line) for k, line in enumerate(d["lines"])]
+    return plan
+
+
+def select_topical(conversations: dict, n: int = 280) -> list[dict]:
+    """Topical-Chat (Gopalakrishnan et al., 2019; CDLA-Sharing-1.0): real human-to-human chats,
+    held-out (test) conversations of 16+ turns, each 2-40 words: long enough that a room's 10
+    minutes are whole conversations, not one repeated. Fixed order, so every run is the same."""
+    def fits(c):
+        return len(c["content"]) >= 16 and all(2 <= len(m["message"].split()) <= 40 for m in c["content"])
+    out = []
+    for cid in sorted(k for k, c in conversations.items() if fits(c))[:n]:
+        out.append({"id": f"tc-{cid}", "topic": "topical-chat",
+                    "lines": [{"side": 0 if m["agent"] == "agent_1" else 1, "text": " ".join(m["message"].split())}
+                              for m in conversations[cid]["content"]]})
+    return out
 
 
 def voice_for(dialogue_id: str, side: int) -> str:

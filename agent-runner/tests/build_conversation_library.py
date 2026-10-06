@@ -4,7 +4,10 @@ the lines marked for one, and write the audio plus a manifest. The load generato
 from S3 (LIBRARY=s3://…/library.json); it stays out of the repo, which is public.
 
     uv run --no-project --with kokoro-onnx --with soundfile --with numpy --with boto3 \\
-        python agent-runner/tests/build_conversation_library.py OUT_DIR [s3://bucket/prefix]
+        python agent-runner/tests/build_conversation_library.py OUT_DIR [s3://bucket/prefix] [v1|v2]
+
+v2 (the 100-room spike): Topical-Chat's held-out conversations (github.com/alexa/Topical-Chat,
+conversations/test_freq.json and test_rare.json, CDLA-Sharing-1.0) at OUT_DIR/topicalchat/.
 
 Needs ConvLab's DailyDialog (data.zip from huggingface.co/datasets/ConvLab/dailydialog, CC
 BY-NC-SA 4.0) unpacked at OUT_DIR/dailydialog/dialogues.json, and Kokoro's model files
@@ -19,18 +22,31 @@ import numpy as np
 import soundfile as sf
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from conversation_library import paused, select, split_for_pause, voice_for  # noqa: E402
+from conversation_library import paused, select, select_topical, split_for_pause, voice_for  # noqa: E402
 
 RATE = 24000          # Kokoro's rate, and the load generator's microphone rate
 PAUSE_S = 0.8         # a thinking pause: longer than the bot's endpointing (450 ms)
-VERSION = "v1"
+SOURCES = {
+    "v1": "DailyDialog (Li et al., 2017), ConvLab mirror, CC BY-NC-SA 4.0; voices: Kokoro v1.0",
+    "v2": "Topical-Chat (Gopalakrishnan et al., 2019), CDLA-Sharing-1.0; voices: Kokoro v1.0",
+}
 
 
-def main(out: Path, upload: str | None):
+def dialogues(out: Path, version: str) -> list[dict]:
+    if version == "v2":
+        convs = {}
+        for f in ("test_freq.json", "test_rare.json"):
+            convs.update(json.loads((out / "topicalchat" / f).read_text()))
+        return select_topical(convs, n=280)  # 100 rooms, a third of one person: 34×4 + 66×2 = 268
+    return select(json.loads((out / "dailydialog" / "dialogues.json").read_text()), n=100)
+
+
+def main(out: Path, upload: str | None, version: str = "v1"):
+    VERSION = version
     from kokoro_onnx import Kokoro
 
     tts = Kokoro(str(out / "kokoro" / "kokoro-v1.0.onnx"), str(out / "kokoro" / "voices-v1.0.bin"))
-    library = select(json.loads((out / "dailydialog" / "dialogues.json").read_text()), n=100)
+    library = dialogues(out, VERSION)
     audio_dir = out / VERSION
     audio_dir.mkdir(parents=True, exist_ok=True)
 
@@ -54,7 +70,7 @@ def main(out: Path, upload: str | None):
         print(f"{d['id']}: {len(d['lines'])} lines", flush=True)
 
     manifest = {"version": VERSION, "rate": RATE, "pause_s": PAUSE_S,
-                "source": "DailyDialog (Li et al., 2017), ConvLab mirror, CC BY-NC-SA 4.0; voices: Kokoro v1.0",
+                "source": SOURCES[VERSION],
                 "dialogues": library}
     (audio_dir / "library.json").write_text(json.dumps(manifest, indent=1))
     lines = sum(len(d["lines"]) for d in library)
@@ -70,4 +86,4 @@ def main(out: Path, upload: str | None):
 
 
 if __name__ == "__main__":
-    main(Path(sys.argv[1]), sys.argv[2] if len(sys.argv) > 2 else None)
+    main(Path(sys.argv[1]), sys.argv[2] if len(sys.argv) > 2 else None, sys.argv[3] if len(sys.argv) > 3 else "v1")

@@ -6,9 +6,9 @@ locals {
     # Staging between test runs: nothing warm, the smallest sizes.
     staging = {
       stt_nim_enabled   = false, model_services = [], tts_replicas = 1,
-      bot_pool_min      = 0, bot_pool_max = 2, livekit_instance_type = "c6i.large",
-      db_instance_class = "db.t4g.small", db_multi_az = false, egress_count = 0,
-      egress_room_cpu   = null, # LiveKit's default booking per recording; lowered only to measure
+      bot_pool_min      = 0, bot_pool_max = 4, livekit_instance_type = "c6i.large",
+      db_instance_class = "db.t4g.small", db_multi_az = false, egress_count = 1,
+      egress_room_cpu   = 0.5, # LiveKit's default booking per recording; lowered only to measure
     }
     # Production (user's decisions, 2026-10-06): like v1 (Parakeet NIM always on, OpenAI
     # and ElevenLabs), the database across two zones, and 20 rooms at any time with nobody

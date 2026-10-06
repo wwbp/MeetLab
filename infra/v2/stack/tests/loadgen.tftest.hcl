@@ -17,7 +17,7 @@ run "a_fargate_task_running_the_load_driver_from_the_runner_image" {
     condition = (
       aws_ecs_task_definition.loadgen.requires_compatibilities == toset(["FARGATE"]) &&
       aws_ecs_task_definition.loadgen.network_mode == "awsvpc" &&
-      jsondecode(aws_ecs_task_definition.loadgen.container_definitions)[0].image == "${aws_ecr_repository.this["agent-runner"].repository_url}:0123abc" &&
+      jsondecode(aws_ecs_task_definition.loadgen.container_definitions)[0].image == "${data.aws_ecr_repository.this["agent-runner"].repository_url}:0123abc" &&
       jsondecode(aws_ecs_task_definition.loadgen.container_definitions)[0].command == ["python", "tests/load_run.py"]
     )
     error_message = "the deployed commit's own harness, on Fargate (no machines to keep; billed only while a run lasts)"

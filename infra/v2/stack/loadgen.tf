@@ -55,7 +55,7 @@ resource "aws_ecs_task_definition" "loadgen" {
   task_role_arn            = aws_iam_role.loadgen.arn
   container_definitions = jsonencode([{
     name        = "loadgen"
-    image       = "${aws_ecr_repository.this["agent-runner"].repository_url}:${var.image_tag}"
+    image       = "${data.aws_ecr_repository.this["agent-runner"].repository_url}:${var.image_tag}"
     essential   = true
     command     = ["python", "tests/load_run.py"]
     environment = concat(local.livekit_environment, [{ name = "MEET_URL", value = "https://meet${var.hostname_suffix}.wwbp.org" }])

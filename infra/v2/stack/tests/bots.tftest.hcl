@@ -37,7 +37,7 @@ run "a_bot_task_runs_one_session_and_gets_time_to_finish" {
   command = apply
 
   assert {
-    condition     = jsondecode(aws_ecs_task_definition.bot.container_definitions)[0].name == "bot" && jsondecode(aws_ecs_task_definition.bot.container_definitions)[0].image == "${aws_ecr_repository.this["agent-runner"].repository_url}:0123abc"
+    condition     = jsondecode(aws_ecs_task_definition.bot.container_definitions)[0].name == "bot" && jsondecode(aws_ecs_task_definition.bot.container_definitions)[0].image == "${data.aws_ecr_repository.this["agent-runner"].repository_url}:0123abc"
     error_message = "container 'bot' (dispatch.py overrides it by name), same image as the runner"
   }
   assert {

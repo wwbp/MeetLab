@@ -6,13 +6,13 @@ data "aws_route53_zone" "wwbp" {
 }
 
 locals {
-  account  = data.aws_caller_identity.current.account_id
-  arn      = "arn:aws:%s:us-east-1:${data.aws_caller_identity.current.account_id}:%s"
-  roles    = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/meetlab-v2-staging-*"
-  boundary = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:policy/meetlab-v2-boundary"
-  users    = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:user/meetlab-v2-staging-*"
+  account    = data.aws_caller_identity.current.account_id
+  arn        = "arn:aws:%s:us-east-1:${data.aws_caller_identity.current.account_id}:%s"
+  roles      = { for env, e in local.envs : env => "arn:aws:iam::${local.account}:role/${e.p}-*" }
+  boundaries = { for env, e in local.envs : env => "arn:aws:iam::${local.account}:policy/${e.boundary}" }
+  users      = { for env, e in local.envs : env => "arn:aws:iam::${local.account}:user/${e.p}-*" }
 
-  compute_read = jsonencode({
+  compute_read = { for env, e in local.envs : env => jsonencode({
     Version = "2012-10-17"
     Statement = [
       {
@@ -34,15 +34,15 @@ locals {
           "iam:ListInstanceProfilesForRole", "iam:GetInstanceProfile", "iam:GetPolicy", "iam:GetPolicyVersion",
         ]
         Resource = [
-          local.roles,
-          "arn:aws:iam::${local.account}:instance-profile/meetlab-v2-staging-*",
+          local.roles[env],
+          "arn:aws:iam::${local.account}:instance-profile/${e.p}-*",
           "arn:aws:iam::aws:policy/*",
         ]
       },
       {
         Effect   = "Allow"
         Action   = ["iam:GetUser", "iam:GetUserPolicy", "iam:ListUserPolicies"]
-        Resource = local.users
+        Resource = local.users[env]
       },
       {
         # The ECS-optimized AMI id is a public AWS parameter.
@@ -51,9 +51,9 @@ locals {
         Resource = "arn:aws:ssm:us-east-1::parameter/aws/service/ecs/*"
       },
     ]
-  })
+  }) }
 
-  compute_write = jsonencode({
+  compute_write = { for env, e in local.envs : env => jsonencode({
     Version = "2012-10-17"
     Statement = [
       {
@@ -61,8 +61,8 @@ locals {
         Effect = "Allow"
         Action = "ecs:*"
         Resource = [for r in [
-          "cluster/meetlab-v2-*", "service/meetlab-v2-*/*", "task-definition/meetlab-v2-*:*",
-          "capacity-provider/meetlab-v2-*", "task/meetlab-v2-*/*", "container-instance/meetlab-v2-*/*",
+          "cluster/${e.p}", "service/${e.p}/*", "task-definition/${e.p}-*:*",
+          "capacity-provider/${e.p}-*", "task/${e.p}/*", "container-instance/${e.p}/*",
         ] : format(local.arn, "ecs", r)]
       },
       {
@@ -71,16 +71,16 @@ locals {
         Effect    = "Allow"
         Action    = ["ecs:RegisterTaskDefinition", "ecs:TagResource"]
         Resource  = "*"
-        Condition = { StringEquals = { "aws:RequestTag/Project" = "meetlab-v2" } }
+        Condition = { StringEquals = { "aws:RequestTag/Project" = "meetlab-v2", "aws:RequestTag/Environment" = env } }
       },
       {
         Sid    = "OwnLoadBalancers"
         Effect = "Allow"
         Action = "elasticloadbalancing:*"
         Resource = [for r in [
-          "loadbalancer/app/meetlab-v2-*/*", "targetgroup/meetlab-v2-*/*",
-          "listener/app/meetlab-v2-*/*", "listener-rule/app/meetlab-v2-*/*",
-          "loadbalancer/net/meetlab-v2-*/*", "listener/net/meetlab-v2-*/*", # the STT NIM's
+          "loadbalancer/app/${e.p}*/*", "targetgroup/${e.p}*/*",
+          "listener/app/${e.p}*/*", "listener-rule/app/${e.p}*/*",
+          "loadbalancer/net/${e.p}*/*", "listener/net/${e.p}*/*", # the STT NIM's and TURN's
         ] : format(local.arn, "elasticloadbalancing", r)]
       },
       {
@@ -89,14 +89,14 @@ locals {
         Sid    = "OwnRedis"
         Effect = "Allow"
         Action = "elasticache:*"
-        Resource = [for r in ["cluster:meetlab-v2-*", "subnetgroup:meetlab-v2-*", "parametergroup:default.redis7"] :
+        Resource = [for r in ["cluster:${e.p}-*", "subnetgroup:${e.p}-*", "parametergroup:default.redis7"] :
         format(local.arn, "elasticache", r)]
       },
       {
         Sid      = "OwnAutoScalingGroups"
         Effect   = "Allow"
         Action   = "autoscaling:*"
-        Resource = format(local.arn, "autoscaling", "autoScalingGroup:*:autoScalingGroupName/meetlab-v2-*")
+        Resource = format(local.arn, "autoscaling", "autoScalingGroup:*:autoScalingGroupName/${e.p}-*")
       },
       {
         # ASGs and capacity checks call RunInstances as us. Every resource but these
@@ -111,7 +111,7 @@ locals {
         Sid      = "OwnLogGroups"
         Effect   = "Allow"
         Action   = "logs:*"
-        Resource = [format(local.arn, "logs", "log-group:/meetlab-v2/*"), format(local.arn, "logs", "log-group:/meetlab-v2/*:*")]
+        Resource = [format(local.arn, "logs", "log-group:/meetlab-v2/${env}/*"), format(local.arn, "logs", "log-group:/meetlab-v2/${env}/*:*")]
       },
       {
         # Cloud Map ids are random, so our tag is the handle; ECS registers the
@@ -120,34 +120,34 @@ locals {
         Effect    = "Allow"
         Action    = ["servicediscovery:CreateHttpNamespace", "servicediscovery:TagResource"]
         Resource  = "*"
-        Condition = { StringEquals = { "aws:RequestTag/Project" = "meetlab-v2" } }
+        Condition = { StringEquals = { "aws:RequestTag/Project" = "meetlab-v2", "aws:RequestTag/Environment" = env } }
       },
       {
         Sid       = "OwnNamespaces"
         Effect    = "Allow"
         Action    = "servicediscovery:*"
         Resource  = "*"
-        Condition = { StringEquals = { "aws:ResourceTag/Project" = "meetlab-v2" } }
+        Condition = { StringEquals = { "aws:ResourceTag/Project" = "meetlab-v2", "aws:ResourceTag/Environment" = env } }
       },
       {
         Sid       = "OneDnsName"
         Effect    = "Allow"
         Action    = "route53:ChangeResourceRecordSets"
         Resource  = data.aws_route53_zone.wwbp.arn
-        Condition = { "ForAllValues:StringEquals" = { "route53:ChangeResourceRecordSetsNormalizedRecordNames" = ["meet-staging.wwbp.org", "livekit-staging.wwbp.org", "turn-staging.wwbp.org"] } }
+        Condition = { "ForAllValues:StringEquals" = { "route53:ChangeResourceRecordSetsNormalizedRecordNames" = e.hostnames } }
       },
     ]
-  })
+  }) }
 
-  iam_write = jsonencode({
+  iam_write = { for env, e in local.envs : env => jsonencode({
     Version = "2012-10-17"
     Statement = [
       {
         Sid       = "CreateRolesOnlyWithTheBoundary"
         Effect    = "Allow"
         Action    = ["iam:CreateRole", "iam:PutRolePermissionsBoundary"]
-        Resource  = local.roles
-        Condition = { StringEquals = { "iam:PermissionsBoundary" = local.boundary } }
+        Resource  = local.roles[env]
+        Condition = { StringEquals = { "iam:PermissionsBoundary" = local.boundaries[env] } }
       },
       {
         # The boundary caps whatever these attach.
@@ -157,21 +157,21 @@ locals {
           "iam:DeleteRole", "iam:UpdateRole", "iam:UpdateAssumeRolePolicy", "iam:TagRole", "iam:UntagRole",
           "iam:PutRolePolicy", "iam:DeleteRolePolicy", "iam:AttachRolePolicy", "iam:DetachRolePolicy",
         ]
-        Resource = local.roles
+        Resource = local.roles[env]
       },
       {
-        # The LiveKit egress user (staging egress.tf); a person mints its key.
+        # The LiveKit egress user (stack egress.tf); a person mints its key.
         Sid       = "CreateUsersOnlyWithTheBoundary"
         Effect    = "Allow"
         Action    = ["iam:CreateUser", "iam:PutUserPermissionsBoundary"]
-        Resource  = local.users
-        Condition = { StringEquals = { "iam:PermissionsBoundary" = local.boundary } }
+        Resource  = local.users[env]
+        Condition = { StringEquals = { "iam:PermissionsBoundary" = local.boundaries[env] } }
       },
       {
         Sid      = "ManageOwnUsers"
         Effect   = "Allow"
         Action   = ["iam:DeleteUser", "iam:TagUser", "iam:UntagUser", "iam:PutUserPolicy", "iam:DeleteUserPolicy"]
-        Resource = local.users
+        Resource = local.users[env]
       },
       {
         Sid    = "OwnInstanceProfiles"
@@ -180,20 +180,20 @@ locals {
           "iam:CreateInstanceProfile", "iam:DeleteInstanceProfile", "iam:TagInstanceProfile",
           "iam:AddRoleToInstanceProfile", "iam:RemoveRoleFromInstanceProfile",
         ]
-        Resource = "arn:aws:iam::${local.account}:instance-profile/meetlab-v2-staging-*"
+        Resource = "arn:aws:iam::${local.account}:instance-profile/${e.p}-*"
       },
       {
         Sid       = "PassOwnRoles"
         Effect    = "Allow"
         Action    = "iam:PassRole"
-        Resource  = local.roles
+        Resource  = local.roles[env]
         Condition = { StringEquals = { "iam:PassedToService" = ["ecs-tasks.amazonaws.com", "ec2.amazonaws.com"] } }
       },
       {
         Sid      = "NeverTheCiRolesOrTheBoundary"
         Effect   = "Deny"
         Action   = "iam:*"
-        Resource = ["arn:aws:iam::${local.account}:role/meetlab-v2-tf-*", local.boundary]
+        Resource = concat(["arn:aws:iam::${local.account}:role/meetlab-v2-tf-*"], [for e in local.envs : "arn:aws:iam::${local.account}:role/${e.acceptance_role}"], values(local.boundaries))
       },
       {
         Sid      = "NoRoleLosesItsBoundary"
@@ -208,13 +208,14 @@ locals {
         Resource = "*"
       },
     ]
-  })
+  }) }
 }
 
-# The ceiling for every role infra/v2 creates: run containers, pull our images, write
+# The ceiling for every role an environment's stack creates, one per environment: run containers, pull our images, write
 # logs, read our parameters and secrets, use our buckets, launch bot tasks.
 resource "aws_iam_policy" "boundary" {
-  name = "meetlab-v2-boundary"
+  for_each = local.envs
+  name     = each.value.boundary
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
@@ -232,13 +233,13 @@ resource "aws_iam_policy" "boundary" {
         Sid      = "OwnParameters"
         Effect   = "Allow"
         Action   = ["ssm:GetParameter", "ssm:GetParameters"]
-        Resource = ["arn:aws:ssm:us-east-1:${local.account}:parameter/meetlab-v2/*", "arn:aws:ssm:us-east-1::parameter/aws/service/*"]
+        Resource = ["arn:aws:ssm:us-east-1:${local.account}:parameter/meetlab-v2/${each.key}/*", "arn:aws:ssm:us-east-1::parameter/aws/service/*"]
       },
       {
         Sid      = "OwnSecrets"
         Effect   = "Allow"
         Action   = "secretsmanager:GetSecretValue"
-        Resource = ["arn:aws:secretsmanager:us-east-1:${local.account}:secret:rds!*", "arn:aws:secretsmanager:us-east-1:${local.account}:secret:meetlab-v2/*"]
+        Resource = ["arn:aws:secretsmanager:us-east-1:${local.account}:secret:rds!*", "arn:aws:secretsmanager:us-east-1:${local.account}:secret:meetlab-v2/${each.key}/*"]
       },
       {
         Sid       = "DecryptThem"
@@ -251,14 +252,14 @@ resource "aws_iam_policy" "boundary" {
         Sid      = "OwnBuckets"
         Effect   = "Allow"
         Action   = ["s3:GetObject", "s3:PutObject", "s3:AbortMultipartUpload", "s3:ListBucket"]
-        Resource = ["arn:aws:s3:::meetlab-v2-*", "arn:aws:s3:::meetlab-v2-*/*"]
+        Resource = ["arn:aws:s3:::${each.value.p}-*", "arn:aws:s3:::${each.value.p}-*/*"]
       },
       {
         # Prepare for study (agent-runner capacity.py): warm a bot pool, no other group.
         Sid      = "PrewarmBotPools"
         Effect   = "Allow"
         Action   = ["autoscaling:UpdateAutoScalingGroup", "autoscaling:PutScheduledUpdateGroupAction", "autoscaling:DeleteScheduledAction"]
-        Resource = format(local.arn, "autoscaling", "autoScalingGroup:*:autoScalingGroupName/meetlab-v2-*-bots")
+        Resource = format(local.arn, "autoscaling", "autoScalingGroup:*:autoScalingGroupName/${each.value.p}-bots")
       },
       {
         Sid      = "ReadAutoScaling"
@@ -277,8 +278,13 @@ resource "aws_iam_policy" "boundary" {
         Sid      = "LaunchBots"
         Effect   = "Allow"
         Action   = "iam:PassRole"
-        Resource = [local.roles]
+        Resource = [local.roles[each.key]]
       },
     ]
   })
+}
+
+moved {
+  from = aws_iam_policy.boundary
+  to   = aws_iam_policy.boundary["staging"]
 }

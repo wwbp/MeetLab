@@ -23,6 +23,7 @@ run "staging_keeps_todays_names" {
       aws_route53_record.livekit[0].name == "livekit-staging.wwbp.org",
       aws_route53_record.turn[0].name == "turn-staging.wwbp.org",
       local.parameters == "arn:aws:ssm:us-east-1:123456789012:parameter/meetlab-v2/staging",
+      local.boundary == "arn:aws:iam::123456789012:policy/meetlab-v2-boundary",
     ])
     error_message = "staging's names must not change: a renamed resource is a replaced one"
   }
@@ -46,6 +47,7 @@ run "production_has_its_own_names" {
       aws_route53_record.livekit[0].name == "livekit-v2.wwbp.org",
       aws_route53_record.turn[0].name == "turn-v2.wwbp.org",
       local.parameters == "arn:aws:ssm:us-east-1:123456789012:parameter/meetlab-v2/prod",
+      local.boundary == "arn:aws:iam::123456789012:policy/meetlab-v2-prod-boundary",
     ])
     error_message = "production must share no name with staging"
   }

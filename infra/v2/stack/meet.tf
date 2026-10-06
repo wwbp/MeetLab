@@ -27,7 +27,7 @@ resource "aws_ecs_task_definition" "meet_app" {
   execution_role_arn       = aws_iam_role.execution.arn
   container_definitions = jsonencode([{
     name              = "meet"
-    image             = "${aws_ecr_repository.this["meet"].repository_url}:${var.image_tag}"
+    image             = "${data.aws_ecr_repository.this["meet"].repository_url}:${var.image_tag}"
     essential         = true
     cpu               = 512 # peak ~315 units at 100 rooms joining at once (spike, 2026-10-05)
     memoryReservation = 512 # peak ~175 MB

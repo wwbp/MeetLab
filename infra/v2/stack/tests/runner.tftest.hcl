@@ -85,7 +85,7 @@ run "runner_deploys_safely" {
     error_message = "a runner that never becomes healthy fails the apply and rolls back"
   }
   assert {
-    condition     = jsondecode(aws_ecs_task_definition.runner_app.container_definitions)[0].image == "${aws_ecr_repository.this["agent-runner"].repository_url}:0123abc"
+    condition     = jsondecode(aws_ecs_task_definition.runner_app.container_definitions)[0].image == "${data.aws_ecr_repository.this["agent-runner"].repository_url}:0123abc"
     error_message = "the runner runs the SHA the pipeline just pushed"
   }
 }

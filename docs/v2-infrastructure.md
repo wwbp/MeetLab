@@ -75,6 +75,14 @@ environment. Staging's is raised by a pull request for a test and lowered after,
 always-on cost stays the same; production's holds 20 rooms at any time (the user's
 minimum, 2026-10-06), and Prepare for study grows the bots to 100 rooms.
 
+## Video recording
+
+Measured 2026-10-06 (`infra/v2/LEDGER.md`, Measurements): a recorded room uses about 1.6 CPU on
+the recorder (a `c6i.2xlarge`: 36% at 2 rooms, 64% at 3, saturated at 5). Production books 2 CPU
+per recording, so each recorder takes 3 and refuses a fourth rather than degrading; 7 recorders
+cover the 20-room minimum (~$1,740/month). When all are full, auto-record waits up to 10 minutes
+for one, then marks the session's recording `failed`, so the console shows it has no video.
+
 ## Caveats
 
 - **One run per configuration.** Repeat a run before a decision rests on a small difference.

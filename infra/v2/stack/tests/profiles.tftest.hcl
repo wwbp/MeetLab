@@ -41,8 +41,12 @@ run "production_holds_20_rooms_unprepared_and_grows_to_100" {
     error_message = "like v1: Parakeet NIM always on, OpenAI and ElevenLabs (no self-hosted model GPUs)"
   }
   assert {
-    condition     = local.egress_count >= 1
-    error_message = "every session is recorded: a recording machine is always up (sized for 20 rooms once measured)"
+    condition     = aws_launch_template.egress.instance_type == "c6i.2xlarge" && local.egress_count * floor(8 * 0.8 / local.egress_room_cpu) >= 20
+    error_message = "every session recorded, 20 at once: each c6i.2xlarge books 2 CPU per recording (3 each; 64% CPU measured at 3)"
+  }
+  assert {
+    condition     = local.egress_room_cpu >= 1.6
+    error_message = "a recording uses ~1.6 CPU (measured, 2026-10-06): book at least that, so a full recorder refuses instead of degrading"
   }
 }
 

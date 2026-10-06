@@ -4,6 +4,7 @@ import os
 import socket
 import threading
 import traceback
+import time
 import uuid
 import zipfile
 from datetime import datetime, timedelta, timezone
@@ -419,11 +420,45 @@ async def start_bot(request: Request, _=Depends(verify_api_key)):
 _RECORDING_STARTS: set = set()  # keep each background start alive until it finishes
 
 
+AUTO_RECORD_WAIT_S = int(os.environ.get("AUTO_RECORD_WAIT_SECONDS", "600"))
+
+
+def _recorder_busy(status: int, payload: dict) -> bool:
+    """LiveKit's answer when every recorder is full (its CPU booking is used up)."""
+    err = str(payload.get("error", ""))
+    return status == 502 and ("no response from servers" in err or "unavailable" in err)
+
+
+async def record_with_retry(room_name: str, give_up_after_s: float = AUTO_RECORD_WAIT_S,
+                            every_s: float = 15) -> tuple[int, dict]:
+    """Auto-record: while every recorder is busy, ask again (until the session ends, which
+    answers 404, or the wait runs out). A session that still gets no recorder keeps a
+    'failed' recording, so the console shows it has no video (2026-10-06: 2 of 8 rooms
+    had none, and nothing said so)."""
+    give_up = time.monotonic() + give_up_after_s
+    while True:
+        status, payload = await start_recording_for_room(room_name)
+        if not _recorder_busy(status, payload) or time.monotonic() >= give_up:
+            break
+        logger.info(f"auto_record: {room_name}: every recorder is busy; asking again in {every_s:.0f}s")
+        await asyncio.sleep(every_s)
+    if status not in (200, 409, 404):
+        logger.warning(f"auto_record: {room_name} has NO video recording: {status} {payload}")
+        async with AsyncSessionLocal() as db, db.begin():
+            conv = (await db.execute(
+                select(Conversation).where(Conversation.room_name == room_name, Conversation.status == "running")
+                .order_by(Conversation.started_at.desc()).limit(1))).scalar_one_or_none()
+            if conv:
+                db.add(MediaFile(id=str(uuid.uuid4()), conv_id=conv.id, type="recording", status="failed",
+                                 meta={"error": str(payload.get("error", ""))[:500]}))
+    return status, payload
+
+
 def _record_from_the_start(room_name: str) -> None:
     """Auto-record: the room recording starts with the session, before the bot joins,
     so its greeting is recorded. Here because only the runner holds the egress key."""
     async def start():
-        status, payload = await start_recording_for_room(room_name)
+        status, payload = await record_with_retry(room_name)
         logger.info(f"auto_record: {room_name} recording → {status} {payload}")
 
     task = asyncio.create_task(start())
@@ -1307,6 +1342,15 @@ _RECONCILER_SESSION: list = []
 
 
 @app.on_event("startup")
+async def reconcile_tick() -> None:
+    """One pass of the background loop: sessions, then recordings (a finished recording was
+    marked available only when someone opened the Meetings page, 2026-10-06)."""
+    await reconcile_stale_conversations()
+    await fail_silent_sessions(AsyncSessionLocal, stop=_stop_bot)
+    await rejoin_dead_sessions()
+    await sync_pending_recordings()
+
+
 async def _start_conversation_reconcile_loop() -> "asyncio.Task | None":
     if os.environ.get("DISABLE_CONVERSATION_RECONCILE", "").lower() in ("1", "true", "yes"):
         return
@@ -1323,9 +1367,7 @@ async def _start_conversation_reconcile_loop() -> "asyncio.Task | None":
         while True:
             await asyncio.sleep(interval)
             try:
-                await reconcile_stale_conversations()
-                await fail_silent_sessions(AsyncSessionLocal, stop=_stop_bot)
-                await rejoin_dead_sessions()
+                await reconcile_tick()
             except Exception as e:
                 logger.warning(f"conversation reconcile loop error: {e}")
 
@@ -1343,6 +1385,16 @@ async def reconcile_recordings(
     Webhooks can be missed (network issues, redeployments, LiveKit Cloud timing).
     The meetings UI calls this whenever it detects recordings stuck in 'pending'.
     """
+    pending = await _pending_recordings()
+    if not pending:
+        return {"checked": 0}
+
+    background_tasks.add_task(_reconcile_pending_recordings, pending)
+    logger.info(f"reconcile: queued check for {len(pending)} pending recording(s)")
+    return {"checked": len(pending)}
+
+
+async def _pending_recordings() -> list:
     async with AsyncSessionLocal() as db:
         result = await db.execute(
             select(MediaFile).where(
@@ -1350,14 +1402,17 @@ async def reconcile_recordings(
                 MediaFile.status == "pending",
             )
         )
-        pending = list(result.scalars().all())
+        return list(result.scalars().all())
 
-    if not pending:
-        return {"checked": 0}
 
-    background_tasks.add_task(_reconcile_pending_recordings, pending)
-    logger.info(f"reconcile: queued check for {len(pending)} pending recording(s)")
-    return {"checked": len(pending)}
+async def sync_pending_recordings() -> None:
+    """Mark each pending recording available or failed from LiveKit's egress state
+    (the background loop runs this every tick)."""
+    # ponytail: one LiveKit call per pending recording per tick; a recording LiveKit no
+    # longer knows stays pending and is asked again. Batch by room if pending grows large.
+    pending = await _pending_recordings()
+    if pending:
+        await _reconcile_pending_recordings(pending)
 
 
 async def _reconcile_pending_recordings(pending: list) -> None:

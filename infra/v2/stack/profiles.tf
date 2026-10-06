@@ -14,12 +14,14 @@ locals {
     # and ElevenLabs), the database across two zones, and 20 rooms at any time with nobody
     # pressing Prepare: 7 warm bot machines (3 sessions each), LiveKit c6i.large (60 rooms
     # at 57% CPU in L6). Prepare grows the bots to 40 machines (the spike's 100 rooms).
-    # ponytail: one recording machine until a measured recording says how many 20 rooms need.
+    # Video (measured 2026-10-06, docs/v2-infrastructure.md): a recorded room uses ~1.6 CPU on
+    # a c6i.2xlarge (36% at 2, 64% at 3, saturated at 5); booking 2 CPU caps each at 3, so a
+    # full recorder refuses (auto-record waits for a free one) instead of degrading. 7 hold 21.
     prod = {
       stt_nim_enabled   = true, model_services = [], tts_replicas = 1,
       bot_pool_min      = 7, bot_pool_max = 40, livekit_instance_type = "c6i.large",
-      db_instance_class = "db.t4g.medium", db_multi_az = true, egress_count = 1,
-      egress_room_cpu   = null,
+      db_instance_class = "db.t4g.medium", db_multi_az = true, egress_count = 7,
+      egress_room_cpu   = 2,
     }
   }
   profile = local.profiles[var.env]

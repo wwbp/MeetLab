@@ -57,7 +57,7 @@ resource "aws_iam_role_policy" "acceptance" {
       },
       {
         # "Load test v2" (.github/workflows/loadtest-v2.yml): start the load generator
-        # (infra/v2/staging/loadgen.tf) in its own subnets and group, and read its results.
+        # (infra/v2/stack/loadgen.tf) in its own subnets and group, and read its results.
         Effect    = "Allow"
         Action    = "ecs:RunTask"
         Resource  = "arn:aws:ecs:us-east-1:${local.account}:task-definition/meetlab-v2-staging-loadgen:*"

@@ -6,12 +6,12 @@
 # per-session load when load testing resumes (LEDGER).
 
 resource "aws_cloudwatch_log_group" "bot" {
-  name              = "/meetlab-v2/staging/bot"
+  name              = "/meetlab-v2/${var.env}/bot"
   retention_in_days = 30
 }
 
 resource "aws_ecs_task_definition" "bot" {
-  family                   = "meetlab-v2-staging-bot"
+  family                   = "${local.name}-bot"
   requires_compatibilities = ["EC2"]
   network_mode             = "bridge"
   skip_destroy             = true # see tests/runner.tftest.hcl
@@ -43,7 +43,7 @@ resource "aws_ecs_task_definition" "bot" {
 }
 
 resource "aws_launch_template" "bots" {
-  name                   = "meetlab-v2-staging-bots"
+  name                   = "${local.name}-bots"
   image_id               = data.aws_ssm_parameter.ecs_ami.value
   instance_type          = "c6i.large"
   vpc_security_group_ids = [aws_security_group.app.id]
@@ -57,16 +57,16 @@ resource "aws_launch_template" "bots" {
   user_data = base64encode("#!/bin/bash\necho ECS_CLUSTER=${aws_ecs_cluster.this.name} >> /etc/ecs/ecs.config\n")
   tag_specifications {
     resource_type = "instance"
-    tags          = { Name = "meetlab-v2-staging-bots", Project = "meetlab-v2", Environment = "staging" }
+    tags          = { Name = "${local.name}-bots", Project = "meetlab-v2", Environment = var.env }
   }
   tag_specifications {
     resource_type = "volume"
-    tags          = { Project = "meetlab-v2", Environment = "staging" }
+    tags          = { Project = "meetlab-v2", Environment = var.env }
   }
 }
 
 resource "aws_autoscaling_group" "bots" {
-  name                  = "meetlab-v2-staging-bots"
+  name                  = "${local.name}-bots"
   min_size              = var.bot_pool_min
   max_size              = var.bot_pool_max
   vpc_zone_identifier   = [for s in aws_subnet.private : s.id]
@@ -94,7 +94,7 @@ resource "aws_autoscaling_group" "bots" {
 }
 
 resource "aws_ecs_capacity_provider" "bots" {
-  name = "meetlab-v2-staging-bots"
+  name = "${local.name}-bots"
   auto_scaling_group_provider {
     auto_scaling_group_arn         = aws_autoscaling_group.bots.arn
     managed_termination_protection = "ENABLED"
@@ -108,7 +108,7 @@ resource "aws_ecs_capacity_provider" "bots" {
 # The bot's own role: only the Session Manager channels ECS Exec needs, so a person
 # can open a shell in a staging bot (and kill -9 it for the heartbeat test).
 resource "aws_iam_role" "bot_task" {
-  name                 = "meetlab-v2-staging-bot-task"
+  name                 = "${local.name}-bot-task"
   permissions_boundary = local.boundary
   assume_role_policy = jsonencode({
     Version   = "2012-10-17"
@@ -172,7 +172,7 @@ resource "aws_iam_role_policy" "runner_prewarm" {
 
 # agent-runner may start bot tasks, and stop or inspect tasks in this cluster.
 resource "aws_iam_role" "runner_task" {
-  name                 = "meetlab-v2-staging-runner-task"
+  name                 = "${local.name}-runner-task"
   permissions_boundary = local.boundary
   assume_role_policy = jsonencode({
     Version   = "2012-10-17"

@@ -2,12 +2,12 @@
 # through Service Connect.
 
 resource "aws_cloudwatch_log_group" "meet" {
-  name              = "/meetlab-v2/staging/meet"
+  name              = "/meetlab-v2/${var.env}/meet"
   retention_in_days = 30
 }
 
 resource "aws_lb_target_group" "meet" {
-  name                 = "meetlab-v2-staging-meet"
+  name                 = "${local.name}-meet"
   port                 = 3000
   protocol             = "HTTP"
   vpc_id               = aws_vpc.this.id
@@ -20,7 +20,7 @@ resource "aws_lb_target_group" "meet" {
 }
 
 resource "aws_ecs_task_definition" "meet_app" {
-  family                   = "meetlab-v2-staging-meet"
+  family                   = "${local.name}-meet"
   requires_compatibilities = ["EC2"]
   network_mode             = "bridge"
   skip_destroy             = true # see tests/runner.tftest.hcl
@@ -33,7 +33,7 @@ resource "aws_ecs_task_definition" "meet_app" {
     memoryReservation = 512 # peak ~175 MB
     portMappings      = [{ containerPort = 3000, hostPort = 0, protocol = "tcp" }]
     environment = concat(local.livekit_environment, [
-      { name = "MEET_BASE_URL", value = "https://meet-staging.wwbp.org" },
+      { name = "MEET_BASE_URL", value = "https://meet${var.hostname_suffix}.wwbp.org" },
       { name = "BOT_RUNNER_URL", value = "http://agent-runner:7860/" },
     ])
     secrets = concat(local.livekit_secrets, [for n in ["BOT_RUNNER_SECRET", "CONSOLE_PASSWORD"] :
@@ -50,7 +50,7 @@ resource "aws_ecs_task_definition" "meet_app" {
 }
 
 resource "aws_ecs_service" "meet" {
-  name                  = "meetlab-v2-staging-meet"
+  name                  = "${local.name}-meet"
   cluster               = aws_ecs_cluster.this.id
   task_definition       = aws_ecs_task_definition.meet_app.arn
   desired_count         = 1

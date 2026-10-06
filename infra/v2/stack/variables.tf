@@ -1,3 +1,19 @@
+variable "env" {
+  description = "Which environment this stack is: staging or prod. Names, logs, secrets and the state file follow it"
+  type        = string
+  default     = "staging"
+  validation {
+    condition     = contains(["staging", "prod"], var.env)
+    error_message = "env is staging or prod"
+  }
+}
+
+variable "hostname_suffix" {
+  description = "Public names are meet<suffix>, livekit<suffix> and turn<suffix>.wwbp.org: -staging; -v2 for production until cutover, then empty"
+  type        = string
+  default     = "-staging"
+}
+
 variable "image_tag" {
   description = "Git SHA of the images to run; the pipeline passes the commit it just pushed"
   type        = string

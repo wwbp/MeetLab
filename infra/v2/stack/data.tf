@@ -2,7 +2,7 @@
 # what the database trusts; ECS tasks join it in a later PR.
 
 resource "aws_security_group" "app" {
-  name        = "meetlab-v2-staging-app"
+  name        = "${local.name}-app"
   description = "meet, control API and bot tasks"
   vpc_id      = aws_vpc.this.id
   # Bridge networking: ECS maps container ports to the ephemeral range on the host.
@@ -24,7 +24,7 @@ resource "aws_security_group" "app" {
 }
 
 resource "aws_security_group" "db" {
-  name        = "meetlab-v2-staging-db"
+  name        = "${local.name}-db"
   description = "Postgres, from the app only"
   vpc_id      = aws_vpc.this.id
   ingress {
@@ -36,14 +36,14 @@ resource "aws_security_group" "db" {
 }
 
 resource "aws_db_subnet_group" "this" {
-  name       = "meetlab-v2-staging"
+  name       = local.name
   subnet_ids = [for s in aws_subnet.private : s.id]
 }
 
 # ponytail: t4g.small, single AZ. Enough for staging (100 sessions heartbeating every
 # 10 s is ~10 writes/s); size up and turn on multi_az before this carries a study.
 resource "aws_db_instance" "this" {
-  identifier                  = "meetlab-v2-staging"
+  identifier                  = local.name
   engine                      = "postgres"
   engine_version              = "17"
   instance_class              = var.db_instance_class # db.t4g.small; raised for big load tests
@@ -60,11 +60,11 @@ resource "aws_db_instance" "this" {
   backup_retention_period     = 7
   deletion_protection         = true
   skip_final_snapshot         = false
-  final_snapshot_identifier   = "meetlab-v2-staging-final"
+  final_snapshot_identifier   = "${local.name}-final"
 }
 
 resource "aws_s3_bucket" "media" {
-  bucket = "meetlab-v2-staging-media-848180123498"
+  bucket = "${local.name}-media-${data.aws_caller_identity.current.account_id}"
 }
 
 resource "aws_s3_bucket_public_access_block" "media" {

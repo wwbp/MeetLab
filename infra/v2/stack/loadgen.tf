@@ -5,7 +5,7 @@
 # no machines to keep, billed only while a run lasts, and each run picks its size.
 
 resource "aws_security_group" "loadgen" {
-  name        = "meetlab-v2-staging-loadgen"
+  name        = "${local.name}-loadgen"
   description = "Load generator: out only (meet and LiveKit, through the NAT)"
   vpc_id      = aws_vpc.this.id
   egress {
@@ -17,7 +17,7 @@ resource "aws_security_group" "loadgen" {
 }
 
 resource "aws_iam_role" "loadgen" {
-  name                 = "meetlab-v2-staging-loadgen"
+  name                 = "${local.name}-loadgen"
   permissions_boundary = local.boundary
   assume_role_policy = jsonencode({
     Version   = "2012-10-17"
@@ -40,12 +40,12 @@ resource "aws_iam_role_policy" "loadgen_results" {
 }
 
 resource "aws_cloudwatch_log_group" "loadgen" {
-  name              = "/meetlab-v2/staging/loadgen"
+  name              = "/meetlab-v2/${var.env}/loadgen"
   retention_in_days = 30
 }
 
 resource "aws_ecs_task_definition" "loadgen" {
-  family                   = "meetlab-v2-staging-loadgen"
+  family                   = "${local.name}-loadgen"
   requires_compatibilities = ["FARGATE"]
   network_mode             = "awsvpc"
   cpu                      = 4096 # a run asks for more (the workflow's cpu input)
@@ -58,7 +58,7 @@ resource "aws_ecs_task_definition" "loadgen" {
     image       = "${aws_ecr_repository.this["agent-runner"].repository_url}:${var.image_tag}"
     essential   = true
     command     = ["python", "tests/load_run.py"]
-    environment = concat(local.livekit_environment, [{ name = "MEET_URL", value = "https://meet-staging.wwbp.org" }])
+    environment = concat(local.livekit_environment, [{ name = "MEET_URL", value = "https://meet${var.hostname_suffix}.wwbp.org" }])
     secrets = concat(local.livekit_secrets, [
       { name = "CONSOLE_PASSWORD", valueFrom = "${local.parameters}/CONSOLE_PASSWORD" },
       { name = "OPENAI_API_KEY", valueFrom = "${local.parameters}/OPENAI_API_KEY" }, # the answer judge (judge.py)

@@ -8,7 +8,7 @@ locals {
 resource "aws_vpc" "this" {
   cidr_block           = "10.20.0.0/16"
   enable_dns_hostnames = true
-  tags                 = { Name = "meetlab-v2-staging" }
+  tags                 = { Name = local.name }
 }
 
 resource "aws_subnet" "public" {
@@ -17,7 +17,7 @@ resource "aws_subnet" "public" {
   availability_zone       = each.value
   map_public_ip_on_launch = false
   cidr_block              = cidrsubnet(aws_vpc.this.cidr_block, 4, index(keys(local.azs), each.key))
-  tags                    = { Name = "meetlab-v2-staging-public-${each.key}" }
+  tags                    = { Name = "${local.name}-public-${each.key}" }
 }
 
 resource "aws_subnet" "private" {
@@ -26,17 +26,17 @@ resource "aws_subnet" "private" {
   availability_zone       = each.value
   map_public_ip_on_launch = false
   cidr_block              = cidrsubnet(aws_vpc.this.cidr_block, 4, 8 + index(keys(local.azs), each.key))
-  tags                    = { Name = "meetlab-v2-staging-private-${each.key}" }
+  tags                    = { Name = "${local.name}-private-${each.key}" }
 }
 
 resource "aws_internet_gateway" "this" {
   vpc_id = aws_vpc.this.id
-  tags   = { Name = "meetlab-v2-staging" }
+  tags   = { Name = local.name }
 }
 
 resource "aws_eip" "nat" {
   domain = "vpc"
-  tags   = { Name = "meetlab-v2-staging-nat" }
+  tags   = { Name = "${local.name}-nat" }
 }
 
 # ponytail: one NAT, so losing us-east-1a cuts private egress in both AZs. Add a
@@ -44,7 +44,7 @@ resource "aws_eip" "nat" {
 resource "aws_nat_gateway" "this" {
   allocation_id = aws_eip.nat.id
   subnet_id     = aws_subnet.public["a"].id
-  tags          = { Name = "meetlab-v2-staging" }
+  tags          = { Name = local.name }
   depends_on    = [aws_internet_gateway.this]
 }
 
@@ -54,7 +54,7 @@ resource "aws_route_table" "public" {
     cidr_block = "0.0.0.0/0"
     gateway_id = aws_internet_gateway.this.id
   }
-  tags = { Name = "meetlab-v2-staging-public" }
+  tags = { Name = "${local.name}-public" }
 }
 
 resource "aws_route_table" "private" {
@@ -63,7 +63,7 @@ resource "aws_route_table" "private" {
     cidr_block     = "0.0.0.0/0"
     nat_gateway_id = aws_nat_gateway.this.id
   }
-  tags = { Name = "meetlab-v2-staging-private" }
+  tags = { Name = "${local.name}-private" }
 }
 
 resource "aws_route_table_association" "public" {

@@ -1,4 +1,4 @@
-# Public entry: meet-staging.wwbp.org -> ALB (public subnets) -> tasks (private).
+# Public entry: meet${var.hostname_suffix}.wwbp.org -> ALB (public subnets) -> tasks (private).
 # One level under wwbp.org so the existing, auto-renewing *.wwbp.org certificate
 # covers it; nothing about that certificate or the shared zone is managed here
 # except this one record.
@@ -14,7 +14,7 @@ data "aws_route53_zone" "wwbp" {
 }
 
 resource "aws_security_group" "alb" {
-  name        = "meetlab-v2-staging-alb"
+  name        = "${local.name}-alb"
   description = "Public HTTP/HTTPS"
   vpc_id      = aws_vpc.this.id
   ingress {
@@ -38,7 +38,7 @@ resource "aws_security_group" "alb" {
 }
 
 resource "aws_lb" "this" {
-  name               = "meetlab-v2-staging"
+  name               = local.name
   load_balancer_type = "application"
   security_groups    = [aws_security_group.alb.id]
   subnets            = [for s in aws_subnet.public : s.id]
@@ -73,7 +73,7 @@ resource "aws_lb_listener" "https" {
 
 resource "aws_route53_record" "meet" {
   zone_id = data.aws_route53_zone.wwbp.zone_id
-  name    = "meet-staging.wwbp.org"
+  name    = "meet${var.hostname_suffix}.wwbp.org"
   type    = "A"
   alias {
     name                   = aws_lb.this.dns_name

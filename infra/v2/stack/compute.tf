@@ -12,7 +12,7 @@ locals {
 }
 
 resource "aws_ecs_cluster" "this" {
-  name = "meetlab-v2-staging"
+  name = local.name
   setting {
     name  = "containerInsights"
     value = var.container_insights ? "enabled" : "disabled" # billed per task; on for load tests
@@ -25,7 +25,7 @@ resource "aws_ecs_cluster" "this" {
 # Service Connect: services find each other by name (meet -> http://agent-runner:7860)
 # without a second load balancer.
 resource "aws_service_discovery_http_namespace" "this" {
-  name = "meetlab-v2-staging"
+  name = local.name
 }
 
 data "aws_ssm_parameter" "ecs_ami" {
@@ -33,7 +33,7 @@ data "aws_ssm_parameter" "ecs_ami" {
 }
 
 resource "aws_iam_role" "instance" {
-  name                 = "meetlab-v2-staging-ecs-instance"
+  name                 = "${local.name}-ecs-instance"
   permissions_boundary = local.boundary
   assume_role_policy = jsonencode({
     Version   = "2012-10-17"
@@ -47,12 +47,12 @@ resource "aws_iam_role_policy_attachment" "instance" {
 }
 
 resource "aws_iam_instance_profile" "instance" {
-  name = "meetlab-v2-staging-ecs-instance"
+  name = "${local.name}-ecs-instance"
   role = aws_iam_role.instance.name
 }
 
 resource "aws_launch_template" "ecs" {
-  name                   = "meetlab-v2-staging-ecs"
+  name                   = "${local.name}-ecs"
   image_id               = data.aws_ssm_parameter.ecs_ami.value
   instance_type          = "t3.medium"
   vpc_security_group_ids = [aws_security_group.app.id]
@@ -66,17 +66,17 @@ resource "aws_launch_template" "ecs" {
   user_data = base64encode("#!/bin/bash\necho ECS_CLUSTER=${aws_ecs_cluster.this.name} >> /etc/ecs/ecs.config\n")
   tag_specifications {
     resource_type = "instance"
-    tags          = { Name = "meetlab-v2-staging-ecs", Project = "meetlab-v2", Environment = "staging" }
+    tags          = { Name = "${local.name}-ecs", Project = "meetlab-v2", Environment = var.env }
   }
   tag_specifications {
     resource_type = "volume"
-    tags          = { Project = "meetlab-v2", Environment = "staging" }
+    tags          = { Project = "meetlab-v2", Environment = var.env }
   }
 }
 
 # ponytail: one t3.medium for meet and the runner; bots have their own group (bots.tf).
 resource "aws_autoscaling_group" "ecs" {
-  name                  = "meetlab-v2-staging-ecs"
+  name                  = "${local.name}-ecs"
   min_size              = 1
   max_size              = 2
   vpc_zone_identifier   = [for s in aws_subnet.private : s.id]
@@ -104,7 +104,7 @@ resource "aws_autoscaling_group" "ecs" {
 }
 
 resource "aws_ecs_capacity_provider" "ec2" {
-  name = "meetlab-v2-staging-services"
+  name = "${local.name}-services"
   auto_scaling_group_provider {
     auto_scaling_group_arn         = aws_autoscaling_group.ecs.arn
     managed_termination_protection = "ENABLED"
@@ -125,7 +125,7 @@ resource "aws_ecs_cluster_capacity_providers" "this" {
 }
 
 resource "aws_iam_role" "execution" {
-  name                 = "meetlab-v2-staging-task-execution"
+  name                 = "${local.name}-task-execution"
   permissions_boundary = local.boundary
   assume_role_policy = jsonencode({
     Version   = "2012-10-17"
@@ -134,13 +134,13 @@ resource "aws_iam_role" "execution" {
 }
 
 locals {
-  parameters = "arn:aws:ssm:us-east-1:${data.aws_caller_identity.current.account_id}:parameter/meetlab-v2/staging"
+  parameters = "arn:aws:ssm:us-east-1:${data.aws_caller_identity.current.account_id}:parameter/meetlab-v2/${var.env}"
   db_secret  = aws_db_instance.this.master_user_secret[0].secret_arn
 }
 
 # Values are written by infra/v2/seed-staging-secrets.sh; Terraform only names them.
 resource "aws_iam_role_policy" "execution_secrets" {
-  name = "staging-secrets"
+  name = "${var.env}-secrets"
   role = aws_iam_role.execution.id
   policy = jsonencode({
     Version = "2012-10-17"

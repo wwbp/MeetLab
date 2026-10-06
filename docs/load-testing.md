@@ -178,5 +178,5 @@ The report reads staging's CloudWatch, so locally you need AWS credentials.
 | A conversation's turns as data | runner `GET /conversations/{id}/utterances`, console `/api/meetings/{id}/utterances` |
 | The report (both tables, quality, staging's side) | `agent-runner/tests/load_report.py` |
 | The driver: rooms, participants, listening | `agent-runner/tests/load_run.py` |
-| Load generator in AWS | `infra/v2/staging/loadgen.tf` |
+| Load generator in AWS | `infra/v2/stack/loadgen.tf` |
 | The workflow | `.github/workflows/loadtest-v2.yml` |

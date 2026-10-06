@@ -1,18 +1,18 @@
 # Self-hosted LiveKit (load-test readiness L2): our own livekit-server, the version local
 # development runs, on one machine with a public IP. Signalling goes through the load
-# balancer's TLS (wss://livekit-staging.wwbp.org); media goes straight to the machine,
+# balancer's TLS (wss://livekit${var.hostname_suffix}.wwbp.org); media goes straight to the machine,
 # the standard LiveKit shape. Off unless livekit_self_hosted; LiveKit Cloud otherwise.
 #
 # TURN (D1): participants whose network allows only web traffic reach LiveKit's built-in
-# TURN server at turn-staging.wwbp.org:443; the network load balancer ends TLS with the
+# TURN server at turn${var.hostname_suffix}.wwbp.org:443; the network load balancer ends TLS with the
 # *.wwbp.org certificate and passes plain TCP to the machine (external_tls).
 #
 # Video recording: egress_server.tf. ponytail: TURN over UDP (3478) not offered: 443/TLS
 # covers the strict networks.
 
 locals {
-  livekit_host = "livekit-staging.wwbp.org"
-  turn_host    = "turn-staging.wwbp.org"
+  livekit_host = "livekit${var.hostname_suffix}.wwbp.org"
+  turn_host    = "turn${var.hostname_suffix}.wwbp.org"
   # What meet, the runner and the bots connect with: ours when switched on, LiveKit Cloud otherwise.
   livekit_environment = var.livekit_self_hosted ? [{ name = "LIVEKIT_URL", value = "wss://${local.livekit_host}" }] : []
   livekit_secrets = var.livekit_self_hosted ? [
@@ -32,7 +32,7 @@ output "livekit" {
 }
 
 resource "aws_security_group" "livekit" {
-  name        = "meetlab-v2-staging-livekit"
+  name        = "${local.name}-livekit"
   description = "Self-hosted LiveKit: media from anywhere, signalling via the load balancer"
   vpc_id      = aws_vpc.this.id
   ingress {
@@ -68,7 +68,7 @@ resource "aws_security_group" "livekit" {
 }
 
 resource "aws_launch_template" "livekit" {
-  name          = "meetlab-v2-staging-livekit"
+  name          = "${local.name}-livekit"
   image_id      = data.aws_ssm_parameter.ecs_ami.value
   instance_type = var.livekit_instance_type # c6i.large; raised for big load tests
   network_interfaces {
@@ -85,16 +85,16 @@ resource "aws_launch_template" "livekit" {
   user_data = base64encode("#!/bin/bash\necho ECS_CLUSTER=${aws_ecs_cluster.this.name} >> /etc/ecs/ecs.config\n")
   tag_specifications {
     resource_type = "instance"
-    tags          = { Name = "meetlab-v2-staging-livekit", Project = "meetlab-v2", Environment = "staging" }
+    tags          = { Name = "${local.name}-livekit", Project = "meetlab-v2", Environment = var.env }
   }
   tag_specifications {
     resource_type = "volume"
-    tags          = { Project = "meetlab-v2", Environment = "staging" }
+    tags          = { Project = "meetlab-v2", Environment = var.env }
   }
 }
 
 resource "aws_autoscaling_group" "livekit" {
-  name                  = "meetlab-v2-staging-livekit"
+  name                  = "${local.name}-livekit"
   min_size              = 0
   max_size              = 1
   vpc_zone_identifier   = [for s in aws_subnet.public : s.id]
@@ -129,7 +129,7 @@ resource "aws_autoscaling_group" "livekit" {
 }
 
 resource "aws_ecs_capacity_provider" "livekit" {
-  name = "meetlab-v2-staging-livekit"
+  name = "${local.name}-livekit"
   auto_scaling_group_provider {
     auto_scaling_group_arn         = aws_autoscaling_group.livekit.arn
     managed_termination_protection = "ENABLED"
@@ -141,12 +141,12 @@ resource "aws_ecs_capacity_provider" "livekit" {
 }
 
 resource "aws_cloudwatch_log_group" "livekit" {
-  name              = "/meetlab-v2/staging/livekit"
+  name              = "/meetlab-v2/${var.env}/livekit"
   retention_in_days = 30
 }
 
 resource "aws_ecs_task_definition" "livekit" {
-  family                   = "meetlab-v2-staging-livekit"
+  family                   = "${local.name}-livekit"
   requires_compatibilities = ["EC2"]
   network_mode             = "host" # WebRTC media on the machine's own ports
   skip_destroy             = true   # see tests/runner.tftest.hcl
@@ -166,7 +166,7 @@ resource "aws_ecs_task_definition" "livekit" {
       { name = "KEY", valueFrom = "${local.parameters}/SELFHOSTED_LIVEKIT_API_KEY" },
       { name = "SECRET", valueFrom = "${local.parameters}/SELFHOSTED_LIVEKIT_API_SECRET" },
     ]
-    environment = [{ name = "WEBHOOK", value = "https://meet-staging.wwbp.org/api/concierge/webhooks/livekit" }]
+    environment = [{ name = "WEBHOOK", value = "https://meet${var.hostname_suffix}.wwbp.org/api/concierge/webhooks/livekit" }]
     # The config holds the key, so it is assembled here from the secrets, never in Terraform.
     entryPoint = ["sh", "-c"]
     command = [join("", [
@@ -189,7 +189,7 @@ resource "aws_ecs_task_definition" "livekit" {
 
 resource "aws_lb_target_group" "livekit" {
   count       = var.livekit_self_hosted ? 1 : 0
-  name        = "meetlab-v2-staging-livekit"
+  name        = "${local.name}-livekit"
   port        = 7880
   protocol    = "HTTP"
   target_type = "instance"
@@ -228,7 +228,7 @@ resource "aws_route53_record" "livekit" {
 
 resource "aws_ecs_service" "livekit" {
   count           = var.livekit_self_hosted ? 1 : 0
-  name            = "meetlab-v2-staging-livekit"
+  name            = "${local.name}-livekit"
   cluster         = aws_ecs_cluster.this.id
   task_definition = aws_ecs_task_definition.livekit.arn
   desired_count   = 1
@@ -258,7 +258,7 @@ resource "aws_ecs_service" "livekit" {
 }
 
 resource "aws_security_group" "turn_lb" {
-  name        = "meetlab-v2-staging-turn-lb"
+  name        = "${local.name}-turn-lb"
   description = "TURN over TLS on 443 from anywhere (every relay needs LiveKit credentials)"
   vpc_id      = aws_vpc.this.id
   ingress {
@@ -277,7 +277,7 @@ resource "aws_security_group" "turn_lb" {
 
 resource "aws_lb" "turn" {
   count              = var.livekit_self_hosted ? 1 : 0
-  name               = "meetlab-v2-staging-turn"
+  name               = "${local.name}-turn"
   internal           = false
   load_balancer_type = "network"
   subnets            = [for s in aws_subnet.public : s.id]
@@ -286,7 +286,7 @@ resource "aws_lb" "turn" {
 
 resource "aws_lb_target_group" "turn" {
   count              = var.livekit_self_hosted ? 1 : 0
-  name               = "meetlab-v2-staging-turn"
+  name               = "${local.name}-turn"
   port               = 5349
   protocol           = "TCP"
   target_type        = "instance"

@@ -12,10 +12,10 @@ reads it from there. Every run speaks the same lines in the same voices, so runs
 | Licence | CC BY-NC-SA 4.0 (research use) | CDLA-Sharing-1.0 |
 | Kind of talk | everyday two-person dialogues | real human-to-human chats about a topic |
 | Selection (`agent-runner/conversation_library.py`) | `select`: test split, 6–10 turns, lines of 2–30 words, topics taken in turn; 100 dialogues | `select_topical`: held-out (test) conversations, 16+ turns, lines of 2–40 words, fixed order; 280 conversations |
-| Size | 100 dialogues, 795 lines | 280 conversations, ~6,100 lines |
+| Size | 100 dialogues, 795 lines | 280 conversations, 6,072 lines (1,052 with a pause) |
 | Used for | the load tests up to 2026-10-04 (L6, B2, B3) | the 100-room spike (10-minute holds), 2026-10-05 |
 | S3 | `loadtests/library/v1/` | `loadtests/library/v2/` |
-| Manifest `library.json` SHA-256 | `b3e07bd581dab34130ef8df6909441750e7d6b33a574c76430285b6b41876582` | written when v2 is built (see Verify) |
+| Manifest `library.json` SHA-256 | `b3e07bd581dab34130ef8df6909441750e7d6b33a574c76430285b6b41876582` | `1f9939abbd5aaf22b31ef5ac8aa6d53296d1128b9909a2c4b49f3d7ccee6bbcf` |
 
 Both: the two sides of a dialogue get different voices (20 Kokoro English voices); about one
 line in five is spoken with a 0.8 s pause mid-sentence, to test turn-taking. In a room of one

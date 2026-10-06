@@ -380,13 +380,22 @@ def main() -> int:
         # Video: how many rooms got a finished recording (newest meetings first; the run's are among them).
         if VIDEO or profile.get("auto_record"):
             from load_plan import recordings_summary
-            sessions, meetings = [r["session"] for r in result["rooms"]], []
-            for page in range(10):
-                got = console.call("GET", f"/api/meetings?limit=200&offset={200 * page}")["conversations"]
-                meetings += got
-                if not got or set(sessions) <= {m["id"] for m in meetings}:
-                    break
-            result["recordings"] = recordings_summary(meetings, sessions)
+            sessions = [r["session"] for r in result["rooms"]]
+
+            def summary():
+                meetings = []
+                for page in range(10):
+                    got = console.call("GET", f"/api/meetings?limit=200&offset={200 * page}")["conversations"]
+                    meetings += got
+                    if not got or set(sessions) <= {m["id"] for m in meetings}:
+                        break
+                return recordings_summary(meetings, sessions)
+            # A recording is finalized and uploaded after its room ends, and the runner marks it
+            # available a little later (2026-10-06: all 4 "pending" at report time, all in S3).
+            deadline = time.time() + 300
+            while (rec := summary())["pending"] and time.time() < deadline:
+                time.sleep(15)
+            result["recordings"] = rec
         # How good the answers were, per step (judge.py): a sample of replies, each with the
         # conversation before it, scored by a fixed judge model. Skipped without a key.
         if os.getenv("OPENAI_API_KEY"):

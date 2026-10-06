@@ -7,7 +7,7 @@ from collections import Counter
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from conversation_library import (  # noqa: E402
-    VOICES, paused, participants_for, room_plan, select, split_for_pause, voice_for,
+    VOICES, paused, participants_for, room_plan, select, select_topical, split_for_pause, voice_for,
 )
 
 
@@ -44,10 +44,11 @@ class TestRooms(unittest.TestCase):
         self.assertEqual(sorted({participants_for(i) for i in range(4)}), [1, 2, 3])
 
     def test_one_person_speaks_one_side_and_the_bot_answers_in_place_of_the_other(self):
-        lib = select([dialogue(1)], n=1)
-        plan = room_plan(0, lib)  # room 0: one person
+        lib = select([dialogue(1), dialogue(2)], n=2)
+        plan = room_plan(0, lib)  # room 0: one person, one side of each of two dialogues
         self.assertEqual({p for p, _ in plan}, {0})
-        self.assertEqual(len(plan), 4)
+        self.assertEqual({line["side"] for _, line in plan}, {0})
+        self.assertEqual(len(plan), 2 * 4)
 
     def test_two_people_speak_the_two_sides(self):
         lib = select([dialogue(1)], n=1)
@@ -81,6 +82,48 @@ class TestVoicesAndPauses(unittest.TestCase):
     def test_or_between_two_sentences_of_one_turn(self):
         self.assertEqual(split_for_pause("That's unless there is a traffic jam. It could take three hours."),
                          ("That's unless there is a traffic jam.", "It could take three hours."))
+
+
+def topical(cid, turns=20, words=12):
+    """A Topical-Chat conversation as its JSON has it: two agents taking turns."""
+    return cid, {"content": [{"agent": f"agent_{1 + k % 2}", "message": " ".join(["word"] * words) + "."}
+                             for k in range(turns)]}
+
+
+class TestTopicalChat(unittest.TestCase):
+    """The 100-room spike's library (user, 2026-10-05): real, long human-to-human chats
+    (Topical-Chat, CDLA-Sharing-1.0), enough to fill 10 minutes per room without repeating."""
+
+    def test_long_spoken_sized_conversations_in_a_fixed_order(self):
+        convs = dict([topical("b"), topical("a"), topical("short", turns=10), topical("wordy", words=60),
+                      topical("terse", words=1)])
+        self.assertEqual([d["id"] for d in select_topical(convs, n=10)], ["tc-a", "tc-b"])
+
+    def test_lines_keep_who_said_them(self):
+        lines = select_topical(dict([topical("a")]), n=1)[0]["lines"]
+        self.assertEqual([line["side"] for line in lines], [0, 1] * 10)
+
+    def test_equal_mix_has_as_many_rooms_of_one_two_and_three(self):
+        self.assertEqual(Counter(participants_for(i, "equal") for i in range(99)), {1: 33, 2: 33, 3: 33})
+        self.assertEqual(sorted({participants_for(i, "equal") for i in range(3)}), [1, 2, 3])
+
+    def test_each_room_chains_its_own_conversations_and_no_two_rooms_share_one(self):
+        lib = select_topical(dict(topical(f"c{i:03d}") for i in range(45)), n=45)  # 4 one-person rooms take 6
+        rooms = [room_plan(r, lib, per_room=3, mix="equal") for r in range(10)]
+        heard = [{line["text"] + str(id(line)) for _, line in plan} for plan in rooms]
+        for a in range(10):
+            for b in range(a + 1, 10):
+                self.assertFalse(heard[a] & heard[b], (a, b))
+        self.assertEqual(len(rooms[1]), 3 * 20)  # room 1: two people, three whole conversations
+
+    def test_one_person_rooms_get_twice_the_conversations(self):
+        # One person speaks only one side (the bot answers the other): twice the conversations
+        # fill the same time; still no conversation shared between rooms.
+        lib = select_topical(dict(topical(f"c{i:03d}") for i in range(40)), n=40)
+        plans = [room_plan(r, lib, per_room=3, mix="equal") for r in range(9)]
+        self.assertEqual(len(plans[0]), 6 * 10)  # room 0: one person, six conversations' one side
+        heard = [{id(line) for _, line in plan} for plan in plans]
+        self.assertEqual(sum(map(len, heard)), len(set().union(*heard)))
 
 
 if __name__ == "__main__":

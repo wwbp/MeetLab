@@ -36,6 +36,7 @@ in the middle (after a comma, between two sentences or before "and/but/so"), the
 that split turns in the 2026 pilot. Every person is a separate microphone and so a separate
 speech-to-text stream, which is what makes a busy room expensive.
 
+Its sources, licences, checksums and the steps to rebuild it: [data/](https://github.com/wwbp/MeetLab/blob/v2/data/README.md).
 The library is built once (`agent-runner/tests/build_conversation_library.py`) and kept in
 the media bucket (`loadtests/library/v1/`), not in the repository. The workflow's `library`
 input chooses it (`v1`, the default) or the original 5 scripts with one person (`none`).

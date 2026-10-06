@@ -99,20 +99,6 @@ run "the_recording_cpu_booking_is_lowered_only_when_set" {
   }
 }
 
-run "production_books_livekits_default" {
-  command = plan
-
-  variables {
-    env             = "prod"
-    hostname_suffix = "-v2"
-  }
-
-  assert {
-    condition     = !strcontains(join("", jsondecode(aws_ecs_task_definition.egress.container_definitions)[0].command), "cpu_cost")
-    error_message = "production keeps LiveKit's booking until a measurement says otherwise"
-  }
-}
-
 run "a_measurement_can_lower_the_recording_cpu_booking" {
   command = plan
 

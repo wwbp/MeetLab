@@ -24,6 +24,14 @@ resource "aws_ecs_task_definition" "bot" {
     cpu               = local.bot_cpu # sized by measurement (profiles.tf)
     memoryReservation = local.bot_memory
     stopTimeout       = 120 # the ECS maximum: SIGTERM, then this long to flush and write ended
+    # ECS's init as PID 1: python would otherwise be PID 1, which ignores a SIGKILL sent inside
+    # its container (kill9, 2026-10-07) and reaps no zombies. With linuxParameters set, ECS stores
+    # these empty lists explicitly; declared here too, or every plan shows a change (#186).
+    linuxParameters = { initProcessEnabled = true }
+    portMappings    = []
+    mountPoints     = []
+    systemControls  = []
+    volumesFrom     = []
     # A bot needs few connections (heartbeat, turn writes); a bounded pool keeps
     # 100 bots inside db.t4g.small's ~180 (db/url.py pool_options).
     environment = concat(local.bot_environment, [

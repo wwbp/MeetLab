@@ -77,6 +77,7 @@ def bot_container_spec(me: dict, session_id: str) -> dict:
             "Mounts": mounts,
             "NetworkMode": next(iter(me["NetworkSettings"]["Networks"])),
             "AutoRemove": True,
+            "Init": True,  # an init as PID 1, as in ECS (initProcessEnabled): signals reach python
         },
     }
 

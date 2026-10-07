@@ -46,6 +46,11 @@ run "staging_keeps_nothing_warm" {
     condition     = aws_autoscaling_group.bots.min_size == 0 && !aws_db_instance.this.multi_az
     error_message = "staging: no always-warm bot machines, one database zone"
   }
+
+  assert {
+    condition     = local.stt_cpu_enabled == true && !local.stt_nim_enabled
+    error_message = "staging hears with production's speech-to-text (Parakeet on CPU), so its bugs show here first"
+  }
 }
 
 run "a_load_test_switch_still_overrides_the_profile" {

@@ -3,13 +3,14 @@
 
 locals {
   profiles = {
-    # Staging between test runs: nothing warm, the smallest sizes.
+    # Staging between test runs: nothing warm, the smallest sizes; production's speech-to-text
+    # stays on (user, 2026-10-07: a smart-turn bug hid on Deepgram), about $62 a month.
     staging = {
       stt_nim_enabled     = false, model_services = [], tts_replicas = 1,
       bot_pool_min        = 0, bot_pool_max = 2, livekit_instance_type = "c6i.large",
       db_instance_class   = "db.t4g.small", db_multi_az = false, egress_count = 0,
       egress_room_cpu     = null, # LiveKit's default booking per recording; lowered only to measure
-      livekit_self_hosted = true, stt_cpu_enabled = false, stt_cpu_instance_type = "c6i.large",
+      livekit_self_hosted = true, stt_cpu_enabled = true, stt_cpu_instance_type = "c6i.large",
       bot_cpu             = 384, bot_memory = 512, bots_per_instance = 5, bot_instance_type = "c6i.large",
       container_insights  = false,
     }

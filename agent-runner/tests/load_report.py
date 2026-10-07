@@ -26,7 +26,7 @@ from quality import clip_reply, reply_for, score_rooms, voice  # noqa: E402
 
 REGION, CLUSTER, DB = "us-east-1", "meetlab-v2-staging", "meetlab-v2-staging"
 SERVICES = ["meet", "agent-runner", "livekit"]          # ECS services with their own CPU/memory
-GROUPS = ["bots", "ecs", "livekit", "llm", "tts", "stt-nim", "egress"]  # machine groups (CPU)
+GROUPS = ["bots", "ecs", "livekit", "llm", "tts", "stt-nim", "stt-cpu", "egress"]  # machine groups (CPU)
 
 
 def _queries():
@@ -143,7 +143,7 @@ def markdown(r: dict) -> str:
         lines += ["", "**Inside staging** (p95 of the bot's own stage timings; maximum CPU/memory %)", "",
                   "| step | rooms | turn-end wait ms | LLM first token ms | first sentence ms | TTS first audio ms | meet CPU/mem | runner CPU/mem | "
                   "LiveKit CPU | bot machines CPU | heaviest bot task CPU units / MB (reserved 512 / 1024) | "
-                  "LLM / TTS / STT machine CPU | recording machines CPU | DB CPU / connections |",
+                  "LLM / TTS / STT GPU / STT CPU machine CPU | recording machines CPU | DB CPU / connections |",
                   "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
         for k, m in enumerate(r["steps"]):
             s, x = m.get("server", {}).get("stages", {}), m.get("server", {}).get("max", {})
@@ -152,7 +152,7 @@ def markdown(r: dict) -> str:
             lines.append(f"| {k} | {m['rooms']} | {p95('stt_ms')} | {p95('llm_ttft_ms')} | {p95('sentence_agg_ms')} | {p95('tts_ttfb_ms')} | "
                          f"{g('meet_cpu')}/{g('meet_mem')} | {g('agent-runner_cpu')}/{g('agent-runner_mem')} | "
                          f"{g('livekit_hosts_cpu')} | {g('bots_hosts_cpu')} | {g('bot_task_cpu')} / {g('bot_task_mem')} | "
-                         f"{g('llm_hosts_cpu')} / {g('tts_hosts_cpu')} / {g('stt-nim_hosts_cpu')} | {g('egress_hosts_cpu')} | "
+                         f"{g('llm_hosts_cpu')} / {g('tts_hosts_cpu')} / {g('stt-nim_hosts_cpu')} / {g('stt-cpu_hosts_cpu')} | {g('egress_hosts_cpu')} | "
                          f"{g('db_cpu')} / {g('db_connections')} |")
     if r.get("rooms"):
         lines += ["", "**Quality** (what the bot heard against what was said; how long it talked)", "",

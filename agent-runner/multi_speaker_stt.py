@@ -301,10 +301,12 @@ class MultiSpeakerSTT(FrameProcessor):
         )
         tail.link(collector)
         if self._setup_params is not None:
-            await head.setup(self._setup_params)
-            if tail is not head:
-                await tail.setup(self._setup_params)
-            await collector.setup(self._setup_params)
+            # Every part, head to collector: a middle one (the smart-turn gate) left out raised
+            # "TaskManager is not initialized" on its first frame (2026-10-07).
+            p = head
+            while p is not None:
+                await p.setup(self._setup_params)
+                p = p.next
         if self._start_frame is not None:
             await head.process_frame(self._start_frame, FrameDirection.DOWNSTREAM)
         self._stts[sid] = head

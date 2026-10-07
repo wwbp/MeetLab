@@ -80,14 +80,3 @@ def route_audio(sid: str | None, existing: set[str], *, cap: int | None = None) 
         return None
 
     return Routing(worker=name, create=True)
-
-
-def teardown_for(sid: str, existing: set[str]) -> str | None:
-    """The worker to shut down when a participant leaves, if they had one.
-
-    Returning the name rather than mutating lets the caller decide when the
-    worker is genuinely finished — a departing speaker may still have audio in
-    flight worth flushing.
-    """
-    name = worker_name(sid)
-    return name if name in existing else None

@@ -5,7 +5,7 @@ segments, SegmentedSTTService wraps each one as WAV bytes, and run_stt POSTs the
 NIM's OpenAI-compatible endpoint (POST /v1/audio/transcriptions, Triton-backed, concurrent).
 
 Wired by _build_stt / _build_stt_for_multi_speaker in bot.py for stt_model values with the
-"parakeet-" prefix, reusing the (VADProcessor, tail) chain mechanism built for local whisper.
+"parakeet-" prefix, as the tail of a (VADProcessor, tail) chain.
 The NIM's private endpoint is set via NEMOTRON_STT_URL. Experiment log: docs/latency-experiments.md
 (Experiments 6–7); deployment: docs/gpu-stt-deployment.md.
 """

@@ -36,7 +36,7 @@ def run_bot_task(ecs, session_id: str, target: EcsBotTarget) -> str:
         propagateTags="TASK_DEFINITION",
         overrides={"containerOverrides": [{
             "name": target.container,
-            "command": ["uv", "run", "python", "-m", "bot_task", "--session-id", session_id],
+            "command": ["python", "-m", "bot_task", "--session-id", session_id],
         }]},
     )
     tasks, failures = resp.get("tasks") or [], resp.get("failures") or []
@@ -69,7 +69,7 @@ def bot_container_spec(me: dict, session_id: str) -> dict:
     ]
     return {
         "Image": me["Image"],
-        "Cmd": ["uv", "run", "python", "-m", "bot_task", "--session-id", session_id],
+        "Cmd": ["python", "-m", "bot_task", "--session-id", session_id],
         "Env": me["Config"]["Env"],
         "Labels": {"meetlab.session": session_id},
         "StopTimeout": 120,  # same as the ECS stopTimeout: SIGTERM, then this long

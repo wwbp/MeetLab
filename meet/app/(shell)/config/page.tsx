@@ -13,8 +13,8 @@ const Explain = createContext<(key: string) => void>(() => {});
 
 // Settings that only some speech-to-text models use (agent-runner/bot.py _build_stt).
 const isOpenAiStt = (model: string) => model.startsWith('gpt-');
-// Smart turn needs a per-speaker segmenting recogniser (smart_turn.py): Parakeet or Whisper.
-const isSegmentedStt = (model: string) => model.startsWith('parakeet-') || model.startsWith('whisper-');
+// Smart turn needs a per-speaker segmenting recogniser (smart_turn.py): Parakeet.
+const isSegmentedStt = (model: string) => model.startsWith('parakeet-');
 
 
 

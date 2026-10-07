@@ -146,7 +146,7 @@ class TestEffectiveRule(unittest.TestCase):
     def test_smart_turn_needs_a_segmenting_recogniser(self):
         from smart_turn import effective_turn_detection
         self.assertEqual(effective_turn_detection("smart_turn", "parakeet-tdt-0.6b-v2"), "smart_turn")
-        self.assertEqual(effective_turn_detection("smart_turn", "whisper-base"), "smart_turn")
+        self.assertEqual(effective_turn_detection("smart_turn", "parakeet-tdt-0.6b-v2"), "smart_turn")
         # Deepgram and OpenAI decide their own segments: the room falls back to silence, said in the log.
         self.assertEqual(effective_turn_detection("smart_turn", "nova-3-general"), "silence")
         self.assertEqual(effective_turn_detection("smart_turn", "gpt-4o-transcribe"), "silence")

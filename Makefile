@@ -14,7 +14,7 @@ BENCHMARK_PARALLEL ?= 3
 
 MSG ?= migration
 
-.PHONY: test-config-parity up down start stop logs migrate migration test test-unit test-integration test-infra test-stt-cpu test-image test-dead-code scan scan-agent-runner scan-meet sim-attribution
+.PHONY: test-static test-config-parity up down start stop logs migrate migration test test-unit test-integration test-infra test-stt-cpu test-image test-dead-code scan scan-agent-runner scan-meet sim-attribution
 
 up:
 	$(COMPOSE) up --build -d --renew-anon-volumes
@@ -57,8 +57,6 @@ test-unit:
 	@$(COMPOSE) exec -T meet sh -c 'cmp -s pnpm-lock.yaml node_modules/.pnpm/lock.yaml' \
 	  || { echo "meet's node_modules is older than pnpm-lock.yaml: run make up"; exit 1; }
 	$(COMPOSE) exec -T meet pnpm test
-	$(COMPOSE) exec -T meet pnpm lint
-	$(COMPOSE) exec -T meet pnpm knip # no unused files, exports or dependencies (knip)
 
 # Every Bot Config field is in the database, the runner's API and the console form. The
 # services' own tests can't see each other, so this runs on the host from the repo root.
@@ -68,6 +66,13 @@ test-config-parity:
 # No dead code or undeclared dependencies in agent-runner, by the standard tools: vulture
 # (unused code; framework-signature false positives in vulture_whitelist.py) and deptry
 # (pyproject.toml against imports). Runs on the host, no Docker.
+# Static testing (ISTQB, docs/testing.md): defects found without running the code. No stack:
+# meet's checks run in its deps stage, node_modules seeded from the image (anonymous volume).
+test-static: test-dead-code test-image docs-build
+	docker build -q --target deps -t meetlab-meet:deps meet >/dev/null
+	docker run --rm -v $(CURDIR)/meet:/app -v /app/node_modules -w /app meetlab-meet:deps \
+		sh -c 'pnpm lint && pnpm exec tsc --noEmit && pnpm knip'
+
 test-dead-code:
 	cd agent-runner && uvx vulture . vulture_whitelist.py --exclude ".venv,alembic" --min-confidence 80
 	cd agent-runner && uv run --python 3.12 --with deptry deptry .

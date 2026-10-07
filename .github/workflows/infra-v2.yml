@@ -56,8 +56,7 @@ jobs:
       - run: make test-config-parity
       - uses: astral-sh/setup-uv@v6
       - run: make test-stt-cpu
-      - run: make test-image # the bot/runner image: under budget, every entry point imports
-      - run: make test-dead-code # vulture + deptry: no unused code, every import declared
+      - run: make test-static # dead code, image budget, docs, meet lint/tsc/knip (docs/testing.md)
 
   plan:
     if: github.event_name == 'pull_request'

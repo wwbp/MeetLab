@@ -22,6 +22,10 @@ class Config:
     livekit_url: Optional[str]
     livekit_api_key: Optional[str]
     livekit_api_secret: Optional[str]
+    enable_tracing: bool
+    otlp_endpoint: Optional[str]
+    otlp_headers: Optional[str]
+    otel_console_export: bool
 
 
 def load_config() -> Config:
@@ -32,6 +36,10 @@ def load_config() -> Config:
         livekit_url=os.getenv("LIVEKIT_URL"),
         livekit_api_key=os.getenv("LIVEKIT_API_KEY"),
         livekit_api_secret=os.getenv("LIVEKIT_API_SECRET"),
+        enable_tracing=os.getenv("ENABLE_TRACING", "").lower() in ("1", "true", "yes"),
+        otlp_endpoint=os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT"),
+        otlp_headers=os.getenv("OTEL_EXPORTER_OTLP_HEADERS"),
+        otel_console_export=os.getenv("OTEL_CONSOLE_EXPORT", "").lower() in ("1", "true", "yes"),
     )
 
 

@@ -693,16 +693,20 @@ async def _bot(runner_args: LiveKitRunnerArguments):
                     pass
 
         def _handle(self, m):
+            import metrics as _prom
             if isinstance(m, TTFBMetricsData):
                 val_ms = m.value * 1000
                 stage = _ttfb_stage(m.processor)
                 if stage == "llm_ttft_ms":
                     _metrics_data["llm_ttft_ms"] = val_ms
+                    _prom.llm_ttft.record(val_ms, {"llm_model": bot_config.llm_model})
                 elif stage == "tts_ttfb_ms":
                     _metrics_data["tts_ttfb_ms"] = val_ms
+                    _prom.tts_ttfb.record(val_ms, {"tts_provider": bot_config.tts_provider})
             elif isinstance(m, TextAggregationMetricsData):
                 val_ms = m.value * 1000
                 _metrics_data["sentence_agg_ms"] = val_ms
+                _prom.sentence_agg.record(val_ms, {"tts_provider": bot_config.tts_provider})
 
     class _InterruptionObserver(BaseObserver):
         """Feeds the bot's TTS speaking window to the InterruptionTracker.
@@ -853,6 +857,8 @@ async def _bot(runner_args: LiveKitRunnerArguments):
         ),
         observers=[MetricsLogObserver(), _MetricsObserver(), _InterruptionObserver()],
         processor_unusable_policy=UNUSABLE_POLICY,
+        enable_tracing=env_config.enable_tracing,
+        enable_turn_tracking=env_config.enable_tracing,
         conversation_id=runner_args.session_id,
         additional_span_attributes={
             "room.name": runner_args.room_name,
@@ -890,6 +896,13 @@ async def _bot(runner_args: LiveKitRunnerArguments):
         if stt_ms is not None and stt_ms > _STT_SPIKE_THRESHOLD_MS:
             _turn_timing["diag_stt_spike"] = True
             _ep = getattr(bot_config, "stt_endpointing_ms", 200)
+            try:
+                import metrics as _prom
+                _prom.stt_spikes_total.add(
+                    1, {"stt_model": bot_config.stt_model, "endpointing_ms": str(_ep)}
+                )
+            except Exception:
+                pass
             logger.warning(
                 "STT latency spike: stt_ms={:.0f} model={} endpointing_ms={} "
                 "queue_depth={} content={!r}",
@@ -897,7 +910,13 @@ async def _bot(runner_args: LiveKitRunnerArguments):
                 (message.content or "")[:80],
             )
         if not message.content:
-            # VAD/STT fired but produced no transcript.
+            # VAD/STT fired but produced no transcript — these are dropped from the
+            # stt_ms histogram, so count them separately to explain percentile skew.
+            try:
+                import metrics as _prom
+                _prom.phantom_segments_total.add(1, {"stt_model": bot_config.stt_model})
+            except Exception:
+                pass
             logger.debug("Phantom segment: user turn committed with empty content")
             return
         # Self-echo heuristic: does this user transcript echo recent bot TTS?
@@ -905,6 +924,11 @@ async def _bot(runner_args: LiveKitRunnerArguments):
             sim = _text_similarity(message.content, _bot_text)
             if sim >= _SELF_ECHO_SIMILARITY:
                 _turn_timing["diag_self_echo"] = True
+                try:
+                    import metrics as _prom
+                    _prom.self_echo_suspected_total.add(1, {"stt_model": bot_config.stt_model})
+                except Exception:
+                    pass
                 logger.warning(
                     "Possible bot self-echo (sim={:.2f}): user={!r} ~ bot={!r}",
                     sim, message.content[:80], _bot_text[:80],
@@ -1024,6 +1048,17 @@ async def _bot(runner_args: LiveKitRunnerArguments):
             diag["queue_depth"] = t["diag_queue_depth"]
         if diag:
             meta["diag"] = diag
+        # E2E latency + utterance counter (per-stage metrics observed by _MetricsObserver)
+        try:
+            import metrics as _prom
+            _ep = str(getattr(bot_config, "stt_endpointing_ms", 200))
+            if meta.get("latency_ms"):
+                _prom.e2e_latency.record(meta["latency_ms"], {"stt_model": bot_config.stt_model, "endpointing_ms": _ep})
+            if timing.get("stt_ms"):
+                _prom.stt_latency.record(timing["stt_ms"], {"stt_model": bot_config.stt_model, "endpointing_ms": _ep})
+            _prom.utterances_total.add(1, {"stt_model": bot_config.stt_model})
+        except Exception:
+            pass
         async with AsyncSessionLocal() as db:
             async with db.begin():
                 db.add(

@@ -2,158 +2,98 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Stack overview
+## What runs where
 
-Four Docker services orchestrated via `.devcontainer/docker-compose.yml`:
+MeetLab v2: browser meetings with a voice bot, recorded for research. Production and staging are
+the same Terraform stack (`infra/v2/stack`, `env = staging | prod`, sizes in `profiles.tf`),
+deployed only by GitHub Actions on merge (`infra-v2.yml`); CI's own permissions are
+`infra/v2/bootstrap`, applied by a person. Decisions, costs and measurements: `infra/v2/LEDGER.md`.
+v1 (Elastic Beanstalk) is frozen on `main` and tagged `v1.0.0`; nothing of it lives on `v2`.
 
-| Service | Dir | Port | Role |
-|---------|-----|------|------|
-| `transport-server` | — | 7880-7882 | LiveKit media server (`--dev` mode) |
-| `agent-runner` | `agent-runner/` | 7860 | FastAPI service that spawns Pipecat bots |
-| `meet` | `meet/` | 3000 | Next.js 16 — conferencing UI + voice agent UI + Concierge admin API |
-| `bastion` | — | — | Ubuntu dev container for VS Code attach |
+The local Docker stack (`.devcontainer/docker-compose.yml`) mirrors production so errors show up
+early: same images, same speech-to-text path.
 
-All `make` targets delegate to `docker compose -f .devcontainer/docker-compose.yml`.
+| Service | Dir | Role |
+|---|---|---|
+| `meet` | `meet/` | Next.js 16: participant rooms, the console (Rooms, Meetings, Events, Bot settings, Start links, Database) |
+| `agent-runner` | `agent-runner/` | FastAPI on 7860: sessions in Postgres, starts one bot per meeting, recordings, Bot settings API, SQLAdmin at `/api/db` |
+| `stt-cpu` | `stt-cpu/` | Speech-to-text: Parakeet int8 on CPU, `/v1/audio/transcriptions` (production's default; the GPU NIM is for studies past the measured switch point) |
+| `transport-server` | — | LiveKit (production uses LiveKit Cloud; staging self-hosts) |
+| `egress`, `redis` | — | local video recording |
+| `postgres` | — | the database |
+| `docker-socket-proxy` | — | lets the runner start bot containers locally (`BOT_DISPATCHER=docker`); ECS tasks in AWS |
+| `bastion` | — | dev container for VS Code attach |
 
 ## Commands
 
 ```bash
-# Stack lifecycle
-make start           # build + start all services detached
-make stop            # stop and remove volumes
-make logs SERVICE=agent-runner   # tail logs for one service
+make start / make stop          # local stack up (build + migrate) / down
+make logs SERVICE=agent-runner
 
-# Tests (require running stack)
-make test            # unit + integration
-make test-unit       # agent-runner Python unittest + meet lint
-make test-integration # meet concierge API + load tests
-make test-bot-longevity BOT_LONGEVITY_MAX_SECONDS=1050   # long-running bot drop test
+make test                       # unit + integration against the local stack (ci.yml)
+make test-unit                  # runner unittest + meet lint, knip and vitest
+make test-infra                 # terraform fmt/validate/test, offline (mock provider)
+make test-image                 # agent-runner image under budget; every entry point imports in it
+make test-dead-code             # vulture + deptry on agent-runner
+make test-stt-cpu               # the CPU speech server against recorded clips
+make test-config-parity         # a Bot settings field exists in DB, API and form
+make sim-attribution            # overlapping speakers each heard as themselves
 
-# Run a single Python test file inside the container
+# one runner test file, inside the stack (the venv is /venv, on PATH):
 docker compose -f .devcontainer/docker-compose.yml exec -T agent-runner \
-  uv run python -m unittest tests.test_runner_start -v
-
-# Run meet tests against a running stack
-docker compose -f .devcontainer/docker-compose.yml exec -T meet \
-  pnpm test:api     # concierge integration tests
-docker compose -f .devcontainer/docker-compose.yml exec -T meet \
-  pnpm test:load    # load tests
-
-# LiveKit cloud switching
-make setup-livekit-cloud LIVEKIT_CLOUD_URL=wss://... LIVEKIT_API_KEY=... LIVEKIT_API_SECRET=...
-make revert-livekit-local
-make test-livekit-tooling   # tests the switch script itself
-
-# Latency benchmarks (always BENCHMARK_SAMPLES=10 minimum — see docs/performance-tests.md)
-make benchmark BENCHMARK_SAMPLES=10                    # default config
-make benchmark-full BENCHMARK_SAMPLES=10 BENCHMARK_CONFIGS="<label>,<label>"  # specific configs
-make benchmark-report                                  # re-print table from stored results
+  python -m unittest tests.test_runner_start -v
 ```
 
-Latency docs: `docs/performance-tests.md` (how to run/read, team-facing),
-`docs/latency-experiments.md` (experiment log with metric definitions and history).
-Local tracing: Jaeger at `http://localhost:16686` (`ENABLE_TRACING=true` in `.env.runner`).
-Note: agent-runner has no hot reload — `docker compose restart agent-runner` after editing
-`bot.py`/`multi_speaker_stt.py`/`runner.py`.
+Load tests run in AWS: the "Load test v2" workflow (`docs/load-testing.md`). Live tests run after
+every staging deploy (`agent-runner/tests/acceptance_staging.py`). The runner has no hot reload:
+`docker compose restart agent-runner` after editing it.
 
-## Environment setup
+## Environment
 
-Two env files must exist before `make start`:
 ```bash
-cp agent-runner/.env.runner.example agent-runner/.env.runner   # set OPENAI_API_KEY
+cp agent-runner/.env.runner.example agent-runner/.env.runner   # OPENAI_API_KEY, ...
 cp meet/.env.local.example meet/.env.local
 ```
+`LIVEKIT_API_KEY` / `LIVEKIT_API_SECRET` must match across both (local: `devkey` / `secret`).
+In AWS, secrets live in SSM under `/meetlab-v2/<env>/`, never in Terraform state.
 
-`LIVEKIT_API_KEY` and `LIVEKIT_API_SECRET` must be identical across both files. The local dev defaults are `devkey` / `secret`.
+## How a meeting runs
 
-Key per-service variables:
-- `agent-runner`: `OPENAI_API_KEY`, `LIVEKIT_URL=ws://transport-server:7880`
-- `meet`: `LIVEKIT_URL_PUBLIC` (browser-facing), `LIVEKIT_URL_INTERNAL` (server-side, `ws://transport-server:7880` in Docker), `LIVEKIT_URL` (fallback), `BOT_RUNNER_URL=http://agent-runner:7860/`
+1. The console (or a start link) asks meet; meet calls the runner's `POST /start` (`BOT_RUNNER_URL`).
+2. The runner records a `running` session (one per room, enforced in Postgres; a repeat is 409) and
+   dispatches the bot (`dispatch.py`): an ECS task in AWS, a container locally.
+3. `bot_task.py` reads its session row, mints its LiveKit token, runs `bot()` and heartbeats.
+   `bot.py`: LiveKit transport → per-speaker STT (`multi_speaker_stt.py`) → LLM → TTS → LiveKit.
+4. The runner's background loop (`reconcile_tick`, every 10 s) fails silent sessions, rejoins a
+   dead bot with context (`rejoin.py`), closes sessions whose room is gone, and syncs recordings.
 
-## Architecture: request flow
+## agent-runner
 
-**Voice agent UI (`meet/app/agent`):**
-1. Browser → `POST /api/agent-connection` → creates room + participant token, calls `agent-runner /start` via `BOT_RUNNER_URL`
-2. `agent-runner /start` → records a `running` session, then starts one bot per meeting: an ECS task on staging (`BOT_DISPATCHER=ecs`) or a Docker container locally (`BOT_DISPATCHER=docker`); there is no in-process mode
-3. `bot()` (Pipecat pipeline) joins the LiveKit room; STT → LLM → TTS runs until room ends
-4. Browser connects to LiveKit directly using the returned token
+- `runner.py` (API, background loop), `bot.py` (pipeline), `bot_task.py` (a bot's process),
+  `dispatch.py`, `sessions.py`, `heartbeat.py`, `rejoin.py`, `storage.py` (S3 via task roles),
+  `migration_check.py` (v1 → v2 data copy check), `capacity.py` / `capacity_model.py` (Prepare for
+  study; how much to run for N rooms).
+- Image: two-stage `Dockerfile`; the venv is `/venv` (outside `/app`, so the dev mount doesn't hide
+  it); bots start as `python -m bot_task` under an init (PID 1).
+- Package manager `uv` (host); `config.py` loads `.env.runner` then `.env.runner.local`.
 
-**Desk admin UI (`meet/app/desk`):**
-- `ConciergeConsole` component talks to the `/api/concierge/**` routes
-- Room lifecycle (create, delete, metadata) via `RoomServiceClient` (LiveKit server SDK)
-- Which bot a room has is agent-runner's running session (`GET /rooms/{room}/session`, `getRoomSession` in `lib/concierge/bot-runner.ts`); Postgres allows one running session per room, and a repeated start returns 409. Meet keeps no claim, lock or request history
-- LiveKit webhooks (`POST /api/concierge/webhooks/livekit`) are logged and forwarded; they never decide a room's bot
+## meet
 
-**Meet conference UI (`meet/app/rooms/[roomName]`):**
-- Standard LiveKit Meet flow: landing → pre-join → `VideoConference` component
-- `GET /api/connection-details` issues tokens for human participants (no bot runner involvement)
-- COOP (`same-origin`) + COEP (`credentialless`) headers in `next.config.js` required for `SharedArrayBuffer` (E2EE, Krisp)
-
-## agent-runner internals
-
-- `runner.py` — FastAPI app; `POST /start` validates input, records the session, and dispatches the bot (`dispatch.py`); `bot_task.py` is the bot's own process: it reads the session row, mints its JWT, runs `bot()`, and heartbeats
-- `bot.py` — Pipecat pipeline: `LiveKitTransport` → `OpenAISTTService` → `LLMContextAggregatorPair` → `OpenAILLMService` → `OpenAITTSService` → `LiveKitTransport`
-- `config.py` uses `python-dotenv` to load `.env.runner` then `.env.runner.local` (override)
-- Package manager: `uv`; run scripts with `uv run python ...`
-
-## meet internals
-
-- Next.js 16.2.4 App Router; all routes under `meet/app/`
-- `lib/concierge/` — the remaining in-memory state (track-subscription signals, room presence, the local event ring) is plain `globalThis`-keyed Maps, reset on process restart; nothing that decides a bot's lifecycle
-- `lib/concierge/livekit-admin.ts` — wraps `RoomServiceClient`; handles Docker hostname translation (`localhost` ↔ `transport-server`) and `ws://`↔`http://` URL conversion
-- `lib/config/server.ts` — server-side env; `lib/config/client.ts` — client-side env (only `NEXT_PUBLIC_*` vars)
-- Webhook verification uses LiveKit's `WebhookReceiver` with SHA-256 body hash in the `Authorization` header
-- `components/agent/` — voice agent UI; `components/desk/` — concierge admin UI; `components/ui/` — shared primitives
-- `app/agent/layout.tsx` and `app/desk/layout.tsx` are nested layouts (no `<html>`/`<body>`); they import `agent-globals.css` for Tailwind v4 theming
-- Tailwind v4 configured via `@tailwindcss/postcss`; theme scoped to agent/desk via nested layout CSS imports
-- `output: 'standalone'` in `next.config.js` — `meet/Dockerfile` is the single file for dev and prod; stages: `deps → dev → builder → runner`; docker-compose builds the `dev` target (alpine, hot-reload, source bind-mounted); production targets `runner` (non-root `nextjs` user, standalone output)
-- Integration tests use Node's built-in test runner (`node --test`); unit tests use Vitest (`pnpm test`)
-- `lib/concierge/event-log.ts` — durable event log: admin actions, LiveKit webhooks and route failures are written to agent-runner's `events` table (not the old in-memory ring), where the runner and bots also mirror every WARNING+ log. Writes never throw and are deferred with `after()`; reads throw so the console can't render "no events" when the log is down. Console view at `/events`. See `docs/event-log.md`
-- `middleware.ts` — console auth is a path allow-list, so a new console page or admin API is PUBLIC until added there; `middleware.test.ts` enumerates `app/(shell)` and asserts coverage. `/api/record/*` is outside it but checks for itself: console sessions only (`lib/record-auth.ts`, F10); participants have no Record button, studies use auto-record
-- `app/(shell)/config/page.tsx` — the console's Bot Config form is a hand-written field list, not generated from the runner's schema, and the two services' tests cannot see each other (each container mounts only its own directory). A new `bot_config` column therefore has to be added in **three** places or it is invisible: `agent-runner/db/models.py` + a migration, `agent-runner/runner.py` (`/config` GET response and PUT validation), and this form. `make test-config-parity` (run in CI) checks all three; `tests/test_config_contract.py` checks the bot uses each field
-- `lib/session-limit.ts` — advisory session time cap (`bot_config.session_limit_minutes`, 0 = unlimited); all logic is pure and unit-tested, `lib/SessionTimer.tsx` is a 1s tick over it. No stored deadline and no server timer: the countdown is derived from the earliest non-bot `joinedAt` LiveKit reports, so late joiners share one clock and an emptied room resets it. `/api/connection-details` hands the limit to the browser and degrades to unlimited if agent-runner is unreachable. See `docs/session-limits.md`
-- `lib/study.ts` / `lib/completion-code.ts` — paid-study support. Pre-join requires a Prolific ID (prefilled from `?PROLIFIC_PID`, editable, validated client-side), which travels as LiveKit participant metadata and lands in `speakers.meta.prolific_id`. On leaving, the participant sees a completion code — `HMAC(LIVEKIT_API_SECRET, room:prolific_id)`, derived not stored — to paste into the survey. The bot announces the end of a capped session with `bot_config.closing_message`. See `docs/study-support.md`
-
-## Browser & device support
-
-The app requires WebRTC, `navigator.mediaDevices.getUserMedia`, and WebSockets. The binding constraint is `Cross-Origin-Embedder-Policy: credentialless` (set globally in `next.config.js`), which is required for `SharedArrayBuffer` — used by E2EE and the Krisp noise filter.
-
-### Supported browsers
-
-| Browser | Minimum version | Notes |
-|---------|----------------|-------|
-| Chrome / Chromium | 96 (Nov 2021) | First version with COEP `credentialless` |
-| Edge | 96 (Nov 2021) | Same engine as Chrome |
-| Firefox | 119 (Oct 2023) | First version with COEP `credentialless` |
-| Safari (macOS) | 17 (Sep 2023) | First version with COEP `credentialless` |
-| Safari (iOS) | 17 (Sep 2023) | All iOS browsers use WebKit; iOS 17 required |
-| Chrome for Android | 96+ | Follows desktop Chrome |
-| Samsung Internet | 24+ | Partial; not actively tested |
-
-### Not supported
-
-- Internet Explorer (any version) — no WebRTC
-- Firefox < 119, Chrome < 96, Safari < 17
-- iOS < 17 (all iOS browsers use WKWebView, constrained to OS WebKit version)
-- Opera Mini — no WebRTC
-- UC Browser — no WebRTC
-
-### Feature detection
-
-`meet/lib/browser-support.ts` exports `getBrowserSupport()`, `isCoreSupported()`, and `isEnhancedSupported()`. The root layout renders `UnsupportedBrowserGate` (client-only), which blocks the UI with a full-screen message when core APIs are absent. Unit tests are in `meet/lib/browser-support.test.ts`.
-
-### Device notes
-
-- Camera and microphone permissions are required for video/audio
-- Minimum 4 CPU cores recommended for concurrent encode/decode; `isLowPowerDevice()` in `client-utils.ts` flags `hardwareConcurrency < 6`
-- Responsive layout but optimised for landscape (tablet/desktop); voice agent UI is mobile-friendly
-- No native mobile app; all mobile access is via browser
+- Next.js App Router. The console lives in `app/(shell)` and renders `components/desk/*` and
+  `components/console/*`; participants use `app/rooms/[roomName]` and `/api/connection-details`.
+- `middleware.ts`: console auth is an allow-list of paths, so a new console page or admin API is
+  PUBLIC until listed there; `middleware.test.ts` checks every `(shell)` page is covered.
+- Bot settings (`app/(shell)/config/page.tsx`) is a hand-written form: a new `bot_config` column goes
+  in three places (`db/models.py` + a migration, `runner.py` GET/PUT, the form);
+  `make test-config-parity` checks all three. Model names: `lib/model-choices.ts`.
+- Session limits: `lib/session-limit.ts` (`docs/session-limits.md`). Study flow: `lib/study.ts`,
+  `lib/completion-code.ts` (`docs/study-support.md`). Event log: `lib/concierge/event-log.ts`
+  (`docs/event-log.md`).
+- COOP/COEP headers in `next.config.js` are required for `SharedArrayBuffer` (E2EE, Krisp), which
+  sets the browser floor: Chrome/Edge 96, Firefox 119, Safari 17 (`lib/browser-support.ts`).
 
 ## Known constraints
 
-- Meet still holds some display state in memory (track-subscription signals, room presence); a restart resets those views, not sessions.
-- `livekit-server:latest` is unpinned — pin to a specific version before any production use.
-- The LiveKit server runs with `--dev` which uses `devkey`/`secret` and disables security checks.
-- Bot identity detection (`isBotParticipant` in `bots/route.ts`) uses `identity.startsWith('bot_')` — any participant with that prefix is treated as a bot.
-- Token TTL is 15 minutes with no refresh path; sessions longer than that will silently drop.
-- `web-client/` directory is retained as historical reference but the service is removed from docker-compose; all functionality has been consolidated into `meet/`.
+- Bot identity is `identity.startsWith('bot_')`.
+- Meet keeps some display state in memory (track-subscription signals); a restart resets views,
+  not sessions.

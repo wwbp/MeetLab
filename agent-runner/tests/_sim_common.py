@@ -99,7 +99,7 @@ def set_config(scope: str, stt_model: str = "", endpointing_ms: str = "",
 
 def load_speech() -> tuple:
     if not FIXTURE.exists():
-        raise SystemExit(f"Missing speech fixture {FIXTURE} — run: make benchmark-audio")
+        raise SystemExit(f"Missing speech fixture {FIXTURE} (it is in git: restore it)")
     return audio.load_wav_float(str(FIXTURE))
 
 

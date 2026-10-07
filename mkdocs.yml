@@ -16,28 +16,18 @@ theme:
 
 nav:
   - Start here: index.md
-  - Architecture: architecture.md
+  - "Architecture: parts, sizes, capacity": v2-infrastructure.md
   - Writing diagrams: writing-diagrams.md
   - Using MeetLab:
-      - Use cases: use-cases.md
       - Study support: study-support.md
       - Session limits: session-limits.md
       - Events and errors: event-log.md
   - Testing and operations:
-      - Performance tests: performance-tests.md
-      - Load and quality testing (v2): load-testing.md
+      - Load and quality testing: load-testing.md
       - "Load test report, October 2026": load-test-report-2026-10.md
       - "Fastest options per stage": latency-options.md
-      - Meeting simulations: meeting-simulations.md
-      - Parakeet soak tests: test-plan-parakeet-soak.md
       - Deploying v2 (first time): v2-deployment.md
-      - "v2 staging: parts, sizes, capacity": v2-infrastructure.md
-  - Historical investigations:
-      - Latency experiments: latency-experiments.md
-      - GPU deployment: gpu-stt-deployment.md
-      - Scale readiness: scale-readiness-plan.md
-      - Pilot postmortem: pilot-postmortem-2026-08.md
-      - Distillation audit: distillation-audit.md
+      - "Moving v1's data to v2": v1-to-v2-migration.md
 
 exclude_docs: |
   team-update-2026-06-11.md

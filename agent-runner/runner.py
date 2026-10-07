@@ -761,7 +761,7 @@ async def update_config(request: Request, _=Depends(verify_api_key)):
         # moment the default moved outside it: /api/start-link materialises a room
         # config by GETting a pool config and PUTting it back, so an unaccepted
         # default makes every start link fail with a 502. Bounds are wide enough
-        # to tune within (see docs/pilot-postmortem-2026-08.md RC2) and tight
+        # to tune within (see v1.0.0:docs/pilot-postmortem-2026-08.md RC2) and tight
         # enough to catch nonsense.
         v = body["stt_endpointing_ms"]
         if isinstance(v, bool) or not isinstance(v, int) or not (50 <= v <= 2000):

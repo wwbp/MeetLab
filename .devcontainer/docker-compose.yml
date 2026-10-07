@@ -110,7 +110,6 @@ services:
       - DOCKER_HOST=tcp://docker-socket-proxy:2375
     volumes:
       - ../agent-runner:/app:cached
-      - agent-runner-venv:/app/.venv
       - ../recordings:/recordings
     ports:
       - "7860:7860"
@@ -142,7 +141,9 @@ services:
       - BOT_RUNNER_SECRET=${BOT_RUNNER_SECRET:-}
     volumes:
       - ../meet:/app:cached
-      - meet-node-modules:/app/node_modules
+      # Anonymous, so `make up` (--renew-anon-volumes) reseeds it from the image: a named
+      # volume kept the first install forever and dev ran other packages than CI.
+      - /app/node_modules
     ports:
       - "3000:3000"
     depends_on:
@@ -152,6 +153,4 @@ services:
         condition: service_healthy
 
 volumes:
-  agent-runner-venv:
-  meet-node-modules:
   postgres-data:

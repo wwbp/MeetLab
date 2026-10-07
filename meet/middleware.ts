@@ -10,7 +10,7 @@ const COOKIE_NAME = 'console-session';
 //
 // 2026-08-05: `/meetings` and `/api/meetings/*` were missing and were serving
 // meeting metadata, transcripts and participant audio/video downloads
-// unauthenticated in production. See docs/distillation-audit.md (Iteration 3).
+// unauthenticated in production. See v1.0.0:docs/distillation-audit.md (Iteration 3).
 export const config = {
   matcher: [
     '/',

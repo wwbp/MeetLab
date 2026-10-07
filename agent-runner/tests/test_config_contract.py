@@ -14,7 +14,7 @@ The check is deliberately generic rather than a list of hand-written per-field
 assertions — a new knob is covered the day it is added, and a knob that quietly
 loses its last real reader fails here immediately.
 
-See docs/distillation-audit.md (Iteration 1) and docs/pilot-postmortem-2026-08.md.
+See v1.0.0:docs/distillation-audit.md (Iteration 1) and v1.0.0:docs/pilot-postmortem-2026-08.md.
 """
 
 import ast

@@ -9,7 +9,7 @@ import unittest
 import uuid
 from datetime import datetime, timezone
 
-import requests
+from tests import _http
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -71,7 +71,7 @@ class TestConversationSpeakers(unittest.TestCase):
     def test_each_person_once_with_their_prolific_id(self):
         conv_id = str(uuid.uuid4())
         ana, ben = asyncio.run(_seed_people(conv_id))
-        r = requests.get(f"{BASE}/conversations/{conv_id}/speakers", headers=AUTH, timeout=10)
+        r = _http.get(f"{BASE}/conversations/{conv_id}/speakers", headers=AUTH, timeout=10)
         self.assertEqual(r.status_code, 200, r.text)
         self.assertEqual(r.json()["speakers"], [
             {"speaker": ana, "display_name": "Ana", "prolific_id": "5f2a91b3c4d5e6f708192a3b", "prolific_id_invalid": None},
@@ -79,14 +79,14 @@ class TestConversationSpeakers(unittest.TestCase):
         ])
 
     def test_an_unknown_conversation_is_404(self):
-        self.assertEqual(requests.get(f"{BASE}/conversations/{uuid.uuid4()}/speakers", headers=AUTH, timeout=10).status_code, 404)
+        self.assertEqual(_http.get(f"{BASE}/conversations/{uuid.uuid4()}/speakers", headers=AUTH, timeout=10).status_code, 404)
 
 
 class TestConversationUtterances(unittest.TestCase):
     def test_turns_in_order_with_times_and_who_spoke(self):
         conv_id = str(uuid.uuid4())
         asyncio.run(_seed(conv_id))
-        r = requests.get(f"{BASE}/conversations/{conv_id}/utterances", headers=AUTH, timeout=10)
+        r = _http.get(f"{BASE}/conversations/{conv_id}/utterances", headers=AUTH, timeout=10)
         self.assertEqual(r.status_code, 200, r.text)
         self.assertEqual([(u["bot"], u["ts"], u["text"]) for u in r.json()["utterances"]],
                          [(True, 1000.0, "Hello there."), (False, 1003.5, "What is new?"), (True, 1005.25, "Not much.")])
@@ -95,16 +95,16 @@ class TestConversationUtterances(unittest.TestCase):
         # Chat becomes a turn like speech; researchers need to tell them apart (user, 2026-10-05).
         conv_id = str(uuid.uuid4())
         asyncio.run(_seed(conv_id))
-        r = requests.get(f"{BASE}/conversations/{conv_id}/utterances", headers=AUTH, timeout=10)
+        r = _http.get(f"{BASE}/conversations/{conv_id}/utterances", headers=AUTH, timeout=10)
         self.assertEqual([u["source"] for u in r.json()["utterances"]], [None, "chat", None])
 
     def test_an_unknown_conversation_is_404(self):
-        r = requests.get(f"{BASE}/conversations/{uuid.uuid4()}/utterances", headers=AUTH, timeout=10)
+        r = _http.get(f"{BASE}/conversations/{uuid.uuid4()}/utterances", headers=AUTH, timeout=10)
         self.assertEqual(r.status_code, 404)
 
     @unittest.skipUnless(os.environ.get("BOT_RUNNER_SECRET"), "the runner is open when no key is set (local default)")
     def test_it_needs_the_runner_key(self):
-        r = requests.get(f"{BASE}/conversations/{uuid.uuid4()}/utterances", timeout=10)
+        r = _http.get(f"{BASE}/conversations/{uuid.uuid4()}/utterances", timeout=10)
         self.assertIn(r.status_code, (401, 403))
 
 

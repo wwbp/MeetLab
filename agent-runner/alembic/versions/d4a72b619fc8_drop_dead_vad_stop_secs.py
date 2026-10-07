@@ -16,7 +16,7 @@ otherwise find the real control.
 
 Removed once the console started exposing stt_endpointing_ms and
 user_speech_timeout_ms, which together form the actual turn-end window. See
-docs/distillation-audit.md (Iteration 1) and docs/pilot-postmortem-2026-08.md.
+v1.0.0:docs/distillation-audit.md (Iteration 1) and v1.0.0:docs/pilot-postmortem-2026-08.md.
 
 The downgrade restores the column and its old default so the schema round-trips,
 but nothing will read it — it was never wired to anything to begin with.

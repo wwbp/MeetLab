@@ -6,8 +6,8 @@ NIM's OpenAI-compatible endpoint (POST /v1/audio/transcriptions, Triton-backed, 
 
 Wired by _build_stt / _build_stt_for_multi_speaker in bot.py for stt_model values with the
 "parakeet-" prefix, as the tail of a (VADProcessor, tail) chain.
-The NIM's private endpoint is set via NEMOTRON_STT_URL. Experiment log: docs/latency-experiments.md
-(Experiments 6–7); deployment: docs/gpu-stt-deployment.md.
+The NIM's private endpoint is set via NEMOTRON_STT_URL. Experiment log: v1.0.0:docs/latency-experiments.md
+(Experiments 6–7); deployment: v1.0.0:docs/gpu-stt-deployment.md.
 """
 import os
 from typing import AsyncGenerator

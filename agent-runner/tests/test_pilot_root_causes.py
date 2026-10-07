@@ -1,7 +1,7 @@
 """Reproductions of the four root causes found in the Jul/Aug 2026 pilot.
 
 Full analysis and the production evidence behind each one:
-``docs/pilot-postmortem-2026-08.md``.
+``v1.0.0:docs/pilot-postmortem-2026-08.md``.
 
     RC1  Pipecat's ``user_turn_stop_timeout`` left at its 5.0s default while the
          aggregator is built with ``vad_analyzer=None``  → lag + chained answers
@@ -260,7 +260,7 @@ class RC3InterruptionEnforcementTests(unittest.TestCase):
         # min_bot_speech_ms=0: this test is about the yield *signal* existing at
         # all (RC3), not about the barge-in floor added 2026-08-19, which is
         # covered in test_interruption_windows.py.
-        tracker = InterruptionTracker(record=False, min_bot_speech_ms=0)
+        tracker = InterruptionTracker(min_bot_speech_ms=0)
         tracker.bot_started(0.0)
 
         self.assertTrue(
@@ -270,7 +270,7 @@ class RC3InterruptionEnforcementTests(unittest.TestCase):
 
         tracker.bot_stopped(4.7)
         # ...and the measurement is unchanged, so the metric stays comparable
-        # with the pilot numbers in docs/pilot-postmortem-2026-08.md.
+        # with the pilot numbers in v1.0.0:docs/pilot-postmortem-2026-08.md.
         self.assertEqual(tracker.interruptions, 1)
         self.assertAlmostEqual(tracker.talkovers_ms[0], 4200.0, places=3)
 
@@ -295,7 +295,7 @@ class RC3InterruptionEnforcementTests(unittest.TestCase):
         from pipecat.frames.frames import InterruptionTaskFrame
         from pipecat.processors.frame_processor import FrameDirection
 
-        tracker = InterruptionTracker(record=False)
+        tracker = InterruptionTracker()
         pushed = []
 
         async def fake_enqueue(frame, direction=FrameDirection.DOWNSTREAM):
@@ -335,7 +335,7 @@ class RC3InterruptionEnforcementTests(unittest.TestCase):
         import bot
         from interruption import InterruptionTracker
 
-        tracker = InterruptionTracker(record=False)
+        tracker = InterruptionTracker()
         handler = bot.make_speech_onset_handler(tracker, None)
         tracker.bot_started(0.0)
 

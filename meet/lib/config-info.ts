@@ -1,9 +1,9 @@
 // What each Bot Config setting does, and what our tests measured (the config page's info panel).
 // Numbers come from infra/v2/LEDGER.md and docs/load-test-report-2026-10.md; each names its source.
 
-export type Result = { text: string; source: string };
+type Result = { text: string; source: string };
 // key: the one result worth seeing at a glance; results: the detail behind "More".
-export type Info = { title: string; about: string; default?: string; key?: { value: string; label: string }; results?: Result[] };
+type Info = { title: string; about: string; default?: string; key?: { value: string; label: string }; results?: Result[] };
 
 export const SECTIONS: { id: string; label: string; about: string; fields: string[] }[] = [
   {

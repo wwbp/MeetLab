@@ -6,7 +6,7 @@ assistant_turn_stopped (the response genuinely ending), and user_onset.
 The audio and response windows are deliberately different — see interruption.py.
 Enforcement is gated on the response window so an onset in the gap between two
 sentences still interrupts; talkover_ms is measured against real audio so the
-numbers stay comparable with the pilot. record=False keeps these tests free of
+numbers stay comparable with the pilot. these tests are free of
 metric side effects.
 """
 import os
@@ -24,7 +24,7 @@ class TestInterruptionTracker(unittest.TestCase):
         # window semantics, once-per-response counting and talkover measurement —
         # all orthogonal to how long the bot is guaranteed before it may be cut
         # off. The floor itself is covered in test_interruption_windows.py.
-        return InterruptionTracker(record=False, min_bot_speech_ms=0)
+        return InterruptionTracker(min_bot_speech_ms=0)
 
     def test_user_speaking_while_bot_silent_is_not_an_interruption(self):
         t = self._tracker()

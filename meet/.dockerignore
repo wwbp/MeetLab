@@ -8,7 +8,7 @@ node_modules
 tsconfig.tsbuildinfo
 # `**/` matters: a bare pattern only matches at the context root, which let
 # lib/*.test.ts into `next build` and failed its type check. Mirrors the
-# exclusions in scripts/build-meet-eb-deploy-package.sh.
+# exclusions the v1 deploy package used.
 tests
 **/*.test.ts
 **/*.test.tsx

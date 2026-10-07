@@ -10,7 +10,7 @@ const COOKIE_NAME = 'console-session';
 //
 // 2026-08-05: `/meetings` and `/api/meetings/*` were missing and were serving
 // meeting metadata, transcripts and participant audio/video downloads
-// unauthenticated in production. See docs/distillation-audit.md (Iteration 3).
+// unauthenticated in production. See v1.0.0:docs/distillation-audit.md (Iteration 3).
 export const config = {
   matcher: [
     '/',
@@ -21,7 +21,9 @@ export const config = {
     '/events',
     '/meetings',
     '/start-links',
-    '/db/:path*',
+    // The database view (SQLAdmin on the runner, mounted at /api/db): console only.
+    '/api/db',
+    '/api/db/:path*',
     '/api/concierge/:path*',
     // Console-only meeting data: listing, transcripts, and the audio/recording
     // download proxies. Only the console calls these, and it carries a session

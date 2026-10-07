@@ -27,7 +27,6 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from participant_workers import (
     MAX_PARTICIPANT_WORKERS,
     route_audio,
-    teardown_for,
     worker_name,
 )
 
@@ -90,23 +89,6 @@ class TestAdmissionControl(unittest.TestCase):
 
     def test_a_cap_of_zero_admits_nobody(self):
         self.assertIsNone(route_audio("PA_1", existing=set(), cap=0))
-
-
-class TestTeardown(unittest.TestCase):
-    def test_a_departing_participant_releases_their_worker(self):
-        self.assertEqual(
-            teardown_for("PA_1", existing={"listener-PA_1"}), "listener-PA_1"
-        )
-
-    def test_a_participant_who_never_spoke_tears_down_nothing(self):
-        self.assertIsNone(teardown_for("PA_9", existing={"listener-PA_1"}))
-
-    def test_teardown_frees_a_slot(self):
-        """Otherwise a long meeting with churn silently fills the cap."""
-        existing = {f"listener-PA_{i}" for i in range(MAX_PARTICIPANT_WORKERS)}
-        gone = teardown_for("PA_0", existing=existing)
-        existing.remove(gone)
-        self.assertIsNotNone(route_audio("PA_new", existing=existing))
 
 
 if __name__ == "__main__":

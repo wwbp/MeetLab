@@ -13,7 +13,7 @@ conversations.
 450 + 300 = 750ms is the calibrated default, derived by running production's own
 Silero analyzer over real pilot audio and matching predicted segments against the
 turns participants actually took. See tests/test_turn_calibration.py and
-docs/pilot-postmortem-2026-08.md (RC1).
+v1.0.0:docs/pilot-postmortem-2026-08.md (RC1).
 """
 from typing import Sequence, Union
 

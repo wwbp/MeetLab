@@ -1,4 +1,4 @@
-import { SignJWT, jwtVerify } from 'jose';
+import { SignJWT } from 'jose';
 
 export const COOKIE_NAME = 'console-session';
 export const SESSION_TTL_SECONDS = 8 * 60 * 60; // 8 hours
@@ -15,13 +15,4 @@ export async function signSession(): Promise<string> {
     .setIssuedAt()
     .setExpirationTime(`${SESSION_TTL_SECONDS}s`)
     .sign(signingKey());
-}
-
-export async function verifySession(token: string): Promise<boolean> {
-  try {
-    await jwtVerify(token, signingKey());
-    return true;
-  } catch {
-    return false;
-  }
 }

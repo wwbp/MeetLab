@@ -13,7 +13,7 @@ from dataclasses import dataclass
 
 # What a participant must get, for every profile; a step that misses one fails.
 MIN_REPLY_RATE = 0.95     # the bot answers 19 turns in 20
-MAX_P95_MS = 2000         # end of speech to the bot's first audio; past 2 s feels broken (docs/performance-tests.md)
+MAX_P95_MS = 2000         # end of speech to the bot's first audio; past 2 s feels broken (v1.0.0:docs/performance-tests.md)
 
 
 @dataclass(frozen=True)

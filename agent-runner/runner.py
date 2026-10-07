@@ -21,7 +21,6 @@ from wtforms import SelectField
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 from starlette.requests import Request as StarletteRequest
-from starlette.responses import Response as StarletteResponse
 
 from fastapi.responses import FileResponse, RedirectResponse, Response
 from sqlalchemy import func, select, text, update
@@ -29,7 +28,6 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import selectinload
 
 import capacity
-import metrics
 import sessions
 import storage
 import transcript as transcript_mod
@@ -51,56 +49,6 @@ from heartbeat import fail_silent_sessions, request_recording
 
 config = load_config()
 
-if config.enable_tracing:
-    from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
-    from pipecat.utils.tracing.setup import setup_tracing
-
-    _headers: dict[str, str] = {}
-    if config.otlp_headers:
-        for pair in config.otlp_headers.split(","):
-            if "=" in pair:
-                k, v = pair.split("=", 1)
-                _headers[k.strip()] = v.strip()
-
-    # OTLPSpanExporter uses the endpoint verbatim (no path appending) when
-    # passed explicitly, so we must include the full OTLP traces path.
-    _raw_endpoint = (config.otlp_endpoint or "http://jaeger:4318").rstrip("/")
-    _exporter = OTLPSpanExporter(
-        endpoint=_raw_endpoint + "/v1/traces",
-        headers=_headers or None,
-    )
-    setup_tracing(
-        service_name="meetlab-agent-runner",
-        exporter=_exporter,
-        console_export=config.otel_console_export,
-    )
-    logger.info(f"OTel tracing enabled → {config.otlp_endpoint or 'http://jaeger:4318'}")
-
-    from opentelemetry.sdk.metrics import MeterProvider
-    from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
-    from opentelemetry.sdk.metrics.view import ExplicitBucketHistogramAggregation, View
-    from opentelemetry.exporter.otlp.proto.http.metric_exporter import OTLPMetricExporter
-    from opentelemetry import metrics as otel_metrics
-
-    _metric_exporter = OTLPMetricExporter(
-        endpoint=_raw_endpoint + "/v1/metrics",
-        headers=_headers or None,
-    )
-    _metric_reader = PeriodicExportingMetricReader(
-        _metric_exporter, export_interval_millis=15_000
-    )
-    _latency_agg = ExplicitBucketHistogramAggregation(metrics.LATENCY_BOUNDARIES)
-    _meter_provider = MeterProvider(
-        metric_readers=[_metric_reader],
-        views=[
-            View(instrument_name="meetlab.e2e_latency_ms", aggregation=_latency_agg),
-            View(instrument_name="meetlab.llm_ttft_ms", aggregation=_latency_agg),
-            View(instrument_name="meetlab.sentence_agg_ms", aggregation=_latency_agg),
-            View(instrument_name="meetlab.tts_ttfb_ms", aggregation=_latency_agg),
-        ],
-    )
-    otel_metrics.set_meter_provider(_meter_provider)
-    logger.info(f"OTel metrics enabled → {_raw_endpoint}/v1/metrics")
 LIVEKIT_API_KEY = require(config.livekit_api_key, "LIVEKIT_API_KEY")
 BOT_RUNNER_SECRET = os.environ.get("BOT_RUNNER_SECRET")
 LIVEKIT_API_SECRET = require(config.livekit_api_secret, "LIVEKIT_API_SECRET")
@@ -813,7 +761,7 @@ async def update_config(request: Request, _=Depends(verify_api_key)):
         # moment the default moved outside it: /api/start-link materialises a room
         # config by GETting a pool config and PUTting it back, so an unaccepted
         # default makes every start link fail with a 502. Bounds are wide enough
-        # to tune within (see docs/pilot-postmortem-2026-08.md RC2) and tight
+        # to tune within (see v1.0.0:docs/pilot-postmortem-2026-08.md RC2) and tight
         # enough to catch nonsense.
         v = body["stt_endpointing_ms"]
         if isinstance(v, bool) or not isinstance(v, int) or not (50 <= v <= 2000):

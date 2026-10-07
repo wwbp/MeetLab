@@ -69,7 +69,7 @@ _STT_DELAY_VALUES = frozenset({"minimal", "low", "medium", "high", "xhigh"})
 # Silence, in ms, after which a participant's VAD closes a speech segment. This is
 # the first half of the turn-end window; user_speech_timeout_ms is the second.
 # (A `vad_stop_secs` column used to sit here doing nothing at all; removed
-# 2026-08-10, see docs/distillation-audit.md.)
+# 2026-08-10, see v1.0.0:docs/distillation-audit.md.)
 #
 # The pilot ran at 100ms, which is far shorter than an ordinary thinking pause, so
 # a single sentence was chopped into as many as 31 fragments and the bot cut people
@@ -174,7 +174,6 @@ class _OpenAIRealtimeSTT(OpenAIRealtimeSTTService):
         # Replicate parent payload and inject delay into transcription dict.
         # Only gpt-realtime-whisper supports this field.
         from pipecat.services.openai.stt import OPENAI_SAMPLE_RATE
-        from pipecat.utils.language import Language
 
         settings: OpenAIRealtimeSTTSettings = self._settings
         transcription: dict = {"model": settings.model, "delay": self._transcription_delay}
@@ -284,7 +283,7 @@ def build_user_aggregator_params(bot_config=None):
     This is the single most consequential setting in the pipeline. Getting it
     wrong cost us the Jul/Aug 2026 pilot: 49% of turns took over three seconds
     and the median substantive answer waited 5.2s. See
-    docs/pilot-postmortem-2026-08.md (RC1).
+    v1.0.0:docs/pilot-postmortem-2026-08.md (RC1).
 
     Why the defaults cannot work here
     ---------------------------------
@@ -370,6 +369,11 @@ def _apply_stt_model_override(bot_config):
         logger.info(f"STT_MODEL_OVERRIDE active: {bot_config.stt_model} → {override}")
         return replace(bot_config, stt_model=override)
     return bot_config
+
+
+def _turn_detection_for_vad_mode(vad_mode: str):
+    """Return turn_detection=False (local Silero VAD) — the only supported mode."""
+    return False
 
 
 def _build_stt(bot_config, openai_api_key: str, deepgram_api_key: str | None):
@@ -550,7 +554,7 @@ async def _bot(runner_args: LiveKitRunnerArguments):
     # Interruption tracking: the bot should yield, not talk over users. The tracker
     # is fed bot-speaking frames (via _InterruptionObserver) and REAL user speech
     # onset from the per-participant VAD (via MultiSpeakerSTT's on_speech_onset).
-    interruptions = InterruptionTracker(labels={"stt_model": bot_config.stt_model})
+    interruptions = InterruptionTracker()
 
     # The PipelineWorker does not exist yet, so the handler reaches it through this
     # holder, filled in once the task is built. Audio cannot flow before the
@@ -597,25 +601,15 @@ async def _bot(runner_args: LiveKitRunnerArguments):
         audio_sink.enable()
     audio_recorder = audio_tracks.PerSpeakerAudioRecorder(audio_sink)
     bot_audio_recorder = audio_tracks.BotAudioRecorder(audio_sink, runner_args.bot_identity)
-    # Mock TTS (BOT_MOCK_TTS) swaps in zero-cost synthetic silence for load/soak
-    # testing — no paid TTS calls. OFF by default; never enable in production. The LLM
-    # is pinned to the cheapest model by the soak harness rather than mocked.
-    _mock_tts = os.getenv("BOT_MOCK_TTS", "").lower() in ("1", "true", "yes")
-
     llm = _build_llm(openai_api_key, bot_config)
     _tts_mode = (
         TextAggregationMode.TOKEN
         if bot_config.tts_aggregation_mode == "token"
         else TextAggregationMode.SENTENCE
     )
-    if _mock_tts:
-        from mock_services import MockTTSService
-        logger.warning("BOT_MOCK_TTS enabled — synthetic silence, no TTS API calls")
-        tts = MockTTSService(text_aggregation_mode=_tts_mode)
-    else:
-        tts = _build_tts(bot_config, openai_api_key, elevenlabs_api_key, _tts_mode)
-        from clause_aggregator import install
-        install(tts, bot_config.tts_aggregation_mode)  # "clause": the first clause, then sentences
+    tts = _build_tts(bot_config, openai_api_key, elevenlabs_api_key, _tts_mode)
+    from clause_aggregator import install
+    install(tts, bot_config.tts_aggregation_mode)  # "clause": the first clause, then sentences
     logger.info(
         f"TTS: provider={bot_config.tts_provider} voice={bot_config.tts_voice}"
         f" aggregation={bot_config.tts_aggregation_mode}"
@@ -668,20 +662,16 @@ async def _bot(runner_args: LiveKitRunnerArguments):
                     pass
 
         def _handle(self, m):
-            import metrics as _prom
             if isinstance(m, TTFBMetricsData):
                 val_ms = m.value * 1000
                 stage = _ttfb_stage(m.processor)
                 if stage == "llm_ttft_ms":
                     _metrics_data["llm_ttft_ms"] = val_ms
-                    _prom.llm_ttft.record(val_ms, {"llm_model": bot_config.llm_model})
                 elif stage == "tts_ttfb_ms":
                     _metrics_data["tts_ttfb_ms"] = val_ms
-                    _prom.tts_ttfb.record(val_ms, {"tts_provider": bot_config.tts_provider})
             elif isinstance(m, TextAggregationMetricsData):
                 val_ms = m.value * 1000
                 _metrics_data["sentence_agg_ms"] = val_ms
-                _prom.sentence_agg.record(val_ms, {"tts_provider": bot_config.tts_provider})
 
     class _InterruptionObserver(BaseObserver):
         """Feeds the bot's TTS speaking window to the InterruptionTracker.
@@ -832,8 +822,6 @@ async def _bot(runner_args: LiveKitRunnerArguments):
         ),
         observers=[MetricsLogObserver(), _MetricsObserver(), _InterruptionObserver()],
         processor_unusable_policy=UNUSABLE_POLICY,
-        enable_tracing=env_config.enable_tracing,
-        enable_turn_tracking=env_config.enable_tracing,
         conversation_id=runner_args.session_id,
         additional_span_attributes={
             "room.name": runner_args.room_name,
@@ -871,13 +859,6 @@ async def _bot(runner_args: LiveKitRunnerArguments):
         if stt_ms is not None and stt_ms > _STT_SPIKE_THRESHOLD_MS:
             _turn_timing["diag_stt_spike"] = True
             _ep = getattr(bot_config, "stt_endpointing_ms", 200)
-            try:
-                import metrics as _prom
-                _prom.stt_spikes_total.add(
-                    1, {"stt_model": bot_config.stt_model, "endpointing_ms": str(_ep)}
-                )
-            except Exception:
-                pass
             logger.warning(
                 "STT latency spike: stt_ms={:.0f} model={} endpointing_ms={} "
                 "queue_depth={} content={!r}",
@@ -885,13 +866,7 @@ async def _bot(runner_args: LiveKitRunnerArguments):
                 (message.content or "")[:80],
             )
         if not message.content:
-            # VAD/STT fired but produced no transcript — these are dropped from the
-            # stt_ms histogram, so count them separately to explain percentile skew.
-            try:
-                import metrics as _prom
-                _prom.phantom_segments_total.add(1, {"stt_model": bot_config.stt_model})
-            except Exception:
-                pass
+            # VAD/STT fired but produced no transcript.
             logger.debug("Phantom segment: user turn committed with empty content")
             return
         # Self-echo heuristic: does this user transcript echo recent bot TTS?
@@ -899,11 +874,6 @@ async def _bot(runner_args: LiveKitRunnerArguments):
             sim = _text_similarity(message.content, _bot_text)
             if sim >= _SELF_ECHO_SIMILARITY:
                 _turn_timing["diag_self_echo"] = True
-                try:
-                    import metrics as _prom
-                    _prom.self_echo_suspected_total.add(1, {"stt_model": bot_config.stt_model})
-                except Exception:
-                    pass
                 logger.warning(
                     "Possible bot self-echo (sim={:.2f}): user={!r} ~ bot={!r}",
                     sim, message.content[:80], _bot_text[:80],
@@ -1023,17 +993,6 @@ async def _bot(runner_args: LiveKitRunnerArguments):
             diag["queue_depth"] = t["diag_queue_depth"]
         if diag:
             meta["diag"] = diag
-        # E2E latency + utterance counter (per-stage metrics observed by _MetricsObserver)
-        try:
-            import metrics as _prom
-            _ep = str(getattr(bot_config, "stt_endpointing_ms", 200))
-            if meta.get("latency_ms"):
-                _prom.e2e_latency.record(meta["latency_ms"], {"stt_model": bot_config.stt_model, "endpointing_ms": _ep})
-            if timing.get("stt_ms"):
-                _prom.stt_latency.record(timing["stt_ms"], {"stt_model": bot_config.stt_model, "endpointing_ms": _ep})
-            _prom.utterances_total.add(1, {"stt_model": bot_config.stt_model})
-        except Exception:
-            pass
         async with AsyncSessionLocal() as db:
             async with db.begin():
                 db.add(
@@ -1407,11 +1366,6 @@ def resolve_speaker_identity(sid, sid_to_identity: dict, remote_participants: di
     if known:
         return sid_to_identity.get(known, known), {}
     return None, {}
-
-
-def _turn_detection_for_vad_mode(vad_mode: str):
-    """Return turn_detection=False (local Silero VAD) — the only supported mode."""
-    return False
 
 
 def _new_id() -> str:

@@ -53,7 +53,8 @@ describe('console auth matcher', () => {
       '/api/console/configs',
       '/api/console/start-link',
       '/api/console/logout',
-      '/db/anything',
+      '/api/db',
+      '/api/db/anything',
     ]) {
       expect(isProtected(route), `${route} is not behind auth`).toBe(true);
     }

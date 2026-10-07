@@ -7,7 +7,7 @@ Create Date: 2026-08-06 00:00:00.000000
 The Jul/Aug 2026 pilot ran with stt_endpointing_ms=100, meaning the bot treated
 100ms of silence as "you have finished speaking". A thinking pause is several
 times that, so single sentences were split into as many as 31 fragments and
-participants were cut off mid-thought. See docs/pilot-postmortem-2026-08.md (RC2).
+participants were cut off mid-thought. See v1.0.0:docs/pilot-postmortem-2026-08.md (RC2).
 
 450ms survives an ordinary pause while staying responsive.
 

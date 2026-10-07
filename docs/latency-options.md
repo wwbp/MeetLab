@@ -3,7 +3,7 @@
 Which speech-to-text, LLM and voice options answer fastest, what our Bot Config offers today,
 and what is worth adding. For studies that require a vendor (e.g. ElevenLabs or OpenAI) and for
 studies that allow alternatives. Collected 2026-10-04; numbers move, so measure before changing
-a default (`make benchmark-full BENCHMARK_SAMPLES=10`, or a load test on staging).
+a default (a load test on staging, `docs/load-testing.md`).
 
 **Sources**, tagged on each number:
 
@@ -12,7 +12,7 @@ a default (`make benchmark-full BENCHMARK_SAMPLES=10`, or a load test on staging
 - **[AA]** [Artificial Analysis](https://artificialanalysis.ai): independent, live pages.
 - **[Coval]** Coval's time-to-first-audio benchmark (2026-09-08), read through a vendor's summary.
 - **[V]** the vendor's own claim.
-- **[Ours]** our measurements: [latency experiments](latency-experiments.md), the
+- **[Ours]** our measurements: [v1's latency experiments](https://github.com/wwbp/MeetLab/blob/v1.0.0/docs/latency-experiments.md), the
   [load test report](load-test-report-2026-10.md).
 
 ✓ = in our Bot Config today.

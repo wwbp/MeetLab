@@ -5,7 +5,7 @@ locals {
   profiles = {
     # Staging between test runs: nothing warm, the smallest sizes.
     staging = {
-      stt_nim_enabled     = false, model_services = [], tts_replicas = 1,
+      stt_nim_enabled     = true, model_services = [], tts_replicas = 1,
       bot_pool_min        = 0, bot_pool_max = 12, livekit_instance_type = "c6i.large",
       db_instance_class   = "db.t4g.small", db_multi_az = false, egress_count = 0,
       egress_room_cpu     = null, # LiveKit's default booking per recording; lowered only to measure

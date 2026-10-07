@@ -205,9 +205,10 @@ async def scenario_removed():
         return "task stopped by itself, exit 0"
 
 
-# No single quotes: the whole thing runs inside sh -c '...'. Skips PID 1 (the launcher;
-# Linux ignores in-namespace signals to PID 1) and kills the bot's python process.
-_KILL9 = ('for p in /proc/[0-9]*; do n=${p#/proc/}; [ "$n" = 1 ] && continue; '
+# No single quotes: the whole thing runs inside sh -c '...'. Skips PID 1 (the init; Linux
+# ignores in-namespace signals to PID 1) and this shell ($$: its own command line matches the
+# pattern, and /proc lists 67 before 7), and kills the bot's python process.
+_KILL9 = ('for p in /proc/[0-9]*; do n=${p#/proc/}; case $n in 1|$$) continue;; esac; '
           'c=$(tr "\\000" " " < $p/cmdline 2>/dev/null); '
           'case "$c" in *python*bot_task*) echo killing $n; kill -9 $n;; esac; done')
 

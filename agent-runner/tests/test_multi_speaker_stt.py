@@ -374,7 +374,7 @@ class TestMultiSpeakerSTTThreePartChain(unittest.IsolatedAsyncioTestCase):
 
         class _Analyzer:  # the smart-turn model, out of the way: it is not under test here
             def set_sample_rate(self, rate): pass
-            def append_audio(self, audio, speaking): pass
+            def append_audio(self, *_): pass
             def clear(self): pass
 
         def chain_factory(sid=None):

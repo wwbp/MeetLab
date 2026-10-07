@@ -27,7 +27,7 @@ import os
 import unittest
 import uuid
 
-import requests
+from tests import _http
 
 BASE = os.environ.get("AGENT_RUNNER_URL", "http://localhost:7860")
 AUTH_HEADERS = {
@@ -37,7 +37,7 @@ AUTH_HEADERS = {
 
 
 def _post(path, **kwargs):
-    return requests.post(f"{BASE}{path}", headers=AUTH_HEADERS, **kwargs)
+    return _http.post(f"{BASE}{path}", headers=AUTH_HEADERS, **kwargs)
 
 
 def _start_bot(room_name: str) -> str:
@@ -85,7 +85,7 @@ class RecordingEndpointTests(unittest.TestCase):
         self.assertEqual(_post("/recordings/start", json={"room_name": 42}).status_code, 400)
 
     def test_start_malformed_json_returns_400(self):
-        r = requests.post(
+        r = _http.post(
             f"{BASE}/recordings/start",
             headers={**AUTH_HEADERS, "Content-Type": "application/json"},
             data="{bad",

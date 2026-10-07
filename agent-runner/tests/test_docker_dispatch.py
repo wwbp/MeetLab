@@ -61,6 +61,11 @@ class SpecTest(unittest.TestCase):
 
 
 class RunTest(unittest.TestCase):
+    def test_an_init_is_pid_1_so_the_bot_can_be_killed_and_reaped(self):
+        # Since the image runs python directly (no uv wrapper), python would be PID 1, and
+        # PID 1 ignores a SIGKILL sent inside its container (2026-10-07: kill9 hung).
+        self.assertIs(bot_container_spec(ME, "sess-1")["HostConfig"]["Init"], True)
+
     def test_start_creates_and_starts_a_container_named_for_the_session(self):
         docker = FakeDocker()
         self.assertEqual(run_bot_container(docker, "sess-1", "runner-host"), "meetlab-bot-sess-1")

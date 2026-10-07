@@ -174,7 +174,6 @@ class _OpenAIRealtimeSTT(OpenAIRealtimeSTTService):
         # Replicate parent payload and inject delay into transcription dict.
         # Only gpt-realtime-whisper supports this field.
         from pipecat.services.openai.stt import OPENAI_SAMPLE_RATE
-        from pipecat.utils.language import Language
 
         settings: OpenAIRealtimeSTTSettings = self._settings
         transcription: dict = {"model": settings.model, "delay": self._transcription_delay}
@@ -331,32 +330,11 @@ def build_user_aggregator_params(bot_config=None):
     )
 
 
-def _build_whisper_chain(bot_config, vad_handlers=None):
-    """Local Whisper STT chain: (VADProcessor, WhisperSTTService) head/tail pair.
-
-    WhisperSTTService is a SegmentedSTTService — it transcribes only the audio
-    between VADUserStarted/StoppedSpeakingFrames and emits nothing without them.
-    MultiSpeakerSTT routes raw per-participant audio straight into each STT
-    (the transport's VAD never sees that path), so the chain carries its own
-    VADProcessor.
-
-    Note: WhisperSTTService.__init__ loads the model eagerly (downloads on first
-    use) — the first participant's chain creation blocks until the model is warm.
-    """
-    from pipecat.services.whisper.stt import WhisperSTTService
-
-    model_name = bot_config.stt_model[len("whisper-"):]
-    vad = _build_vad_processor(bot_config, vad_handlers)
-    stt = WhisperSTTService(settings=WhisperSTTService.Settings(model=model_name))
-    return _link_chain(bot_config, vad, stt)
-
-
 def _build_parakeet_chain(bot_config, vad_handlers=None):
-    """Parakeet NIM chain: (VADProcessor, NemotronHTTPSTTService).
-
-    Same segmented shape as the whisper chain; the tail POSTs each segment to the
-    Parakeet NIM at NEMOTRON_STT_URL. See docs/gpu-stt-deployment.md.
-    """
+    """Parakeet chain: (VADProcessor, NemotronHTTPSTTService). A segmented STT transcribes only
+    the audio between VAD start/stop, so the chain carries its own VADProcessor (per-participant
+    audio never passes the transport's VAD). The tail POSTs each segment to NEMOTRON_STT_URL:
+    our CPU server (stt-cpu) or the GPU NIM (infra/v2/stack/runner.tf)."""
     from nemotron_stt import NemotronHTTPSTTService, nemotron_stt_url
 
     vad = _build_vad_processor(bot_config, vad_handlers)
@@ -382,10 +360,9 @@ def _link_chain(bot_config, vad, stt):
 def _apply_stt_model_override(bot_config):
     """Force the bot's STT model regardless of the DB config, when STT_MODEL_OVERRIDE is set.
 
-    Local dev has no GPU to run the Parakeet NIM (the prod default), so the local stack sets
-    STT_MODEL_OVERRIDE=whisper-base to transcribe in-process instead of depending on a sidecar.
-    Prod leaves it unset and uses the DB config (NIM). This is applied only to the running bot,
-    not to the /config store/API — those still reflect what's actually persisted.
+    The stack sets it from which speech server runs (infra/v2/stack/runner.tf: Parakeet on our
+    CPU server or GPU, else Deepgram); the local stack mirrors that with its own stt-cpu. Applied
+    only to the running bot, not to the /config store/API, which reflects what's persisted.
     """
     override = (os.environ.get("STT_MODEL_OVERRIDE") or "").strip()
     if override and override != bot_config.stt_model:
@@ -394,12 +371,16 @@ def _apply_stt_model_override(bot_config):
     return bot_config
 
 
+def _turn_detection_for_vad_mode(vad_mode: str):
+    """Return turn_detection=False (local Silero VAD) — the only supported mode."""
+    return False
+
+
 def _build_stt(bot_config, openai_api_key: str, deepgram_api_key: str | None):
     """Instantiate the STT service based on stt_model prefix.
 
-    Models starting with 'gpt-' use OpenAI Realtime STT; 'whisper-' returns a
-    local (VADProcessor, WhisperSTTService) chain — see _build_whisper_chain;
-    everything else (nova-*, etc.) uses Deepgram.
+    Models starting with 'gpt-' use OpenAI Realtime STT; 'parakeet-' returns a
+    (VADProcessor, NemotronHTTPSTTService) chain; everything else (nova-*) uses Deepgram.
     """
     if bot_config.stt_model.startswith("gpt-"):
         return _OpenAIRealtimeSTT(
@@ -411,8 +392,6 @@ def _build_stt(bot_config, openai_api_key: str, deepgram_api_key: str | None):
                 noise_reduction="near_field",
             ),
         )
-    if bot_config.stt_model.startswith("whisper-"):
-        return _build_whisper_chain(bot_config)
     if bot_config.stt_model.startswith("parakeet-"):
         return _build_parakeet_chain(bot_config)
     # Deepgram path — disable server endpointing so local Silero VAD drives commits
@@ -575,7 +554,7 @@ async def _bot(runner_args: LiveKitRunnerArguments):
     # Interruption tracking: the bot should yield, not talk over users. The tracker
     # is fed bot-speaking frames (via _InterruptionObserver) and REAL user speech
     # onset from the per-participant VAD (via MultiSpeakerSTT's on_speech_onset).
-    interruptions = InterruptionTracker(labels={"stt_model": bot_config.stt_model})
+    interruptions = InterruptionTracker()
 
     # The PipelineWorker does not exist yet, so the handler reaches it through this
     # holder, filled in once the task is built. Audio cannot flow before the
@@ -622,25 +601,15 @@ async def _bot(runner_args: LiveKitRunnerArguments):
         audio_sink.enable()
     audio_recorder = audio_tracks.PerSpeakerAudioRecorder(audio_sink)
     bot_audio_recorder = audio_tracks.BotAudioRecorder(audio_sink, runner_args.bot_identity)
-    # Mock TTS (BOT_MOCK_TTS) swaps in zero-cost synthetic silence for load/soak
-    # testing — no paid TTS calls. OFF by default; never enable in production. The LLM
-    # is pinned to the cheapest model by the soak harness rather than mocked.
-    _mock_tts = os.getenv("BOT_MOCK_TTS", "").lower() in ("1", "true", "yes")
-
     llm = _build_llm(openai_api_key, bot_config)
     _tts_mode = (
         TextAggregationMode.TOKEN
         if bot_config.tts_aggregation_mode == "token"
         else TextAggregationMode.SENTENCE
     )
-    if _mock_tts:
-        from mock_services import MockTTSService
-        logger.warning("BOT_MOCK_TTS enabled — synthetic silence, no TTS API calls")
-        tts = MockTTSService(text_aggregation_mode=_tts_mode)
-    else:
-        tts = _build_tts(bot_config, openai_api_key, elevenlabs_api_key, _tts_mode)
-        from clause_aggregator import install
-        install(tts, bot_config.tts_aggregation_mode)  # "clause": the first clause, then sentences
+    tts = _build_tts(bot_config, openai_api_key, elevenlabs_api_key, _tts_mode)
+    from clause_aggregator import install
+    install(tts, bot_config.tts_aggregation_mode)  # "clause": the first clause, then sentences
     logger.info(
         f"TTS: provider={bot_config.tts_provider} voice={bot_config.tts_voice}"
         f" aggregation={bot_config.tts_aggregation_mode}"
@@ -693,20 +662,16 @@ async def _bot(runner_args: LiveKitRunnerArguments):
                     pass
 
         def _handle(self, m):
-            import metrics as _prom
             if isinstance(m, TTFBMetricsData):
                 val_ms = m.value * 1000
                 stage = _ttfb_stage(m.processor)
                 if stage == "llm_ttft_ms":
                     _metrics_data["llm_ttft_ms"] = val_ms
-                    _prom.llm_ttft.record(val_ms, {"llm_model": bot_config.llm_model})
                 elif stage == "tts_ttfb_ms":
                     _metrics_data["tts_ttfb_ms"] = val_ms
-                    _prom.tts_ttfb.record(val_ms, {"tts_provider": bot_config.tts_provider})
             elif isinstance(m, TextAggregationMetricsData):
                 val_ms = m.value * 1000
                 _metrics_data["sentence_agg_ms"] = val_ms
-                _prom.sentence_agg.record(val_ms, {"tts_provider": bot_config.tts_provider})
 
     class _InterruptionObserver(BaseObserver):
         """Feeds the bot's TTS speaking window to the InterruptionTracker.
@@ -857,8 +822,6 @@ async def _bot(runner_args: LiveKitRunnerArguments):
         ),
         observers=[MetricsLogObserver(), _MetricsObserver(), _InterruptionObserver()],
         processor_unusable_policy=UNUSABLE_POLICY,
-        enable_tracing=env_config.enable_tracing,
-        enable_turn_tracking=env_config.enable_tracing,
         conversation_id=runner_args.session_id,
         additional_span_attributes={
             "room.name": runner_args.room_name,
@@ -896,13 +859,6 @@ async def _bot(runner_args: LiveKitRunnerArguments):
         if stt_ms is not None and stt_ms > _STT_SPIKE_THRESHOLD_MS:
             _turn_timing["diag_stt_spike"] = True
             _ep = getattr(bot_config, "stt_endpointing_ms", 200)
-            try:
-                import metrics as _prom
-                _prom.stt_spikes_total.add(
-                    1, {"stt_model": bot_config.stt_model, "endpointing_ms": str(_ep)}
-                )
-            except Exception:
-                pass
             logger.warning(
                 "STT latency spike: stt_ms={:.0f} model={} endpointing_ms={} "
                 "queue_depth={} content={!r}",
@@ -910,13 +866,7 @@ async def _bot(runner_args: LiveKitRunnerArguments):
                 (message.content or "")[:80],
             )
         if not message.content:
-            # VAD/STT fired but produced no transcript — these are dropped from the
-            # stt_ms histogram, so count them separately to explain percentile skew.
-            try:
-                import metrics as _prom
-                _prom.phantom_segments_total.add(1, {"stt_model": bot_config.stt_model})
-            except Exception:
-                pass
+            # VAD/STT fired but produced no transcript.
             logger.debug("Phantom segment: user turn committed with empty content")
             return
         # Self-echo heuristic: does this user transcript echo recent bot TTS?
@@ -924,11 +874,6 @@ async def _bot(runner_args: LiveKitRunnerArguments):
             sim = _text_similarity(message.content, _bot_text)
             if sim >= _SELF_ECHO_SIMILARITY:
                 _turn_timing["diag_self_echo"] = True
-                try:
-                    import metrics as _prom
-                    _prom.self_echo_suspected_total.add(1, {"stt_model": bot_config.stt_model})
-                except Exception:
-                    pass
                 logger.warning(
                     "Possible bot self-echo (sim={:.2f}): user={!r} ~ bot={!r}",
                     sim, message.content[:80], _bot_text[:80],
@@ -1048,17 +993,6 @@ async def _bot(runner_args: LiveKitRunnerArguments):
             diag["queue_depth"] = t["diag_queue_depth"]
         if diag:
             meta["diag"] = diag
-        # E2E latency + utterance counter (per-stage metrics observed by _MetricsObserver)
-        try:
-            import metrics as _prom
-            _ep = str(getattr(bot_config, "stt_endpointing_ms", 200))
-            if meta.get("latency_ms"):
-                _prom.e2e_latency.record(meta["latency_ms"], {"stt_model": bot_config.stt_model, "endpointing_ms": _ep})
-            if timing.get("stt_ms"):
-                _prom.stt_latency.record(timing["stt_ms"], {"stt_model": bot_config.stt_model, "endpointing_ms": _ep})
-            _prom.utterances_total.add(1, {"stt_model": bot_config.stt_model})
-        except Exception:
-            pass
         async with AsyncSessionLocal() as db:
             async with db.begin():
                 db.add(
@@ -1274,10 +1208,10 @@ def _build_stt_for_multi_speaker(bot_config, openai_api_key: str, deepgram_api_k
     reducible to 100ms for lower latency). _FrameCollector wraps final transcripts
     in VAD frame sandwiches for the context aggregator.
 
-    Local Whisper: each participant gets a (VADProcessor, WhisperSTTService)
-    chain — see _build_whisper_chain. _FrameCollector wraps TranscriptionFrames
-    in VAD sandwiches (needs_vad_wrap=True) the same way it does for Deepgram,
-    and drops the chain's raw VAD frames so they don't double-fire the observer.
+    Parakeet: each participant gets a (VADProcessor, NemotronHTTPSTTService) chain.
+    _FrameCollector wraps TranscriptionFrames in VAD sandwiches (needs_vad_wrap=True)
+    the same way it does for Deepgram, and drops the chain's raw VAD frames so they
+    don't double-fire the observer.
     """
     if bot_config.stt_model.startswith("gpt-"):
         return _OpenAIRealtimeSTT(
@@ -1289,8 +1223,6 @@ def _build_stt_for_multi_speaker(bot_config, openai_api_key: str, deepgram_api_k
                 noise_reduction="near_field",
             ),
         )
-    if bot_config.stt_model.startswith("whisper-"):
-        return _build_whisper_chain(bot_config, vad_handlers)
     if bot_config.stt_model.startswith("parakeet-"):
         return _build_parakeet_chain(bot_config, vad_handlers)
     if not deepgram_api_key:
@@ -1434,11 +1366,6 @@ def resolve_speaker_identity(sid, sid_to_identity: dict, remote_participants: di
     if known:
         return sid_to_identity.get(known, known), {}
     return None, {}
-
-
-def _turn_detection_for_vad_mode(vad_mode: str):
-    """Return turn_detection=False (local Silero VAD) — the only supported mode."""
-    return False
 
 
 def _new_id() -> str:

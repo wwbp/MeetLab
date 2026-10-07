@@ -66,7 +66,14 @@ resource "aws_ecs_task_definition" "runner_app" {
     cpu               = 1024
     memoryReservation = 1536
     portMappings      = [{ name = "http", containerPort = 7860, hostPort = 0, protocol = "tcp", appProtocol = "http" }]
-    environment       = local.runner_environment
+    # ECS's init as PID 1: python would otherwise be PID 1, which ignores a SIGKILL sent inside
+    # its container (kill9, 2026-10-07) and reaps no zombies. With linuxParameters set, ECS stores
+    # these empty lists explicitly; declared here too, or every plan shows a change (#186).
+    linuxParameters = { initProcessEnabled = true }
+    mountPoints     = []
+    systemControls  = []
+    volumesFrom     = []
+    environment     = local.runner_environment
     # The runner requests video egress. LiveKit Cloud gets the write-only egress key with
     # each request (egress.tf); our own egress uploads with its task role, so then no key at
     # all (egress_server.tf). Bots never hold it. Minted by a person into SSM:

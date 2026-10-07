@@ -205,9 +205,10 @@ async def scenario_removed():
         return "task stopped by itself, exit 0"
 
 
-# No single quotes: the whole thing runs inside sh -c '...'. Skips PID 1 (the launcher;
-# Linux ignores in-namespace signals to PID 1) and kills the bot's python process.
-_KILL9 = ('for p in /proc/[0-9]*; do n=${p#/proc/}; [ "$n" = 1 ] && continue; '
+# No single quotes: the whole thing runs inside sh -c '...'. Skips PID 1 (the init; Linux
+# ignores in-namespace signals to PID 1) and this shell ($$: its own command line matches the
+# pattern, and /proc lists 67 before 7), and kills the bot's python process.
+_KILL9 = ('for p in /proc/[0-9]*; do n=${p#/proc/}; case $n in 1|$$) continue;; esac; '
           'c=$(tr "\\000" " " < $p/cmdline 2>/dev/null); '
           'case "$c" in *python*bot_task*) echo killing $n; kill -9 $n;; esac; done')
 
@@ -669,6 +670,35 @@ async def scenario_our_models():
         return f"heard ({stt}), answered by {OUR_LLM}, spoken by Kokoro; latency_ms={reply} (models ready after {m.started - t0:.0f} s)"
 
 
+async def scenario_smart_turn():
+    """A room that ends turns by smart turn: each person's chain is VAD -> smart-turn gate -> STT.
+    Someone speaks; the bot must answer. Smart turn needs Parakeet (with Deepgram a room ends
+    turns on silence), so without a speech server of ours this tests nothing and says so.
+    Never run live until 2026-10-07, when the gate, never set up, silenced a demo room."""
+    server = "stt-nim" if _service_on("stt-nim") else "stt-cpu" if _service_on("stt-cpu") else None
+    if not server:
+        return "not run: smart turn needs Parakeet, and no speech server of ours is on (Deepgram)"
+    await _until(lambda: _service_ready(server), 2700 if server == "stt-nim" else 600, f"{server} healthy")
+    room = f"accept-{uuid.uuid4().hex[:6]}"
+    _post("/api/console/login", {"password": os.environ["CONSOLE_PASSWORD"]})
+    _post("/api/console/config", {"scope": room, "turn_detection": "smart_turn"}, method="PUT")
+    async with Meeting(room=room) as m:
+        bot_log = lambda: _log_lines("/meetlab-v2/staging/bot", m.session, m.started)
+        await _until(lambda: any("bot line" in l for l in bot_log()), 60, "the greeting spoken and stored")
+        await _play_wav(m.human, SPEECH, 8)
+        await _until(lambda: any("bot reply" in l and "latency_ms=None" not in l for l in bot_log()),
+                     120, "the bot's answer in a smart-turn room")
+        stream = f"bot/bot/{m.task.rsplit('/', 1)[-1]}"
+        lines = [e["message"] for e in logs.filter_log_events(
+            logGroupName="/meetlab-v2/staging/bot", logStreamNames=[stream], startTime=int(m.started * 1000))["events"]]
+        if not any("SmartTurnGate" in l for l in lines):
+            raise Fail("no smart-turn gate in the person's chain: the room did not end turns by smart turn")
+        if any("TaskManager is not initialized" in l for l in lines):
+            raise Fail("a part of the person's chain was not set up")
+        reply = next(l for l in bot_log() if "bot reply" in l and "latency_ms=None" not in l).split("latency_ms=")[1].split()[0]
+        return f"answered with smart turn on ({server}); latency_ms={reply}"
+
+
 # Every peer connection the page opens, so the check can read Chromium's own stats.
 _RECORD_PCS = """(() => { const PC = window.RTCPeerConnection; window.__pcs = [];
   window.RTCPeerConnection = function (...a) { const pc = new PC(...a); window.__pcs.push(pc); return pc; };
@@ -724,7 +754,7 @@ SCENARIOS = {"start": scenario_start, "stoptask": scenario_stoptask, "removed": 
              "transcript": scenario_transcript, "two_humans": scenario_two_humans, "refresh": scenario_refresh,
              "chat": scenario_chat, "auto_record": scenario_auto_record, "our_models": scenario_our_models, "record_auth": scenario_record_auth,
              "study_prolific": scenario_study_prolific, "session_limit": scenario_session_limit,
-             "turn_relay": scenario_turn_relay, "bot_ready": scenario_bot_ready,
+             "turn_relay": scenario_turn_relay, "bot_ready": scenario_bot_ready, "smart_turn": scenario_smart_turn,
              "prewarm": scenario_prewarm}  # last: its Stop preparing cools the pool the run prepared
 
 

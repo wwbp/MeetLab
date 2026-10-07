@@ -204,3 +204,16 @@ run "the_bot_pool_ceiling_is_a_setting" {
     error_message = "a load test raises the ceiling with bot_pool_max (default 2 keeps staging's cost capped)"
   }
 }
+
+# The image runs python directly, so without an init python is PID 1, which ignores a SIGKILL
+# sent inside its container (kill9 hung, 2026-10-07) and reaps no zombies. ECS's own init fixes both.
+run "an_init_is_pid_1_in_bot_and_runner_tasks" {
+  command = apply
+
+  assert {
+    condition = alltrue([for td in [aws_ecs_task_definition.bot, aws_ecs_task_definition.runner_app] :
+      try(jsondecode(td.container_definitions)[0].linuxParameters.initProcessEnabled, false)
+    ])
+    error_message = "bot and runner run under ECS's init (initProcessEnabled)"
+  }
+}

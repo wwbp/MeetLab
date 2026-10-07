@@ -1,8 +1,5 @@
-"""Shared helpers for the local LiveKit audio harnesses (simulate + soak).
-
-Extracted from simulate_meeting.py so the multi-room soak driver can reuse the same
-token/HTTP/audio-streaming/DB-collection machinery. Behavior is identical to the
-original simulate helpers — simulate_meeting.py now imports from here.
+"""Shared helpers for the load generator (load_run.py) and the live tests:
+token/HTTP/audio-streaming/DB-collection machinery.
 """
 import asyncio
 import json

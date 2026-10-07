@@ -363,6 +363,41 @@ class TestMultiSpeakerSTTChainFactory(unittest.IsolatedAsyncioTestCase):
 
 # ── MultiSpeakerSTT routing ───────────────────────────────────────────────────
 
+class TestMultiSpeakerSTTThreePartChain(unittest.IsolatedAsyncioTestCase):
+    """A chain with a middle part (smart turn: VAD -> SmartTurnGate -> STT) works when built for a
+    person who joins mid-meeting. Every part must be set up, not only head and tail: on
+    2026-10-07 the gate was not, raised "TaskManager is not initialized" on its first frame,
+    and the bot never heard anyone in a smart-turn room."""
+
+    async def test_audio_passes_a_middle_part_and_the_transcript_reaches_the_pipeline(self):
+        from smart_turn import SmartTurnGate, TurnVerdict
+
+        class _Analyzer:  # the smart-turn model, out of the way: it is not under test here
+            def set_sample_rate(self, rate): pass
+            def append_audio(self, *_): pass
+            def clear(self): pass
+
+        def chain_factory(sid=None):
+            head, verdict, tail = _PassthroughHead(), TurnVerdict(), _ImmediateSTT()
+            gate = SmartTurnGate(verdict, analyzer=_Analyzer())
+            head.link(gate)
+            gate.link(tail)
+            return (head, tail, verdict)
+
+        multi_stt = MultiSpeakerSTT(chain_factory)
+        await multi_stt.setup(_make_setup())
+        sink = _Sink()
+        multi_stt.link(sink)
+        await multi_stt.process_frame(StartFrame(), FrameDirection.DOWNSTREAM)
+        try:
+            await multi_stt.process_frame(_make_audio_frame("alice_sid"), FrameDirection.DOWNSTREAM)
+            await asyncio.sleep(0.1)
+            transcripts = [f for f in sink.received if isinstance(f, TranscriptionFrame)]
+            self.assertTrue(transcripts, f"audio must pass the middle part to STT, got: {sink.received}")
+        finally:
+            await multi_stt.process_frame(CancelFrame(), FrameDirection.DOWNSTREAM)
+
+
 class TestMultiSpeakerSTTRouting(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.setup_params = _make_setup()

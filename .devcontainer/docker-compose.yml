@@ -60,16 +60,17 @@ services:
       - transport-server
       - redis
 
-  jaeger:
-    image: jaegertracing/all-in-one:1.65.0
-    ports:
-      - "16686:16686"
-    environment:
-      - COLLECTOR_OTLP_ENABLED=true
 
-  # Local Parakeet/Nemotron STT (Experiment 6) — CPU here, same HTTP API as the
-  # GPU build on AWS. Selected per-room via stt_model="parakeet-tdt-0.6b-v2".
-  # Model (~2.4GB) downloads into the volume on first start.
+  # Production's speech-to-text (stt-cpu/, the same image CI builds): Parakeet int8 on CPU.
+  stt-cpu:
+    build:
+      context: ../stt-cpu
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,json,sys; sys.exit(0 if json.load(urllib.request.urlopen('http://localhost:8000/health'))['ready'] else 1)"]
+      interval: 10s
+      timeout: 3s
+      retries: 30
+
   # agent-runner's only way to Docker: container create, start, stop and inspect.
   # No images, exec, volumes, networks or system calls. The raw socket is read-only
   # and never mounted into agent-runner itself. Create is still powerful (a container
@@ -97,19 +98,12 @@ services:
     environment:
       - DATABASE_URL=postgresql+asyncpg://meetlab:meetlab@postgres:5432/meetlab
       - BOT_RUNNER_SECRET=${BOT_RUNNER_SECRET:-}
-      # Local dev has no GPU for the Parakeet NIM (the prod default STT), so force
-      # in-process whisper-base locally — no STT sidecar needed. Prod leaves this unset
-      # and uses the DB config (NIM). Set STT_MODEL_OVERRIDE= (empty) to honor the DB.
-      - STT_MODEL_OVERRIDE=${STT_MODEL_OVERRIDE-whisper-base}
-      # Only used when STT_MODEL_OVERRIDE is cleared and a parakeet-* model is selected:
-      # point NEMOTRON_STT_URL at a reachable Parakeet NIM.
-      - NEMOTRON_STT_URL=${NEMOTRON_STT_URL:-}
-      # Bot JWT lifetime (min). Default 15; soak/longevity runs raise it so 20-min+
-      # sessions don't drop on token expiry. `make soak` passes 30 here.
+      # Speech-to-text as production runs it: Parakeet on our CPU server (stt-cpu below,
+      # infra/v2/stack/stt_cpu.tf), so dev catches what prod would hit.
+      - STT_MODEL_OVERRIDE=${STT_MODEL_OVERRIDE-parakeet-tdt-0.6b-v2}
+      - NEMOTRON_STT_URL=${NEMOTRON_STT_URL:-http://stt-cpu:8000}
+      # Bot JWT lifetime (min). Default 15.
       - BOT_TOKEN_TTL_MINUTES=${BOT_TOKEN_TTL_MINUTES:-15}
-      # Zero-cost mock TTS for load/soak testing (no paid TTS calls). OFF by default —
-      # `make soak MOCK=1` turns it on. Never enable in production.
-      - BOT_MOCK_TTS=${BOT_MOCK_TTS:-0}
       # Each meeting's bot runs as its own container, as each is its own ECS task in
       # staging (dispatch.py). There is no in-process mode: /start refuses without one.
       - BOT_DISPATCHER=${BOT_DISPATCHER:-docker}
@@ -121,11 +115,11 @@ services:
     ports:
       - "7860:7860"
     depends_on:
+      stt-cpu:
+        condition: service_healthy
       postgres:
         condition: service_healthy
       transport-server:
-        condition: service_started
-      jaeger:
         condition: service_started
       docker-socket-proxy:
         condition: service_started

@@ -31,10 +31,9 @@ make start / make stop          # local stack up (build + migrate) / down
 make logs SERVICE=agent-runner
 
 make test                       # unit + integration against the local stack (ci.yml)
-make test-unit                  # runner unittest + meet lint, knip and vitest
+make test-static                # static analysis: dead code, image budget, docs, meet lint/tsc/knip
+make test-unit                  # runner unittest + meet vitest
 make test-infra                 # terraform fmt/validate/test, offline (mock provider)
-make test-image                 # agent-runner image under budget; every entry point imports in it
-make test-dead-code             # vulture + deptry on agent-runner
 make test-stt-cpu               # the CPU speech server against recorded clips
 make test-config-parity         # a Bot settings field exists in DB, API and form
 make sim-attribution            # overlapping speakers each heard as themselves
@@ -44,7 +43,7 @@ docker compose -f .devcontainer/docker-compose.yml exec -T agent-runner \
   python -m unittest tests.test_runner_start -v
 ```
 
-Load tests run in AWS: the "Load test v2" workflow (`docs/load-testing.md`). Live tests run after
+Test levels, types and pass criteria: `docs/testing.md`. Load tests run in AWS: the "Load test v2" workflow (`docs/load-testing.md`). Live tests run after
 every staging deploy (`agent-runner/tests/acceptance_staging.py`). The runner has no hot reload:
 `docker compose restart agent-runner` after editing it.
 

@@ -60,12 +60,6 @@ services:
       - transport-server
       - redis
 
-  jaeger:
-    image: jaegertracing/all-in-one:1.65.0
-    ports:
-      - "16686:16686"
-    environment:
-      - COLLECTOR_OTLP_ENABLED=true
 
   # Production's speech-to-text (stt-cpu/, the same image CI builds): Parakeet int8 on CPU.
   stt-cpu:
@@ -108,12 +102,8 @@ services:
       # infra/v2/stack/stt_cpu.tf), so dev catches what prod would hit.
       - STT_MODEL_OVERRIDE=${STT_MODEL_OVERRIDE-parakeet-tdt-0.6b-v2}
       - NEMOTRON_STT_URL=${NEMOTRON_STT_URL:-http://stt-cpu:8000}
-      # Bot JWT lifetime (min). Default 15; soak/longevity runs raise it so 20-min+
-      # sessions don't drop on token expiry. `make soak` passes 30 here.
+      # Bot JWT lifetime (min). Default 15.
       - BOT_TOKEN_TTL_MINUTES=${BOT_TOKEN_TTL_MINUTES:-15}
-      # Zero-cost mock TTS for load/soak testing (no paid TTS calls). OFF by default —
-      # `make soak MOCK=1` turns it on. Never enable in production.
-      - BOT_MOCK_TTS=${BOT_MOCK_TTS:-0}
       # Each meeting's bot runs as its own container, as each is its own ECS task in
       # staging (dispatch.py). There is no in-process mode: /start refuses without one.
       - BOT_DISPATCHER=${BOT_DISPATCHER:-docker}
@@ -129,8 +119,6 @@ services:
       postgres:
         condition: service_healthy
       transport-server:
-        condition: service_started
-      jaeger:
         condition: service_started
       docker-socket-proxy:
         condition: service_started

@@ -3,10 +3,10 @@
 // keeps it as the typing person's turn: agent-runner/rtvi.py). The bot sends the room only
 // bot-ready and who is speaking.
 
-export const RTVI_LABEL = 'rtvi-ai';
+const RTVI_LABEL = 'rtvi-ai';
 export const RTVI_VERSION = '2.1.0'; // Pipecat 1.12's protocol
 
-export type RtviMessage = { label: string; type: string; id: string; data?: unknown } & Record<string, unknown>;
+type RtviMessage = { label: string; type: string; id: string; data?: unknown } & Record<string, unknown>;
 
 const encode = (msg: object) => new TextEncoder().encode(JSON.stringify(msg));
 

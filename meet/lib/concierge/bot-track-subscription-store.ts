@@ -1,7 +1,7 @@
 const STORE_KEY = '__concierge_bot_track_subscription_store__';
 const MAX_SIGNALS = 300;
 
-export type BotTrackSubscriptionSignal = {
+type BotTrackSubscriptionSignal = {
   roomName: string;
   botIdentity?: string;
   trackSid?: string;

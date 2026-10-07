@@ -6,7 +6,7 @@ import { getServerConfig, requireEnv } from '@/lib/config/server';
  * app/api/concierge/rooms/[roomName]/bots/route.ts.
  */
 
-export type BotRunnerResponse = {
+type BotRunnerResponse = {
   session_id?: string;
   bot_identity?: string;
   message?: string;
@@ -19,7 +19,7 @@ function toBotRunnerStartUrl(botRunnerUrl: string): string {
   return `${normalized}start`;
 }
 
-export function roomSlug(roomName: string): string {
+function roomSlug(roomName: string): string {
   const slug = roomName
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
@@ -168,7 +168,7 @@ export async function callBotRunnerStop(
   }
 }
 
-export type RoomSession = { session_id: string; bot_identity: string; started_at: string };
+type RoomSession = { session_id: string; bot_identity: string; started_at: string };
 
 /**
  * The room's running session (iteration 9): which bot a room has comes from the

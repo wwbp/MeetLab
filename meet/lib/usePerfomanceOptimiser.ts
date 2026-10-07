@@ -10,7 +10,7 @@ import {
 } from 'livekit-client';
 import * as React from 'react';
 
-export type LowCPUOptimizerOptions = {
+type LowCPUOptimizerOptions = {
   reducePublisherVideoQuality: boolean;
   reduceSubscriberVideoQuality: boolean;
   disableVideoProcessing: boolean;

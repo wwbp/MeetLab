@@ -49,7 +49,7 @@ export type ConciergeInviteDetails = {
   shareText: string;
 };
 
-export type ConciergeBot = {
+type ConciergeBot = {
   identity: string;
   name?: string;
   state?: string;
@@ -72,32 +72,14 @@ export type RoomsResponse = {
   rooms: ConciergeRoom[];
 };
 
-export type RoomResponse = {
-  room: ConciergeRoom;
-};
 
-export type ParticipantsResponse = {
-  roomName: string;
-  participants: ConciergeParticipant[];
-};
 
-export type EventsResponse = {
-  events: ConciergeEvent[];
-};
 
 export type InviteResponse = {
   invite: ConciergeInviteDetails;
 };
 
-export type BotsResponse = {
-  roomName: string;
-  bots: ConciergeBot[];
-  assignedBotIdentity?: string;
-};
 
-export type StartBotResponse = {
-  request: ConciergeBotRequest;
-};
 
 export type MediaFileRecord = {
   id: string;

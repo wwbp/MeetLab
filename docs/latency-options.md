@@ -3,7 +3,7 @@
 Which speech-to-text, LLM and voice options answer fastest, what our Bot Config offers today,
 and what is worth adding. For studies that require a vendor (e.g. ElevenLabs or OpenAI) and for
 studies that allow alternatives. Collected 2026-10-04; numbers move, so measure before changing
-a default (`make benchmark-full BENCHMARK_SAMPLES=10`, or a load test on staging).
+a default (a load test on staging, `docs/load-testing.md`).
 
 **Sources**, tagged on each number:
 

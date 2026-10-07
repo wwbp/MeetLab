@@ -35,12 +35,12 @@ export type SessionPhase =
   | 'expired';
 
 /** The subset of a LiveKit Participant this module needs. */
-export type TimedParticipant = {
+type TimedParticipant = {
   identity: string;
   joinedAt?: Date;
 };
 
-export type SessionTimerState = {
+type SessionTimerState = {
   phase: SessionPhase;
   /** Never negative, never more than the limit. */
   remainingMs: number;
@@ -137,7 +137,7 @@ export function nextAnnouncedPhase(
 
 export type NoticeTone = 'info' | 'warning' | 'danger';
 
-export type SessionNotice = {
+type SessionNotice = {
   /** The phase that triggered it — doubles as a de-duplication key. */
   phase: SessionPhase;
   message: string;

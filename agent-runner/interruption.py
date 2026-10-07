@@ -39,9 +39,7 @@ response and measure ``talkover_ms`` = how long the bot's audio kept going after
 the user started (bot_stopped − first onset). Lower is better; a fast,
 well-behaved bot yields almost immediately.
 
-Times are monotonic seconds (the caller passes time.monotonic()). Emits two OTel
-instruments unless record=False: meetlab.bot_interruptions_total and
-meetlab.bot_talkover_ms.
+Times are monotonic seconds (the caller passes time.monotonic()).
 """
 import os
 
@@ -79,12 +77,8 @@ class InterruptionTracker:
     def __init__(
         self,
         *,
-        record: bool = True,
-        labels: dict | None = None,
         min_bot_speech_ms: int | None = None,
     ):
-        self._record = record
-        self._labels = labels or {}
         self._min_bot_speech_ms = (
             _MIN_BOT_SPEECH_MS if min_bot_speech_ms is None else min_bot_speech_ms
         )
@@ -130,8 +124,6 @@ class InterruptionTracker:
         self._interrupted_this_response = True
         self._overlap_start = t
         self.interruptions += 1
-        if self._record:
-            self._emit_count(sid)
         return True
 
     def _current_speaker(self, t: float) -> str | None:
@@ -192,8 +184,6 @@ class InterruptionTracker:
             ms = max(0.0, (t - self._overlap_start) * 1000.0)
             self.talkovers_ms.append(ms)
             logger.info(f"Talk-over: bot kept speaking {ms:.0f}ms after the user started")
-            if self._record:
-                self._emit_talkover(ms)
             # Measured once; keep the response window open so a later onset in
             # this same response is still recognised as talking over the bot.
             self._overlap_start = None
@@ -254,18 +244,3 @@ class InterruptionTracker:
             "talkover_ms_max": max(tk) if tk else 0.0,
             "talkover_ms_avg": (sum(tk) / len(tk)) if tk else 0.0,
         }
-
-    # ── metric emission (kept off the unit-test path via record=False) ────────
-    def _emit_count(self, sid: str | None) -> None:
-        try:
-            import metrics as _prom
-            _prom.bot_interruptions_total.add(1, self._labels)
-        except Exception:
-            pass
-
-    def _emit_talkover(self, ms: float) -> None:
-        try:
-            import metrics as _prom
-            _prom.bot_talkover_ms.record(ms, self._labels)
-        except Exception:
-            pass

@@ -16,7 +16,7 @@ import { getServerConfig } from '@/lib/config/server';
 import type { ConciergeEvent, EventSeverity } from '@/lib/concierge/types';
 
 /** A row as agent-runner's `GET /events` returns it. */
-export type RunnerEventRow = {
+type RunnerEventRow = {
   id: number | string;
   type: string;
   severity?: string;
@@ -26,7 +26,7 @@ export type RunnerEventRow = {
   created_at: string;
 };
 
-export type ConciergeEventInput = Omit<ConciergeEvent, 'id' | 'receivedAt' | 'severity'> & {
+type ConciergeEventInput = Omit<ConciergeEvent, 'id' | 'receivedAt' | 'severity'> & {
   receivedAt?: string;
 };
 

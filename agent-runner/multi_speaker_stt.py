@@ -44,7 +44,6 @@ from pipecat.frames.frames import (
     Frame,
     SpeechControlParamsFrame,
     StartFrame,
-    SystemFrame,
     TranscriptionFrame,
     UserAudioRawFrame,
     UserSpeakingFrame,
@@ -287,11 +286,6 @@ class MultiSpeakerSTT(FrameProcessor):
                     f"MultiSpeakerSTT: participant {sid} refused — at capacity "
                     f"({len(self._stts)} active). Their audio is not being transcribed."
                 )
-                try:
-                    import metrics as _prom
-                    _prom.participants_refused_total.add(1)
-                except Exception:
-                    pass
             return None
 
         # Admitted and new: build the chain. The membership guard that used to wrap
@@ -307,10 +301,12 @@ class MultiSpeakerSTT(FrameProcessor):
         )
         tail.link(collector)
         if self._setup_params is not None:
-            await head.setup(self._setup_params)
-            if tail is not head:
-                await tail.setup(self._setup_params)
-            await collector.setup(self._setup_params)
+            # Every part, head to collector: a middle one (the smart-turn gate) left out raised
+            # "TaskManager is not initialized" on its first frame (2026-10-07).
+            p = head
+            while p is not None:
+                await p.setup(self._setup_params)
+                p = p.next
         if self._start_frame is not None:
             await head.process_frame(self._start_frame, FrameDirection.DOWNSTREAM)
         self._stts[sid] = head
@@ -322,13 +318,6 @@ class MultiSpeakerSTT(FrameProcessor):
         while True:
             try:
                 frame = await self._output_queue.get()
-                # Sample backlog after dequeue so a stalled consumer shows up as
-                # a rising distribution in meetlab.stt_queue_depth.
-                try:
-                    import metrics as _prom
-                    _prom.stt_queue_depth.record(self._output_queue.qsize())
-                except Exception:
-                    pass
                 await self.push_frame(frame, FrameDirection.DOWNSTREAM)
             except asyncio.CancelledError:
                 break

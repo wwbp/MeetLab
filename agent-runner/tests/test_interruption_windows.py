@@ -43,7 +43,7 @@ FLOOR_MS = 600
 
 
 def tracker(floor_ms: int = FLOOR_MS):
-    return InterruptionTracker(record=False, min_bot_speech_ms=floor_ms)
+    return InterruptionTracker(min_bot_speech_ms=floor_ms)
 
 
 class TestNothingInterruptsBeforeTheBotHasSpoken(unittest.TestCase):

@@ -98,6 +98,11 @@ run "bot_size_and_packing_come_from_the_profile" {
 run "todays_bot_sizes_stay_the_default" {
   command = apply
 
+  variables {
+    env             = "prod"
+    hostname_suffix = "-v2"
+  }
+
   assert {
     condition = (
       jsondecode(aws_ecs_task_definition.bot.container_definitions)[0].cpu == 512 &&

@@ -94,7 +94,7 @@ importers:
         specifier: '5'
         version: 5.88.1(@types/node@22.19.1)(typescript@5.9.3)
       postcss:
-        specifier: '8'
+        specifier: ^8.5.23
         version: 8.5.28
       prettier:
         specifier: 3.7.3

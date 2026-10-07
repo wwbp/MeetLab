@@ -5,7 +5,7 @@ Until 2026-08 this module only *measured* how badly it failed to (52 talk-over
 events in the Jul/Aug pilot, up to 4743ms of the bot carrying on regardless).
 ``user_onset`` also returns whether the caller should interrupt, so the
 "once per response" rule lives here rather than being re-derived by bot.py.
-See docs/pilot-postmortem-2026-08.md (RC3).
+See v1.0.0:docs/pilot-postmortem-2026-08.md (RC3).
 
 Two windows, deliberately different
 -----------------------------------

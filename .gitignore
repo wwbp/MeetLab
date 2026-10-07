@@ -21,3 +21,5 @@ soak-results-*.json
 
 # The conversation load harness's speech (tests/generate_conversation_audio.py) is
 # committed: every load test, on every stack, must hear exactly the same audio.
+__pycache__/
+*.pyc

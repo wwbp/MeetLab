@@ -1,7 +1,7 @@
 """Reproductions of the four root causes found in the Jul/Aug 2026 pilot.
 
 Full analysis and the production evidence behind each one:
-``docs/pilot-postmortem-2026-08.md``.
+``v1.0.0:docs/pilot-postmortem-2026-08.md``.
 
     RC1  Pipecat's ``user_turn_stop_timeout`` left at its 5.0s default while the
          aggregator is built with ``vad_analyzer=None``  → lag + chained answers
@@ -270,7 +270,7 @@ class RC3InterruptionEnforcementTests(unittest.TestCase):
 
         tracker.bot_stopped(4.7)
         # ...and the measurement is unchanged, so the metric stays comparable
-        # with the pilot numbers in docs/pilot-postmortem-2026-08.md.
+        # with the pilot numbers in v1.0.0:docs/pilot-postmortem-2026-08.md.
         self.assertEqual(tracker.interruptions, 1)
         self.assertAlmostEqual(tracker.talkovers_ms[0], 4200.0, places=3)
 

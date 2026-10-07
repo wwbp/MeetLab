@@ -26,7 +26,7 @@ flowchart LR
 ```
 
 Flowcharts, sequence diagrams, and entity relationship diagrams are used in
-the [architecture guide](architecture.md). Label relationships with what crosses
+the [architecture page](v2-infrastructure.md). Label relationships with what crosses
 the boundary and link the surrounding text to the implementation.
 
 ## SVG and PNG
@@ -68,7 +68,7 @@ $$
 
 This is a teaching approximation, not the definition of a measured metric:
 streaming stages overlap. Use the actual timestamp definitions in the
-[latency experiments](latency-experiments.md) when interpreting results.
+[the load test report](load-test-report-2026-10.md) when interpreting results.
 
 ## Full LaTeX / TikZ figures
 

@@ -117,7 +117,7 @@ class TestBuildSttParakeetChain(unittest.TestCase):
 
     A segmented chain (VAD → STT); the tail POSTs each VAD-cut
     segment (WAV bytes) to the Parakeet NIM's /v1/audio/transcriptions endpoint.
-    Experiment log: docs/latency-experiments.md
+    Experiment log: v1.0.0:docs/latency-experiments.md
     """
 
     def test_parakeet_returns_vad_to_http_chain(self):

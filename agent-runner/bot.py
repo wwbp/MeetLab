@@ -69,7 +69,7 @@ _STT_DELAY_VALUES = frozenset({"minimal", "low", "medium", "high", "xhigh"})
 # Silence, in ms, after which a participant's VAD closes a speech segment. This is
 # the first half of the turn-end window; user_speech_timeout_ms is the second.
 # (A `vad_stop_secs` column used to sit here doing nothing at all; removed
-# 2026-08-10, see docs/distillation-audit.md.)
+# 2026-08-10, see v1.0.0:docs/distillation-audit.md.)
 #
 # The pilot ran at 100ms, which is far shorter than an ordinary thinking pause, so
 # a single sentence was chopped into as many as 31 fragments and the bot cut people
@@ -284,7 +284,7 @@ def build_user_aggregator_params(bot_config=None):
     This is the single most consequential setting in the pipeline. Getting it
     wrong cost us the Jul/Aug 2026 pilot: 49% of turns took over three seconds
     and the median substantive answer waited 5.2s. See
-    docs/pilot-postmortem-2026-08.md (RC1).
+    v1.0.0:docs/pilot-postmortem-2026-08.md (RC1).
 
     Why the defaults cannot work here
     ---------------------------------

@@ -63,13 +63,14 @@ test-config-parity:
 	python3 agent-runner/tests/config_parity_check.py
 
 # The bot/runner image (agent-runner): within budget, and every runtime entry point imports inside
-# it (a cut that removes something used fails here). Budget: uncompressed, linux/amd64. Was 978 MB
-# before the deep cut (2026-10-06): ffmpeg, a second uv sync, local Whisper; 262 MB after.
-IMAGE_BUDGET_MB ?= 300
+# it (a cut that removes something used fails here). Budget: the files in the image (du), the same
+# on any Docker. Before the deep cut (2026-10-06): 1,879 MB (978 MB compressed in ECR): ffmpeg, a
+# second uv sync, local Whisper; after: 779 MB (262 MB compressed).
+IMAGE_BUDGET_MB ?= 850
 test-image:
 	docker build --platform linux/amd64 -q -t meetlab-agent-runner:budget agent-runner >/dev/null
-	@size=$$(docker image inspect meetlab-agent-runner:budget --format '{{.Size}}'); mb=$$((size / 1000000)); \
-		echo "agent-runner image: $$mb MB (budget $(IMAGE_BUDGET_MB) MB)"; [ $$mb -le $(IMAGE_BUDGET_MB) ]
+	@mb=$$(docker run --rm --platform linux/amd64 meetlab-agent-runner:budget du -sxm / | cut -f1); \
+		echo "agent-runner image: $$mb MB of files (budget $(IMAGE_BUDGET_MB) MB)"; [ $$mb -le $(IMAGE_BUDGET_MB) ]
 	docker run --rm --platform linux/amd64 -e DATABASE_URL=postgresql+asyncpg://x:x@localhost/x \
 		-e LIVEKIT_URL=ws://localhost:7880 -e LIVEKIT_API_KEY=x -e LIVEKIT_API_SECRET=x \
 		meetlab-agent-runner:budget python -c \

@@ -15,6 +15,7 @@ run "off_bots_use_deepgram_and_nothing_runs" {
 
   variables {
     stt_cpu_enabled = false # stated, not assumed: a test session may switch it on
+    stt_nim_enabled = false
   }
 
   assert {
@@ -32,6 +33,7 @@ run "on_bots_transcribe_on_the_cpu_server_behind_a_private_load_balancer" {
 
   variables {
     stt_cpu_enabled = true
+    stt_nim_enabled = false # stated, not assumed: a test session may switch the GPU on
   }
 
   assert {

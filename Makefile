@@ -164,7 +164,7 @@ benchmark-audio-long: benchmark-audio
 # Paused-speech fixture: one question delivered in clauses with PAUSE_MS gaps, so
 # the turn arrives fragmented like real meeting speech. The standard fixtures are
 # single clean phrases and can never reproduce the 5s turn-commit stall (RC1).
-# See docs/pilot-postmortem-2026-08.md.
+# See v1.0.0:docs/pilot-postmortem-2026-08.md.
 PAUSE_MS ?= 400
 benchmark-audio-paused:
 	$(COMPOSE) up -d agent-runner
@@ -256,7 +256,7 @@ soak-sanity:
 # Direct STT-server concurrency benchmark: fire N concurrent transcriptions straight at
 # the STT server (no LiveKit/bot) and measure latency vs concurrency. Point STT_URL at a
 # reachable NIM (run from inside the VPC) to confirm it scales. The old-sidecar baseline
-# is recorded in docs/gpu-stt-deployment.md. See that doc for the before/after table.
+# is recorded in v1.0.0:docs/gpu-stt-deployment.md. See that doc for the before/after table.
 # Knobs: STT_URL (required), STT_MODEL, STT_LANGUAGE, CONCURRENCIES, REQUESTS_PER.
 bench-stt-concurrency:
 	$(COMPOSE) up -d --wait agent-runner

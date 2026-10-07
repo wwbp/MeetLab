@@ -13,7 +13,6 @@ recordings/
 
 # Archives
 *.zip
-docs/team-update-2026-06-11.md
 
 # soak run artifacts
 agent-runner/soak-results-*.json

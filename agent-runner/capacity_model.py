@@ -14,8 +14,11 @@ HOURS_PER_MONTH = 730
 PRICE = {"c6i.large": 0.085, "c6i.xlarge": 0.17, "c6i.2xlarge": 0.34,
          "db.t4g.small": 0.064, "db.t4g.medium": 0.13}  # databases: two zones
 
-# Speech-to-text on CPU: 45% of a c6i.large at 20 rooms (sweep run A) = 2.25% a room.
-STT_SHARE_PER_ROOM = {"c6i.large": 0.0225, "c6i.xlarge": 0.01125, "c6i.2xlarge": 0.005625}
+# Speech-to-text on CPU: up to 46% of a c6i.large at 15 rooms (sweep run C; 45% at 20 in run A)
+# = 3% a room, the cautious figure. The GPU (g6.xlarge) was ~15 ms faster at p95 and no more
+# accurate (run B), so it is never chosen: CPU machines hold the tested 100 rooms for less.
+STT_SHARE_PER_ROOM = {"c6i.large": 0.03, "c6i.xlarge": 0.015, "c6i.2xlarge": 0.0075}
+GPU_PRICE = 0.805  # g6.xlarge, before an NVIDIA production licence
 # Database: 165 connections at 102 rooms (B3) = ~1.6 a room; Postgres' limit by size.
 DB_CONNECTIONS_PER_ROOM = 1.6
 DB_MAX_CONNECTIONS = {"db.t4g.small": 180, "db.t4g.medium": 400}
@@ -36,7 +39,7 @@ def _smallest(options: dict, fits) -> str:
     return next(k for k in options if fits(k))
 
 
-def plan(rooms: int, bots_per_machine: int = 3) -> Plan:
+def plan(rooms: int, bots_per_machine: int = 5) -> Plan:  # 5 per c6i.large: sweep run C
     if not 1 <= rooms <= MAX_ROOMS:
         raise ValueError(f"rooms must be 1 to {MAX_ROOMS}: beyond that nothing was measured")
     bots = math.ceil(rooms / bots_per_machine)
@@ -49,7 +52,7 @@ def plan(rooms: int, bots_per_machine: int = 3) -> Plan:
     return Plan(rooms, bots, stt, db, binding, round(cost, 4))
 
 
-def matrix(sizes=(1, 3, 5, 10, 20, 35, 50, 100), bots_per_machine: int = 3) -> list[dict]:
+def matrix(sizes=(1, 5, 10, 20, 26, 50, 100), bots_per_machine: int = 5) -> list[dict]:
     """The decision matrix: one row per size of study."""
     return [{**vars(p), "usd_per_month": round(p.usd_per_hour * HOURS_PER_MONTH, 2)}
             for p in (plan(n, bots_per_machine) for n in sizes)]

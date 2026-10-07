@@ -95,7 +95,9 @@ run "bot_size_and_packing_come_from_the_profile" {
   }
 }
 
-run "todays_bot_sizes_stay_the_default" {
+# Right-sized from the sweep (runs A and C, 2026-10-06): a bot uses ~225 MB and ~0.3 vCPU on
+# average (peaks to ~1.3); five per c6i.large kept every bot timing and the machine under 80%.
+run "production_bots_are_right_sized" {
   command = apply
 
   variables {
@@ -105,10 +107,11 @@ run "todays_bot_sizes_stay_the_default" {
 
   assert {
     condition = (
-      jsondecode(aws_ecs_task_definition.bot.container_definitions)[0].cpu == 512 &&
+      jsondecode(aws_ecs_task_definition.bot.container_definitions)[0].cpu == 384 &&
+      jsondecode(aws_ecs_task_definition.bot.container_definitions)[0].memoryReservation == 512 &&
       aws_launch_template.bots.instance_type == "c6i.large" &&
-      contains(local.runner_environment, { name = "BOTS_PER_INSTANCE", value = "3" })
+      contains(local.runner_environment, { name = "BOTS_PER_INSTANCE", value = "5" })
     )
-    error_message = "until the sweep says otherwise: 512 units, c6i.large, 3 per machine"
+    error_message = "384 CPU units and 512 MB per bot, 5 per c6i.large (sweep run C)"
   }
 }

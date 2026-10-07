@@ -5,7 +5,7 @@ path, 2026-10-06). Pure: no AWS.
 """
 import unittest
 
-from capacity_model import matrix, plan
+from capacity_model import GPU_PRICE, PRICE, matrix, plan
 
 
 class PlanTest(unittest.TestCase):
@@ -14,19 +14,19 @@ class PlanTest(unittest.TestCase):
         self.assertEqual((p.bot_machines, p.stt, p.db), (1, "c6i.large", "db.t4g.small"))
 
     def test_twenty_rooms_need_more_bots_and_nothing_bigger(self):
-        p = plan(20, bots_per_machine=3)
-        self.assertEqual((p.bot_machines, p.stt, p.db), (7, "c6i.large", "db.t4g.small"))
+        p = plan(20)  # five bots per c6i.large (sweep run C)
+        self.assertEqual((p.bot_machines, p.stt, p.db), (4, "c6i.large", "db.t4g.small"))
 
     def test_speech_moves_to_a_bigger_cpu_machine_past_its_measured_ceiling(self):
-        self.assertEqual(plan(35).stt, "c6i.large")   # 2.25% CPU a room, 80% ceiling: 35 rooms
-        self.assertEqual(plan(36).stt, "c6i.xlarge")
+        self.assertEqual(plan(26).stt, "c6i.large")   # 3% CPU a room (run C), 80% ceiling: 26 rooms
+        self.assertEqual(plan(27).stt, "c6i.xlarge")
 
     def test_the_database_grows_with_connections(self):
         self.assertEqual(plan(89).db, "db.t4g.small")   # ~1.6 connections a room, 80% of ~180
         self.assertEqual(plan(100).db, "db.t4g.medium")
 
     def test_it_names_what_binds(self):
-        self.assertEqual(plan(36).binding, "speech-to-text CPU")
+        self.assertEqual(plan(27).binding, "speech-to-text CPU")
         self.assertEqual(plan(100).binding, "database connections")
 
     def test_more_rooms_never_cost_less(self):
@@ -36,6 +36,14 @@ class PlanTest(unittest.TestCase):
     def test_refuses_what_was_never_measured(self):
         with self.assertRaises(ValueError):
             plan(101)  # tested to 100 rooms (spike, 2026-10-05)
+
+
+class GpuTest(unittest.TestCase):
+    def test_the_gpu_is_never_the_cheaper_way_to_hear_100_rooms(self):
+        # Runs A and B (2026-10-06): the GPU was ~15 ms faster at p95 and no more accurate;
+        # a CPU machine holds the tested 100 rooms for less than the GPU (before its licence).
+        self.assertEqual(plan(100).stt, "c6i.2xlarge")
+        self.assertLess(PRICE["c6i.2xlarge"], GPU_PRICE)
 
 
 class MatrixTest(unittest.TestCase):

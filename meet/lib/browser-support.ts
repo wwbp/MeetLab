@@ -1,4 +1,4 @@
-export type BrowserSupport = {
+type BrowserSupport = {
   webRTC: boolean;
   mediaDevices: boolean;
   webSocket: boolean;

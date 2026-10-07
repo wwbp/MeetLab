@@ -1,6 +1,6 @@
 import { type NextRequest } from 'next/server';
 
-export const dynamic = 'force-dynamic';
+const dynamic = 'force-dynamic';
 
 export async function proxyToSqlAdmin(request: NextRequest): Promise<Response> {
   const botRunnerBase = (process.env.BOT_RUNNER_URL || 'http://localhost:7860').replace(/\/$/, '');

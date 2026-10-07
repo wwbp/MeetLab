@@ -1,4 +1,4 @@
-export type ServerConfig = {
+type ServerConfig = {
   livekitUrl?: string;
   livekitInternalUrl?: string;
   livekitApiKey?: string;

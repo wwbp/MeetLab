@@ -239,6 +239,8 @@ jobs:
           if [ -n "$url" ]; then export LIVEKIT_URL="$url"; else secret LIVEKIT_URL LIVEKIT_URL; fi
           [ "$(jq -r .video <<<"$lk")" = true ] || export NO_VIDEO=1
           # Chromium for turn_relay: a participant's browser, relay-only, through our TURN.
-          timeout 600 uvx --with playwright playwright install --with-deps chromium  # a hung apt mirror fails in 10 min, not at the job limit
+          # Browser only, no --with-deps: the runner image has its libraries, and apt hung on
+          # Azure's Ubuntu mirror for the whole job twice on 2026-10-07. A stall fails in 10 min.
+          timeout 600 uvx --with playwright playwright install chromium
           uv run --no-project --with livekit --with livekit-api --with boto3 --with playwright \
             python agent-runner/tests/acceptance_staging.py

@@ -9,3 +9,6 @@ __pycache__/
 .ruff_cache/
 dist/
 build/
+.DS_Store
+soak-results-*.json
+.git

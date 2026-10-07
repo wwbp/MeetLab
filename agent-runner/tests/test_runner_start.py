@@ -719,14 +719,14 @@ class RunnerStartApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertIn("stt_model", response.json().get("error", ""))
 
-    def test_config_put_local_whisper_stt_model_accepted(self):
-        # whisper-* models run local faster-whisper (Experiment 5)
+    def test_config_put_local_whisper_stt_model_refused(self):
+        # Local Whisper was never v2's: production runs Parakeet on our server (CPU or GPU)
+        # and dev mirrors it (2026-10-06), so a whisper-* model is no longer offered.
         response = self.client.put(
             "/config",
             json={"scope": "test-runner-scope", "stt_model": "whisper-turbo"},
         )
-        self.assertEqual(response.status_code, 200, response.text)
-        self.assertEqual(response.json().get("stt_model"), "whisper-turbo")
+        self.assertEqual(response.status_code, 400, response.text)
 
     def test_config_put_parakeet_stt_model_accepted(self):
         # parakeet-* models run on the Parakeet NIM (Experiments 6-7)

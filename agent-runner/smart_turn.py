@@ -29,7 +29,7 @@ def effective_turn_detection(turn_detection: str, stt_model: str) -> str:
     """The rule a room really gets: smart turn needs a per-speaker segmenting recogniser
     (Parakeet, Whisper); Deepgram and OpenAI segment for themselves, so those rooms end
     turns on silence (the bot says so in its log)."""
-    segmented = stt_model.startswith(("parakeet-", "whisper-"))
+    segmented = stt_model.startswith("parakeet-")
     return "smart_turn" if turn_detection == "smart_turn" and segmented else "silence"
 
 

@@ -777,8 +777,6 @@ async def update_config(request: Request, _=Depends(verify_api_key)):
     if "stt_model" in body:
         _valid_stt = {
             "nova-3-general", "gpt-realtime-whisper", "gpt-4o-transcribe", "gpt-4o-mini-transcribe",
-            # local faster-whisper (whisper-<model_size>); CPU-only — see Experiment 5
-            "whisper-turbo", "whisper-base", "whisper-small",
             # Parakeet NIM (self-hosted GPU, NEMOTRON_STT_URL) — see Experiments 6-7.
             # parakeet-unified-en-0.6b is NVIDIA's offline+streaming unified English model.
             "parakeet-tdt-0.6b-v2",

@@ -14,7 +14,7 @@ BENCHMARK_PARALLEL ?= 3
 
 MSG ?= migration
 
-.PHONY: test-config-parity up down start stop logs migrate migration test test-unit test-integration test-bot-longevity test-multi-speaker test-multi-speaker-audio test-session-lifecycle setup-livekit-cloud revert-livekit-local test-livekit-tooling test-infra test-stt-cpu scan scan-agent-runner scan-meet benchmark benchmark-audio benchmark-audio-long benchmark-audio-paused benchmark-full benchmark-exp2 benchmark-report simulate soak soak-sanity bench-stt-concurrency bench-idle-room
+.PHONY: test-config-parity up down start stop logs migrate migration test test-unit test-integration test-bot-longevity test-multi-speaker test-multi-speaker-audio test-session-lifecycle setup-livekit-cloud revert-livekit-local test-livekit-tooling test-infra test-stt-cpu test-image scan scan-agent-runner scan-meet benchmark benchmark-audio benchmark-audio-long benchmark-audio-paused benchmark-full benchmark-exp2 benchmark-report simulate soak soak-sanity bench-stt-concurrency bench-idle-room
 
 up:
 	$(COMPOSE) up --build -d
@@ -37,10 +37,10 @@ docs-build:
 	uv run --no-project --with-requirements requirements-docs.txt mkdocs build --strict
 
 migrate:
-	$(COMPOSE) exec -T agent-runner uv run alembic upgrade head
+	$(COMPOSE) exec -T agent-runner alembic upgrade head
 
 migration:
-	$(COMPOSE) exec -T agent-runner uv run alembic revision --autogenerate -m "$(MSG)"
+	$(COMPOSE) exec -T agent-runner alembic revision --autogenerate -m "$(MSG)"
 
 logs:
 	$(COMPOSE) logs -f --tail=$(LOG_TAIL) $(SERVICE)
@@ -49,8 +49,8 @@ test: test-unit test-integration
 
 test-unit:
 	$(COMPOSE) up -d transport-server agent-runner meet
-	$(COMPOSE) exec -T agent-runner uv run alembic upgrade head
-	$(COMPOSE) exec -T agent-runner uv run python -m unittest discover -s tests -p "test_*.py" -v
+	$(COMPOSE) exec -T agent-runner alembic upgrade head
+	$(COMPOSE) exec -T agent-runner python -m unittest discover -s tests -p "test_*.py" -v
 	@# Tests that call the live runner start real bot containers in rooms nobody joins;
 	@# a bot alone never leaves yet (design iteration 4, should_leave). Clean them up.
 	-docker rm -f $$(docker ps -aq --filter label=meetlab.session) 2>/dev/null
@@ -61,6 +61,20 @@ test-unit:
 # services' own tests can't see each other, so this runs on the host from the repo root.
 test-config-parity:
 	python3 agent-runner/tests/config_parity_check.py
+
+# The bot/runner image (agent-runner): within budget, and every runtime entry point imports inside
+# it (a cut that removes something used fails here). Budget: the files in the image (du), the same
+# on any Docker. Before the deep cut (2026-10-06): 1,879 MB (978 MB compressed in ECR): ffmpeg, a
+# second uv sync, local Whisper; after: 779 MB (262 MB compressed).
+IMAGE_BUDGET_MB ?= 850
+test-image:
+	docker build --platform linux/amd64 -q -t meetlab-agent-runner:budget agent-runner >/dev/null
+	@mb=$$(docker run --rm --platform linux/amd64 meetlab-agent-runner:budget du -sxm / | cut -f1); \
+		echo "agent-runner image: $$mb MB of files (budget $(IMAGE_BUDGET_MB) MB)"; [ $$mb -le $(IMAGE_BUDGET_MB) ]
+	docker run --rm --platform linux/amd64 -e DATABASE_URL=postgresql+asyncpg://x:x@localhost/x \
+		-e LIVEKIT_URL=ws://localhost:7880 -e LIVEKIT_API_KEY=x -e LIVEKIT_API_SECRET=x \
+		meetlab-agent-runner:budget python -c \
+		"import runner, bot, bot_task, migration_check, soundfile; import tests.load_run; print('entry points import')"
 
 # Speech-to-text on CPU (stt-cpu/): the server against recorded fixture clips. Downloads the
 # model once (~650 MB) into the Hugging Face cache; no AWS, no Docker.
@@ -86,26 +100,26 @@ test-integration:
 
 test-multi-speaker:
 	$(COMPOSE) up -d transport-server agent-runner
-	$(COMPOSE) exec -T agent-runner uv run alembic upgrade head
+	$(COMPOSE) exec -T agent-runner alembic upgrade head
 	$(COMPOSE) exec -T agent-runner \
 		env RUN_MULTI_SPEAKER=1 \
-		uv run python -m unittest -v tests.test_multi_speaker_e2e
+		python -m unittest -v tests.test_multi_speaker_e2e
 
 test-multi-speaker-audio:
 	$(COMPOSE) up -d transport-server agent-runner
-	$(COMPOSE) exec -T agent-runner uv run alembic upgrade head
+	$(COMPOSE) exec -T agent-runner alembic upgrade head
 	$(COMPOSE) exec -T agent-runner \
 		env RUN_MULTI_SPEAKER=1 RUN_MULTI_SPEAKER_AUDIO=1 \
-		uv run python -m unittest -v tests.test_multi_speaker_e2e.TestMultiSpeakerE2E.test_07_audio_two_speakers
+		python -m unittest -v tests.test_multi_speaker_e2e.TestMultiSpeakerE2E.test_07_audio_two_speakers
 
 # Session-end / DB-consistency: cancellation-safe terminal write, stale-conversation
 # reconciler, and the end-to-end all-users-leave path. See Part E / docs.
 test-session-lifecycle:
 	$(COMPOSE) up -d transport-server agent-runner
-	$(COMPOSE) exec -T agent-runner uv run alembic upgrade head
+	$(COMPOSE) exec -T agent-runner alembic upgrade head
 	$(COMPOSE) exec -T agent-runner \
 		env RUN_SESSION_LIFECYCLE_TEST=1 \
-		uv run python -m unittest -v tests.test_session_lifecycle
+		python -m unittest -v tests.test_session_lifecycle
 
 test-bot-longevity:
 	$(COMPOSE) up -d transport-server agent-runner meet
@@ -115,13 +129,13 @@ test-bot-longevity:
 		BOT_LONGEVITY_MAX_SECONDS=$(BOT_LONGEVITY_MAX_SECONDS) \
 		BOT_LONGEVITY_POLL_SECONDS=$(BOT_LONGEVITY_POLL_SECONDS) \
 		BOT_LONGEVITY_MESSAGE_SECONDS=$(BOT_LONGEVITY_MESSAGE_SECONDS) \
-		uv run python -m unittest -v tests.test_bot_longevity_minimal
+		python -m unittest -v tests.test_bot_longevity_minimal
 
 scan: scan-agent-runner scan-meet
 
 scan-agent-runner:
 	$(COMPOSE) up -d agent-runner
-	$(COMPOSE) exec -T agent-runner uv run pip-audit
+	cd agent-runner && uv export --no-dev --format requirements-txt --no-hashes | uvx pip-audit -r /dev/stdin
 
 scan-meet:
 	$(COMPOSE) up -d meet
@@ -141,7 +155,7 @@ test-livekit-tooling:
 
 benchmark-audio:
 	$(COMPOSE) up -d agent-runner
-	$(COMPOSE) exec -T agent-runner uv run python tests/generate_benchmark_audio.py
+	$(COMPOSE) exec -T agent-runner python tests/generate_benchmark_audio.py
 
 benchmark-audio-long: benchmark-audio
 
@@ -154,27 +168,27 @@ benchmark-audio-paused:
 	$(COMPOSE) up -d agent-runner
 	$(COMPOSE) exec -T agent-runner \
 		env PAUSE_MS=$(PAUSE_MS) \
-		uv run python tests/generate_paused_speech_audio.py
+		python tests/generate_paused_speech_audio.py
 
 benchmark:
 	$(COMPOSE) up -d transport-server agent-runner
-	$(COMPOSE) exec -T agent-runner uv run alembic upgrade head
+	$(COMPOSE) exec -T agent-runner alembic upgrade head
 	$(COMPOSE) exec -T agent-runner \
 		env RUN_BENCHMARK=1 \
 		BENCHMARK_SAMPLES=$(BENCHMARK_SAMPLES) \
 		BENCHMARK_TIMEOUT=$(BENCHMARK_TIMEOUT) \
-		uv run python -m unittest -v tests.test_benchmark
+		python -m unittest -v tests.test_benchmark
 
 benchmark-full:
 	$(COMPOSE) up -d transport-server agent-runner
-	$(COMPOSE) exec -T agent-runner uv run alembic upgrade head
+	$(COMPOSE) exec -T agent-runner alembic upgrade head
 	$(COMPOSE) exec -T agent-runner \
 		env BENCHMARK_SAMPLES=$(BENCHMARK_SAMPLES) \
 		BENCHMARK_TIMEOUT=$(BENCHMARK_TIMEOUT) \
 		BENCHMARK_CONFIGS="$(BENCHMARK_CONFIGS)" \
 		BENCHMARK_WAV="$(BENCHMARK_WAV)" \
 		BENCHMARK_PARALLEL=$(BENCHMARK_PARALLEL) \
-		uv run python tests/run_benchmark_matrix.py
+		python tests/run_benchmark_matrix.py
 
 # Meeting simulation: reproduce STT/VAD failure modes locally and read the
 # diagnostics. SCENARIO=noise|noise-bed|overlap|inaudible|echo (default noise).
@@ -185,16 +199,16 @@ SCENARIO ?= noise
 # theirs (diagnosis F11)? Real speech recognition; SPEAKERS=a is the one-speaker control.
 sim-attribution:
 	$(COMPOSE) up -d --wait transport-server agent-runner
-	$(COMPOSE) exec -T -e SPEAKERS=$(or $(SPEAKERS),abc) agent-runner uv run python tests/sim_attribution.py
+	$(COMPOSE) exec -T -e SPEAKERS=$(or $(SPEAKERS),abc) agent-runner python tests/sim_attribution.py
 
 simulate:
 	$(COMPOSE) up -d --wait transport-server agent-runner
-	$(COMPOSE) exec -T agent-runner uv run alembic upgrade head
+	$(COMPOSE) exec -T agent-runner alembic upgrade head
 	$(COMPOSE) exec -T agent-runner \
 		env SCENARIO=$(SCENARIO) \
 		SNR_DB=$(SNR_DB) NOISE=$(NOISE) DURATION=$(DURATION) SPEAKERS=$(SPEAKERS) \
 		STT_MODEL=$(STT_MODEL) ENDPOINTING_MS=$(ENDPOINTING_MS) \
-		uv run python tests/simulate_meeting.py
+		python tests/simulate_meeting.py
 
 # Multi-room soak / load test: ROOMS rooms x USERS_PER_ROOM users x 1 bot conversing
 # for DURATION_MIN minutes, all concurrent. Reports aggregate latency, backlog, and a
@@ -216,11 +230,11 @@ soak: MOCK ?= 1
 soak:
 	BOT_TOKEN_TTL_MINUTES=30 BOT_MOCK_TTS=$(MOCK) \
 		$(COMPOSE) up -d --wait transport-server agent-runner
-	$(COMPOSE) exec -T agent-runner uv run alembic upgrade head
+	$(COMPOSE) exec -T agent-runner alembic upgrade head
 	$(COMPOSE) exec -T agent-runner \
 		env SOAK_MODE=$(SOAK_MODE) ROOMS=$(ROOMS) USERS_PER_ROOM=$(USERS_PER_ROOM) DURATION_MIN=$(DURATION_MIN) \
 		STT_MODEL=$(STT_MODEL) ENDPOINTING_MS=$(ENDPOINTING_MS) \
-		uv run python tests/soak_meeting.py
+		python tests/soak_meeting.py
 
 # Sanity check FIRST: a small, strict run — every room's bot must reply and every
 # session must finalize. Defaults to REAL (cheap) models so it validates the real
@@ -230,12 +244,12 @@ soak-sanity: MOCK ?= 0
 soak-sanity:
 	BOT_TOKEN_TTL_MINUTES=30 BOT_MOCK_TTS=$(MOCK) \
 		$(COMPOSE) up -d --wait transport-server agent-runner
-	$(COMPOSE) exec -T agent-runner uv run alembic upgrade head
+	$(COMPOSE) exec -T agent-runner alembic upgrade head
 	$(COMPOSE) exec -T agent-runner \
 		env SOAK_MODE=sanity ROOMS=$(or $(ROOMS_SANITY),2) USERS_PER_ROOM=2 \
 		DURATION_MIN=$(or $(DURATION_SANITY),2) \
 		STT_MODEL=$(STT_MODEL) ENDPOINTING_MS=$(ENDPOINTING_MS) \
-		uv run python tests/soak_meeting.py
+		python tests/soak_meeting.py
 
 # Direct STT-server concurrency benchmark: fire N concurrent transcriptions straight at
 # the STT server (no LiveKit/bot) and measure latency vs concurrency. Point STT_URL at a
@@ -247,7 +261,7 @@ bench-stt-concurrency:
 	$(COMPOSE) exec -T agent-runner \
 		env STT_URL="$(STT_URL)" \
 		STT_MODEL="$(STT_MODEL)" CONCURRENCIES="$(CONCURRENCIES)" REQUESTS_PER="$(REQUESTS_PER)" \
-		uv run python tests/bench_stt_concurrency.py
+		python tests/bench_stt_concurrency.py
 
 # Idle-room longevity: start a bot in a room, let NOBODY join, and measure how long the
 # room + bot stay up (expected ceiling ≈ BOT_TOKEN_TTL_MINUTES) and whether the session
@@ -256,21 +270,21 @@ bench-stt-concurrency:
 bench-idle-room:
 	BOT_TOKEN_TTL_MINUTES=$(or $(BOT_TOKEN_TTL_MINUTES),15) \
 		$(COMPOSE) up -d --wait transport-server agent-runner
-	$(COMPOSE) exec -T agent-runner uv run alembic upgrade head
+	$(COMPOSE) exec -T agent-runner alembic upgrade head
 	$(COMPOSE) exec -T agent-runner \
 		env MAX_SECONDS="$(MAX_SECONDS)" POLL_SECONDS="$(POLL_SECONDS)" \
-		uv run python tests/bench_idle_room.py
+		python tests/bench_idle_room.py
 
 benchmark-exp2:
 	$(COMPOSE) up -d transport-server agent-runner
-	$(COMPOSE) exec -T agent-runner uv run alembic upgrade head
+	$(COMPOSE) exec -T agent-runner alembic upgrade head
 	$(COMPOSE) exec -T agent-runner \
 		env BENCHMARK_SAMPLES=$(BENCHMARK_SAMPLES) \
 		BENCHMARK_TIMEOUT=$(BENCHMARK_TIMEOUT) \
 		BENCHMARK_WAV="$(BENCHMARK_WAV)" \
 		BENCHMARK_CONFIGS="nova-3-general / gpt-5.4-nano / elevenlabs [sentence],nova-3-general / gpt-5.4-nano / elevenlabs [sentence][ep=100]" \
-		uv run python tests/run_benchmark_matrix.py
+		python tests/run_benchmark_matrix.py
 
 benchmark-report:
 	$(COMPOSE) up -d agent-runner
-	$(COMPOSE) exec -T agent-runner uv run python tests/run_benchmark_matrix.py report
+	$(COMPOSE) exec -T agent-runner python tests/run_benchmark_matrix.py report

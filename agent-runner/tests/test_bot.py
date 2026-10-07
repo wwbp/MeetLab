@@ -27,7 +27,6 @@ from bot import (
 from pipecat.processors.audio.vad_processor import VADProcessor
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.openai.stt import OpenAIRealtimeSTTService
-from pipecat.services.whisper.stt import WhisperSTTService
 
 
 @dataclass
@@ -113,63 +112,10 @@ class TestBuildStt(unittest.TestCase):
         self.assertIsInstance(svc, DeepgramSTTService)
 
 
-class TestBuildSttWhisperChain(unittest.TestCase):
-    """whisper-* models build a local VADProcessor → WhisperSTTService chain.
-
-    WhisperSTTService is a SegmentedSTTService: it only transcribes after
-    VADUserStarted/StoppedSpeakingFrames tell it where the speech segment is.
-    Per-participant audio routed by MultiSpeakerSTT never passes through the
-    transport's VAD, so each chain must carry its own VADProcessor to generate
-    those frames. Both builders return (head, tail) = (VADProcessor, Whisper).
-
-    WhisperSTTService._load is patched out — the real constructor eagerly
-    downloads the model (~1.6 GB for turbo), which unit tests must not do.
-    """
-
-    def setUp(self):
-        patcher = patch.object(WhisperSTTService, "_load", autospec=True)
-        self.addCleanup(patcher.stop)
-        patcher.start()
-
-    def test_whisper_returns_vad_to_stt_chain(self):
-        cfg = _FakeBotConfig(stt_model="whisper-turbo")
-        head, tail = _build_stt(cfg, "openai-key", None)
-        self.assertIsInstance(head, VADProcessor)
-        self.assertIsInstance(tail, WhisperSTTService)
-
-    def test_whisper_multi_speaker_chain_is_linked(self):
-        cfg = _FakeBotConfig(stt_model="whisper-turbo")
-        head, tail = _build_stt_for_multi_speaker(cfg, "openai-key", None)
-        self.assertIsInstance(head, VADProcessor)
-        self.assertIsInstance(tail, WhisperSTTService)
-        self.assertIs(head._next, tail, "audio must flow head (VAD) → tail (Whisper)")
-
-    def test_whisper_model_prefix_stripped(self):
-        cfg = _FakeBotConfig(stt_model="whisper-turbo")
-        _, tail = _build_stt(cfg, "openai-key", None)
-        self.assertEqual(tail._settings.model, "turbo")
-
-    def test_whisper_does_not_require_deepgram_key(self):
-        cfg = _FakeBotConfig(stt_model="whisper-base")
-        head, tail = _build_stt(cfg, "openai-key", None)  # must not raise
-        self.assertIsInstance(head, VADProcessor)
-        self.assertEqual(tail._settings.model, "base")
-
-    def test_whisper_endpointing_default_200ms(self):
-        cfg = _FakeBotConfig(stt_model="whisper-turbo")
-        head, _ = _build_stt(cfg, "openai-key", None)
-        self.assertAlmostEqual(head._vad_controller._vad_analyzer.params.stop_secs, 0.2)
-
-    def test_whisper_endpointing_respects_config(self):
-        cfg = _FakeBotConfig(stt_model="whisper-turbo", stt_endpointing_ms=100)
-        head, _ = _build_stt(cfg, "openai-key", None)
-        self.assertAlmostEqual(head._vad_controller._vad_analyzer.params.stop_secs, 0.1)
-
-
 class TestBuildSttParakeetChain(unittest.TestCase):
     """parakeet-* models build a VADProcessor → NemotronHTTPSTTService chain.
 
-    Same segmented-chain shape as the whisper path; the tail POSTs each VAD-cut
+    A segmented chain (VAD → STT); the tail POSTs each VAD-cut
     segment (WAV bytes) to the Parakeet NIM's /v1/audio/transcriptions endpoint.
     Experiment log: docs/latency-experiments.md
     """
@@ -340,8 +286,8 @@ class TestConfigLoaderDefaults(unittest.TestCase):
 
 
 class TestSTTModelOverride(unittest.TestCase):
-    """STT_MODEL_OVERRIDE forces the bot's STT model (local dev → in-process whisper-base,
-    since there's no local GPU for the Parakeet NIM). Prod leaves it unset. Applied to the
+    """STT_MODEL_OVERRIDE forces the bot's STT model (the stack sets Parakeet when a speech
+    server of ours is on, Deepgram otherwise; dev mirrors it). Applied to the
     running bot only — never to the /config store/API, which reflects what's persisted."""
 
     def _cfg(self, stt_model="parakeet-tdt-0.6b-v2"):
@@ -359,13 +305,13 @@ class TestSTTModelOverride(unittest.TestCase):
             self.assertIs(_apply_stt_model_override(cfg), cfg)
 
     def test_set_value_overrides_stt_model_stripped(self):
-        with patch.dict(os.environ, {"STT_MODEL_OVERRIDE": " whisper-base "}):
+        with patch.dict(os.environ, {"STT_MODEL_OVERRIDE": " nova-3-general "}):
             out = _apply_stt_model_override(self._cfg("parakeet-tdt-0.6b-v2"))
-            self.assertEqual(out.stt_model, "whisper-base")
+            self.assertEqual(out.stt_model, "nova-3-general")
 
     def test_override_matching_current_is_noop(self):
-        with patch.dict(os.environ, {"STT_MODEL_OVERRIDE": "whisper-base"}):
-            cfg = self._cfg("whisper-base")
+        with patch.dict(os.environ, {"STT_MODEL_OVERRIDE": "nova-3-general"}):
+            cfg = self._cfg("nova-3-general")
             self.assertIs(_apply_stt_model_override(cfg), cfg)
 
 

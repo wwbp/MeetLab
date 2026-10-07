@@ -59,7 +59,7 @@ class Scratch:
 
     def alembic(self, revision):
         env = {**os.environ, "DATABASE_URL": self.url.replace("postgresql://", "postgresql+asyncpg://")}
-        subprocess.run(["uv", "run", "--no-sync", "alembic", "upgrade", revision], cwd=AGENT_RUNNER,
+        subprocess.run(["alembic", "upgrade", revision], cwd=AGENT_RUNNER,
                        env=env, check=True, capture_output=True)
 
 

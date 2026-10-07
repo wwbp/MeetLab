@@ -13,7 +13,7 @@ import { MicrophoneSettings } from './MicrophoneSettings';
 /**
  * @alpha
  */
-export interface SettingsMenuProps extends React.HTMLAttributes<HTMLDivElement> {}
+interface SettingsMenuProps extends React.HTMLAttributes<HTMLDivElement> {}
 
 /**
  * @alpha

@@ -21,7 +21,9 @@ export const config = {
     '/events',
     '/meetings',
     '/start-links',
-    '/db/:path*',
+    // The database view (SQLAdmin on the runner, mounted at /api/db): console only.
+    '/api/db',
+    '/api/db/:path*',
     '/api/concierge/:path*',
     // Console-only meeting data: listing, transcripts, and the audio/recording
     // download proxies. Only the console calls these, and it carries a session

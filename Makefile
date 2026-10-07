@@ -56,6 +56,7 @@ test-unit:
 	-docker rm -f $$(docker ps -aq --filter label=meetlab.session) 2>/dev/null
 	$(COMPOSE) exec -T meet pnpm test
 	$(COMPOSE) exec -T meet pnpm lint
+	$(COMPOSE) exec -T meet pnpm knip # no unused files, exports or dependencies (knip)
 
 # Every Bot Config field is in the database, the runner's API and the console form. The
 # services' own tests can't see each other, so this runs on the host from the repo root.

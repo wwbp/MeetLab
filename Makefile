@@ -17,7 +17,7 @@ MSG ?= migration
 .PHONY: test-config-parity up down start stop logs migrate migration test test-unit test-integration test-bot-longevity test-multi-speaker test-multi-speaker-audio test-session-lifecycle setup-livekit-cloud revert-livekit-local test-livekit-tooling test-infra test-stt-cpu test-image scan scan-agent-runner scan-meet benchmark benchmark-audio benchmark-audio-long benchmark-audio-paused benchmark-full benchmark-exp2 benchmark-report simulate soak soak-sanity bench-stt-concurrency bench-idle-room
 
 up:
-	$(COMPOSE) up --build -d
+	$(COMPOSE) up --build -d --renew-anon-volumes
 
 down:
 	@# Bot containers (BOT_DISPATCHER=docker) are not part of the compose project.
@@ -54,6 +54,8 @@ test-unit:
 	@# Tests that call the live runner start real bot containers in rooms nobody joins;
 	@# a bot alone never leaves yet (design iteration 4, should_leave). Clean them up.
 	-docker rm -f $$(docker ps -aq --filter label=meetlab.session) 2>/dev/null
+	@$(COMPOSE) exec -T meet sh -c 'cmp -s pnpm-lock.yaml node_modules/.pnpm/lock.yaml' \
+	  || { echo "meet's node_modules is older than pnpm-lock.yaml: run make up"; exit 1; }
 	$(COMPOSE) exec -T meet pnpm test
 	$(COMPOSE) exec -T meet pnpm lint
 

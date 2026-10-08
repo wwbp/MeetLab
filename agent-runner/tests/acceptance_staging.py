@@ -64,6 +64,8 @@ NAME = f"meetlab-v2-{ENV}"  # every resource's prefix (infra/v2/stack main.tf)
 LOGS = f"/meetlab-v2/{ENV}"
 CLUSTER = os.getenv("ECS_CLUSTER", NAME)
 MEET = os.getenv("MEET_URL", {"staging": "https://meet-staging.wwbp.org", "prod": "https://meet-v2.wwbp.org"}[ENV])
+# Bot machines kept warm between studies: bot_pool_min in infra/v2/stack/profiles.tf.
+POOL_BASELINE = {"staging": 0, "prod": 1}[ENV]
 REGION = "us-east-1"
 ecs = boto3.client("ecs", region_name=REGION)
 logs = boto3.client("logs", region_name=REGION)
@@ -458,7 +460,7 @@ def _capacity(method="GET", body=None):
 
 async def scenario_prewarm():
     """Prepare for study from the console: a warm bot machine comes up and stays;
-    Stop preparing drops the pool back to 0 (AWS would also do it at the end time)."""
+    Stop preparing drops the pool back to its baseline (AWS would also do it at the end time)."""
     from datetime import datetime, timezone
 
     _post("/api/console/login", {"password": os.environ["CONSOLE_PASSWORD"]})
@@ -473,7 +475,7 @@ async def scenario_prewarm():
         waited = await _until(lambda: _capacity()["ready_instances"] >= 1, 300, "a warm bot machine")
     finally:
         cold = _capacity("DELETE")  # never leave a test's pool warm
-    if (cold["min_instances"], cold["warm_until"]) != (0, None):
+    if (cold["min_instances"], cold["warm_until"]) != (POOL_BASELINE, None):
         raise Fail(f"Stop preparing left the pool warm: {cold}")
     return f"a bot machine ready {waited:.0f} s after Prepare; Stop preparing reset the pool"
 

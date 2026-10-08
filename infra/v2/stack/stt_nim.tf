@@ -261,5 +261,5 @@ resource "aws_ecs_service" "stt_nim" {
     container_name   = "stt-nim"
     container_port   = 9000
   }
-  depends_on = [aws_ecs_cluster_capacity_providers.this, aws_lb_listener.stt_nim]
+  depends_on = [aws_ecs_cluster_capacity_providers.this, aws_lb_listener.stt_nim, aws_iam_role_policy.execution_secrets]
 }

@@ -254,7 +254,7 @@ resource "aws_ecs_service" "livekit" {
     container_name   = "livekit"
     container_port   = 5349
   }
-  depends_on = [aws_ecs_cluster_capacity_providers.this, aws_lb_listener_rule.livekit, aws_lb_listener.turn]
+  depends_on = [aws_ecs_cluster_capacity_providers.this, aws_lb_listener_rule.livekit, aws_lb_listener.turn, aws_iam_role_policy.execution_secrets]
 }
 
 resource "aws_security_group" "turn_lb" {

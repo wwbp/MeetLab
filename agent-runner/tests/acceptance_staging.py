@@ -57,8 +57,13 @@ from datetime import timedelta
 import boto3
 from livekit import api, rtc
 
-CLUSTER = os.getenv("ECS_CLUSTER", "meetlab-v2-staging")
-MEET = os.getenv("MEET_URL", "https://meet-staging.wwbp.org")
+# One environment per run: MEETLAB_ENV=staging (default) or prod. Production keeps the
+# -v2 hostname until cutover (meet.wwbp.org is v1's); an unknown name fails at once.
+ENV = os.getenv("MEETLAB_ENV", "staging")
+NAME = f"meetlab-v2-{ENV}"  # every resource's prefix (infra/v2/stack main.tf)
+LOGS = f"/meetlab-v2/{ENV}"
+CLUSTER = os.getenv("ECS_CLUSTER", NAME)
+MEET = os.getenv("MEET_URL", {"staging": "https://meet-staging.wwbp.org", "prod": "https://meet-v2.wwbp.org"}[ENV])
 REGION = "us-east-1"
 ecs = boto3.client("ecs", region_name=REGION)
 logs = boto3.client("logs", region_name=REGION)
@@ -183,7 +188,7 @@ async def scenario_stoptask():
         if code != 0:
             raise Fail(f"exit code {code}, expected 0 (graceful)")
         await _until(lambda: not m.bot_present(), 30, "bot gone from the room")
-        await _until(lambda: any("ended (completed)" in l for l in _log_lines("/meetlab-v2/staging/bot", m.session, m.started)),
+        await _until(lambda: any("ended (completed)" in l for l in _log_lines(f"{LOGS}/bot", m.session, m.started)),
                      60, "bot logged ended (completed)")
         return "exit 0, left the room, recorded completed"
 
@@ -230,15 +235,15 @@ async def scenario_kill9():
         code = _describe(m.task)["containers"][0].get("exitCode")
         if code != 137:
             raise Fail(f"exit code {code}, expected 137 (SIGKILL): the kill did not land")
-        if any("ended (" in l for l in _log_lines("/meetlab-v2/staging/bot", m.session, m.started)):
+        if any("ended (" in l for l in _log_lines(f"{LOGS}/bot", m.session, m.started)):
             raise Fail("the bot recorded its own end: this was not a silent death")
 
         def failed_by_heartbeat():
             m.require_participant()
-            return any("heartbeat: failed" in l for l in _log_lines("/meetlab-v2/staging/agent-runner", m.session, killed_at))
+            return any("heartbeat: failed" in l for l in _log_lines(f"{LOGS}/agent-runner", m.session, killed_at))
         await _until(failed_by_heartbeat, 90, "session failed by the heartbeat check")
         after = time.time() - killed_at
-        if any("could not stop the bot" in l for l in _log_lines("/meetlab-v2/staging/agent-runner", m.session, killed_at)):
+        if any("could not stop the bot" in l for l in _log_lines(f"{LOGS}/agent-runner", m.session, killed_at)):
             raise Fail("the reconciler failed the session but could not stop its bot (a hung bot would keep running)")
         if after > 60:
             raise Fail(f"failed by heartbeat only {after:.0f}s after the kill (limit 60 s)")
@@ -253,7 +258,7 @@ async def scenario_kill9():
         rejoined = time.time() - killed_at
         # CloudWatch delivers a log line seconds after it's written (2026-10-06: the rejoin was
         # logged, but read the moment the new bot appeared): wait for it, as below.
-        rejoin_line = lambda: next((l for l in _log_lines("/meetlab-v2/staging/agent-runner", m.session, killed_at)  # noqa: E731
+        rejoin_line = lambda: next((l for l in _log_lines(f"{LOGS}/agent-runner", m.session, killed_at)  # noqa: E731
                                     if "resumes it" in l), None)
         try:
             await _until(rejoin_line, 60, "the runner's log of the rejoin")
@@ -263,7 +268,7 @@ async def scenario_kill9():
         resumed = line.split("session ")[-1].split()[0]
         # CloudWatch delivers a log line seconds after it's written: wait for it (2026-10-05:
         # the line was there, "with 2 turns", but read too early).
-        load_line = lambda: next((l for l in _log_lines("/meetlab-v2/staging/bot", resumed, killed_at) if "turns (" in l), "")  # noqa: E731
+        load_line = lambda: next((l for l in _log_lines(f"{LOGS}/bot", resumed, killed_at) if "turns (" in l), "")  # noqa: E731
         await _until(load_line, 60, "the new bot's log of the conversation it loaded")
         loaded = load_line()
         turns = int(loaded.split(" with ")[1].split()[0]) if " with " in loaded else 0
@@ -291,7 +296,7 @@ async def scenario_stop_early():
         return "Stop before join: the bot never joined, and its task is stopped"
 
 
-MEDIA_BUCKET = os.getenv("MEDIA_BUCKET", "meetlab-v2-staging-media-848180123498")
+MEDIA_BUCKET = os.getenv("MEDIA_BUCKET", f"{NAME}-media-848180123498")
 
 
 async def _speak(room: rtc.Room, seconds: float):
@@ -356,7 +361,7 @@ SPEECH = os.path.join(os.path.dirname(__file__), "fixtures", "benchmark_prompt.w
 
 def _service_on(name):
     """A GPU service runs only while switched on (infra/v2/stack: stt_nim.tf, models.tf)."""
-    svc = ecs.describe_services(cluster=CLUSTER, services=[f"meetlab-v2-staging-{name}"])["services"]
+    svc = ecs.describe_services(cluster=CLUSTER, services=[f"{NAME}-{name}"])["services"]
     return bool(svc) and svc[0]["status"] == "ACTIVE" and svc[0]["desiredCount"] > 0
 
 
@@ -384,7 +389,7 @@ def still_deploying(services: list[dict]) -> list[str]:
     for svc in services:
         if svc["status"] != "ACTIVE" or svc["desiredCount"] == 0:
             continue
-        name = svc["serviceName"].removeprefix("meetlab-v2-staging-")
+        name = svc["serviceName"].removeprefix(f"{NAME}-")
         state, why = deploy_state(svc)
         if state == "failed":
             raise Fail(f"{name}'s deploy will not finish: {why}")
@@ -394,7 +399,7 @@ def still_deploying(services: list[dict]) -> list[str]:
 
 
 def _service_ready(name):
-    state, why = deploy_state(ecs.describe_services(cluster=CLUSTER, services=[f"meetlab-v2-staging-{name}"])["services"][0])
+    state, why = deploy_state(ecs.describe_services(cluster=CLUSTER, services=[f"{NAME}-{name}"])["services"][0])
     if state == "failed":
         raise Fail(f"{name}'s deploy will not finish: {why}")
     return state == "ready"
@@ -428,13 +433,13 @@ async def scenario_transcript():
     async with Meeting() as m:
         await asyncio.sleep(5)  # the greeting
         await _play_wav(m.human, SPEECH, 8)
-        await _until(lambda: any("user utterance" in l for l in _log_lines("/meetlab-v2/staging/bot", m.session, m.started)),
+        await _until(lambda: any("user utterance" in l for l in _log_lines(f"{LOGS}/bot", m.session, m.started)),
                      120, "the participant's turn transcribed and stored")
         if not server:
             return "a user turn stored (Deepgram; no speech server of ours is on)"
         stream = f"bot/bot/{m.task.rsplit('/', 1)[-1]}"
         lines = [e["message"] for e in logs.filter_log_events(
-            logGroupName="/meetlab-v2/staging/bot", logStreamNames=[stream], startTime=int(m.started * 1000))["events"]]
+            logGroupName=f"{LOGS}/bot", logStreamNames=[stream], startTime=int(m.started * 1000))["events"]]
         # Logged for every session ("override" is only logged when it differs from the
         # stored config, and staging's stored default is already Parakeet).
         if not any("STT: model=parakeet-" in l for l in lines):
@@ -512,7 +517,7 @@ async def scenario_chat():
         message = {"id": uuid.uuid4().hex, "timestamp": int(time.time() * 1000), "message": "What is two plus two?",
                    "label": "rtvi-ai", "type": "send-text", "data": {"content": "What is two plus two?"}}
         await m.human.local_participant.publish_data(json.dumps(message).encode(), reliable=True, topic="lk-chat-topic")
-        utterances = lambda: [l for l in _log_lines("/meetlab-v2/staging/bot", m.session, m.started)  # noqa: E731
+        utterances = lambda: [l for l in _log_lines(f"{LOGS}/bot", m.session, m.started)  # noqa: E731
                               if "user utterance" in l]
         await _until(utterances, 60, "the chat message stored as a user turn")
         await asyncio.sleep(5)  # time for a duplicate to land, if there were one
@@ -550,7 +555,7 @@ async def scenario_auto_record():
     _post("/api/console/login", {"password": os.environ["CONSOLE_PASSWORD"]})
     _post("/api/console/config", {"scope": room, "auto_record": True}, method="PUT")
     async with Meeting(room=room) as m:
-        await _until(lambda: any("bot line" in l for l in _log_lines("/meetlab-v2/staging/bot", m.session, m.started)),
+        await _until(lambda: any("bot line" in l for l in _log_lines(f"{LOGS}/bot", m.session, m.started)),
                      60, "the greeting stored as the bot's line")
         await asyncio.sleep(10)
         _web.open(urllib.request.Request(f"{MEET}/api/record/stop?roomName={room}"), timeout=30)
@@ -654,14 +659,14 @@ async def scenario_our_models():
     _post("/api/console/config", {"scope": room, "llm_model": OUR_LLM, "tts_provider": "kokoro", "tts_voice": "alloy"},
           method="PUT")
     async with Meeting(room=room) as m:
-        bot_log = lambda: _log_lines("/meetlab-v2/staging/bot", m.session, m.started)
+        bot_log = lambda: _log_lines(f"{LOGS}/bot", m.session, m.started)
         await _until(lambda: any("bot line" in l for l in bot_log()), 60, "the greeting spoken and stored")
         await _play_wav(m.human, SPEECH, 8)
         await _until(lambda: any("bot reply" in l and "latency_ms=None" not in l for l in bot_log()),
                      120, "the bot's spoken answer")
         stream = f"bot/bot/{m.task.rsplit('/', 1)[-1]}"
         lines = [e["message"] for e in logs.filter_log_events(
-            logGroupName="/meetlab-v2/staging/bot", logStreamNames=[stream], startTime=int(m.started * 1000))["events"]]
+            logGroupName=f"{LOGS}/bot", logStreamNames=[stream], startTime=int(m.started * 1000))["events"]]
         errors = [l for l in lines if ("OpenAILLMService" in l or "OpenAITTSService" in l) and "error" in l.lower()]
         if errors:
             raise Fail(f"our models returned errors: {errors[0][:200]}")
@@ -683,14 +688,14 @@ async def scenario_smart_turn():
     _post("/api/console/login", {"password": os.environ["CONSOLE_PASSWORD"]})
     _post("/api/console/config", {"scope": room, "turn_detection": "smart_turn"}, method="PUT")
     async with Meeting(room=room) as m:
-        bot_log = lambda: _log_lines("/meetlab-v2/staging/bot", m.session, m.started)
+        bot_log = lambda: _log_lines(f"{LOGS}/bot", m.session, m.started)
         await _until(lambda: any("bot line" in l for l in bot_log()), 60, "the greeting spoken and stored")
         await _play_wav(m.human, SPEECH, 8)
         await _until(lambda: any("bot reply" in l and "latency_ms=None" not in l for l in bot_log()),
                      120, "the bot's answer in a smart-turn room")
         stream = f"bot/bot/{m.task.rsplit('/', 1)[-1]}"
         lines = [e["message"] for e in logs.filter_log_events(
-            logGroupName="/meetlab-v2/staging/bot", logStreamNames=[stream], startTime=int(m.started * 1000))["events"]]
+            logGroupName=f"{LOGS}/bot", logStreamNames=[stream], startTime=int(m.started * 1000))["events"]]
         if not any("SmartTurnGate" in l for l in lines):
             raise Fail("no smart-turn gate in the person's chain: the room did not end turns by smart turn")
         if any("TaskManager is not initialized" in l for l in lines):
@@ -776,7 +781,7 @@ async def _prepared():
 
 async def main(names):
     def app_ready():
-        services = ecs.describe_services(cluster=CLUSTER, services=[f"meetlab-v2-staging-{n}" for n in APP_SERVICES])["services"]
+        services = ecs.describe_services(cluster=CLUSTER, services=[f"{NAME}-{n}" for n in APP_SERVICES])["services"]
         return not still_deploying(services)
     waited = await _until(app_ready, 900, "LiveKit, meet and the runner done deploying")
     if waited > 5:

@@ -25,7 +25,7 @@ name: Infra v2
 on:
   pull_request:
     branches: [v2]
-    paths: ["infra/v2/**", ".github/workflows/infra-v2.yml", "Makefile", "meet/**", "agent-runner/**", "!**/*.md"]
+    paths: ["infra/v2/**", ".github/workflows/**", "Makefile", "meet/**", "agent-runner/**", "!**/*.md"]
   push:
     branches: [v2]
     paths: ["infra/v2/**", ".github/workflows/infra-v2.yml", "meet/**", "agent-runner/**", "!**/*.md"]
@@ -56,7 +56,7 @@ jobs:
       - run: make test-config-parity
       - uses: astral-sh/setup-uv@v6
       - run: make test-stt-cpu
-      - run: make test-static # dead code, image budget, docs, meet lint/tsc/knip (docs/testing.md)
+      - run: make test-static # dead code, image budget, docs, meet lint/tsc/knip, workflows, scripts (docs/testing.md)
 
   plan:
     if: github.event_name == 'pull_request'
@@ -222,25 +222,6 @@ jobs:
           curl -fsSL -o smp.deb https://s3.amazonaws.com/session-manager-downloads/plugin/latest/ubuntu_64bit/session-manager-plugin.deb
           sudo dpkg -i smp.deb
       - uses: astral-sh/setup-uv@v6
-      # Seconds, before any bot starts: every AWS call the code makes, simulated
-      # against the deployed roles (and calls they must never make).
-      - name: Permission contract
-        run: uv run --no-project --with boto3 python agent-runner/tests/permission_contract.py
+      # Permission contract, then the live tests (shared with release-v2.yml).
       - name: Staging acceptance
-        run: |
-          set -euo pipefail
-          get() { aws ssm get-parameter --with-decryption --name "/meetlab-v2/staging/$1" --query Parameter.Value --output text; }
-          secret() { v="$(get "$2")"; echo "::add-mask::$v"; export "$1=$v"; }
-          lk='${{ needs.apply.outputs.livekit }}'  # LiveKit Cloud, or our own (livekit.tf)
-          secret CONSOLE_PASSWORD CONSOLE_PASSWORD
-          secret LIVEKIT_API_KEY "$(jq -r .key_parameter <<<"$lk")"
-          secret LIVEKIT_API_SECRET "$(jq -r .secret_parameter <<<"$lk")"
-          url="$(jq -r '.url // empty' <<<"$lk")"
-          if [ -n "$url" ]; then export LIVEKIT_URL="$url"; else secret LIVEKIT_URL LIVEKIT_URL; fi
-          [ "$(jq -r .video <<<"$lk")" = true ] || export NO_VIDEO=1
-          # Chromium for turn_relay: a participant's browser, relay-only, through our TURN.
-          # Browser only, no --with-deps: the runner image has its libraries, and apt hung on
-          # Azure's Ubuntu mirror for the whole job twice on 2026-10-07. A stall fails in 10 min.
-          timeout 600 uvx --with playwright playwright install chromium
-          uv run --no-project --with livekit --with livekit-api --with boto3 --with playwright \
-            python agent-runner/tests/acceptance_staging.py
+        run: infra/v2/live-tests.sh staging '${{ needs.apply.outputs.livekit }}'

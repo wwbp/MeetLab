@@ -139,7 +139,7 @@ locals {
   db_secret  = aws_db_instance.this.master_user_secret[0].secret_arn
 }
 
-# Values are written by infra/v2/seed-staging-secrets.sh; Terraform only names them.
+# Values are written by infra/v2/seed-secrets.sh; Terraform only names them.
 resource "aws_iam_role_policy" "execution_secrets" {
   name = "${var.env}-secrets"
   role = aws_iam_role.execution.id

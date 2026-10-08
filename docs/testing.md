@@ -28,11 +28,11 @@ of the reply time.
 
 | Level | What it checks | Ours | Command | Runs |
 |---|---|---|---|---|
-| **Static testing** (static analysis) | defects without running code | eslint, TypeScript, knip (meet); vulture, deptry (agent-runner); `terraform validate`/`fmt`; the image budget | `make test-static` | every PR (CI) |
+| **Static testing** (static analysis) | defects without running code | eslint, TypeScript, knip (meet); vulture, deptry (agent-runner); actionlint (workflows), shellcheck (scripts); `terraform validate`/`fmt`; the image budget | `make test-static` | every PR (CI) |
 | **Component** (unit) | one unit in isolation | runner `unittest`, meet `vitest`, the CPU speech server | `make test-unit`, `make test-stt-cpu` | every PR |
 | **Component integration** | units through their interfaces | the runner against Postgres; meet's API routes; database migrations (`test_migration_v1_to_v2`) | `make test-integration` | every PR (`ci.yml`) |
 | **Contract** (interface agreements) | what one part promises another | a Bot settings field exists in DB, API and form; CI and task roles have exactly the permissions used; Terraform's tests | `make test-config-parity`, `make test-infra`, `permission_contract.py` | every PR / deploy |
-| **System and acceptance** (end to end) | real meetings on staging, as a user and an operator | 16+ live scenarios: start/stop, a killed bot replaced, recording, two people, chat, TURN on 443, the study flow, session limits | `acceptance_staging.py` | after every deploy |
+| **System and acceptance** (end to end) | real meetings on staging after every deploy, and on production after every release (`infra/v2/live-tests.sh`), as a user and an operator | 16+ live scenarios: start/stop, a killed bot replaced, recording, two people, chat, TURN on 443, the study flow, session limits | `acceptance_staging.py` | after every deploy |
 | **Regression** (test type) | nothing that worked broke | all of the above, on every PR and deploy | — | — |
 
 ## Performance test types (ISTQB CT-PT)

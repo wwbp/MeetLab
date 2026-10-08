@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 MeetLab v2: browser meetings with a voice bot, recorded for research. Production and staging are
 the same Terraform stack (`infra/v2/stack`, `env = staging | prod`, sizes in `profiles.tf`),
-deployed only by GitHub Actions on merge (`infra-v2.yml`); CI's own permissions are
+deployed only by GitHub Actions: staging on merge (`infra-v2.yml`), production from a `v2.*` release tag after an approval (`release-v2.yml`); CI's own permissions are
 `infra/v2/bootstrap`, applied by a person. Decisions, costs and measurements: `infra/v2/LEDGER.md`.
 v1 (Elastic Beanstalk) is frozen on `main` and tagged `v1.0.0`; nothing of it lives on `v2`.
 

@@ -1,0 +1,112 @@
+# Production: a release tag deploys the exact images staging already passed.
+#
+#   git tag v2.0.0 <a v2 commit whose staging deploy is green> && git push origin v2.0.0
+#
+#   staged  -> no credentials: the commit is on v2 and its "Infra v2" deploy succeeded
+#   deploy  -> waits for your approval (the `production` environment: required reviewer,
+#              v2.* tags only), then tags the images with the release (release images
+#              never expire: bootstrap images.tf), applies infra/v2/stack as prod, and runs
+#              the live tests against production (infra/v2/live-tests.sh)
+#
+# One job after the approval, so one approval: each job naming a gated environment would
+# ask again. The production roles trust only that environment (bootstrap main.tf).
+name: Release v2
+
+on:
+  push:
+    tags: ["v2.*"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: infra-v2-prod-deploy
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: us-east-1
+  TF_IN_AUTOMATION: "1"
+  TF_VAR_env: prod
+  TF_VAR_hostname_suffix: "-v2" # meet-v2.wwbp.org until cutover; meet.wwbp.org is v1's
+
+jobs:
+  staged:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - name: On v2, and green on staging
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/v2 \
+            || { echo "::error::$GITHUB_REF_NAME ($GITHUB_SHA) is not on v2"; exit 1; }
+          green=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow infra-v2.yml --event push \
+            --commit "$GITHUB_SHA" --status success --json databaseId -q length)
+          [ "$green" -gt 0 ] \
+            || { echo "::error::$GITHUB_SHA has no green staging deploy (Infra v2): release a commit staging passed"; exit 1; }
+
+  deploy:
+    needs: staged
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 120
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with: { terraform_version: "1.15.1", terraform_wrapper: false }
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.TF_APPLY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+      - name: Tag the images staging tested with the release
+        run: |
+          set -euo pipefail
+          types="application/vnd.oci.image.index.v1+json application/vnd.docker.distribution.manifest.list.v2+json application/vnd.oci.image.manifest.v1+json application/vnd.docker.distribution.manifest.v2+json"
+          for name in meet agent-runner stt-cpu; do
+            repo="meetlab-v2/$name"
+            if aws ecr describe-images --repository-name "$repo" --image-ids imageTag="$GITHUB_REF_NAME" >/dev/null 2>&1; then
+              echo "$repo:$GITHUB_REF_NAME exists"; continue
+            fi
+            # shellcheck disable=SC2086 # one media type per word
+            got=$(aws ecr batch-get-image --repository-name "$repo" --image-ids imageTag="$GITHUB_SHA" \
+              --accepted-media-types $types --output json)
+            [ "$(jq '.images | length' <<<"$got")" = 1 ] || { echo "::error::no $repo image for $GITHUB_SHA"; exit 1; }
+            aws ecr put-image --repository-name "$repo" --image-tag "$GITHUB_REF_NAME" \
+              --image-manifest "$(jq -r '.images[0].imageManifest' <<<"$got")" \
+              --image-manifest-media-type "$(jq -r '.images[0].imageManifestMediaType' <<<"$got")" >/dev/null
+            echo "$repo:$GITHUB_REF_NAME -> $GITHUB_SHA"
+          done
+      - name: Apply as production
+        working-directory: infra/v2/stack
+        run: |
+          set -euo pipefail
+          terraform init -input=false -backend-config=key=v2/prod/terraform.tfstate
+          terraform plan -input=false -no-color -lock-timeout=5m -out=tfplan -var="image_tag=$GITHUB_REF_NAME"
+          terraform apply -input=false -no-color tfplan
+      - name: Verify no drift after apply
+        working-directory: infra/v2/stack
+        run: terraform plan -input=false -no-color -lock-timeout=5m -detailed-exitcode -var="image_tag=$GITHUB_REF_NAME"
+      - name: LiveKit for the live tests
+        id: livekit
+        working-directory: infra/v2/stack
+        run: echo "livekit=$(terraform output -json livekit | jq -c .)" >> "$GITHUB_OUTPUT"
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.TF_ACCEPTANCE_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+      - name: Session Manager plugin (ECS Exec, for the kill -9 scenario)
+        run: |
+          set -euo pipefail
+          curl -fsSL -o smp.deb https://s3.amazonaws.com/session-manager-downloads/plugin/latest/ubuntu_64bit/session-manager-plugin.deb
+          sudo dpkg -i smp.deb
+      - uses: astral-sh/setup-uv@v6
+      - name: Production acceptance
+        run: infra/v2/live-tests.sh prod '${{ steps.livekit.outputs.livekit }}'

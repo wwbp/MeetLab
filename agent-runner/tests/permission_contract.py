@@ -1,4 +1,4 @@
-"""What each deployed staging role must, and must never, be allowed to do.
+"""What each deployed role (MEETLAB_ENV: staging by default, or prod) must, and must never, be allowed to do.
 
 Every AWS call the code makes at runtime is listed in ALLOW, and a few calls each
 role must never make (another project's resources, another task family, CI roles)
@@ -10,25 +10,28 @@ Adding an AWS call to the code means adding it here.
 
     uv run --no-project --with boto3 python agent-runner/tests/permission_contract.py
 
-Needs iam:SimulatePrincipalPolicy on the meetlab-v2-staging-* roles and users.
+Needs iam:SimulatePrincipalPolicy on the environment's meetlab-v2-<env>-* roles and users.
 """
 import os
 import sys
 from dataclasses import dataclass, field
 
 ACCOUNT = os.getenv("AWS_ACCOUNT_ID", "848180123498")
+ENV = os.getenv("MEETLAB_ENV", "staging")
+NAME = f"meetlab-v2-{ENV}"  # every resource's prefix (infra/v2/stack main.tf)
+APPLY_ROLE = {"staging": "meetlab-v2-tf-apply", "prod": "meetlab-v2-tf-apply-prod"}[ENV]  # CI, never the app
 ARN = f"arn:aws:ecs:us-east-1:{ACCOUNT}"
-CLUSTER = f"{ARN}:cluster/meetlab-v2-staging"
+CLUSTER = f"{ARN}:cluster/{NAME}"
 OTHER_CLUSTER = f"{ARN}:cluster/bcfg-twilio-bot-dev-Cluster-c7MF3TrrR6WL"  # another lab project
 ROLE = f"arn:aws:iam::{ACCOUNT}:role"
-RUNNER, BOT = "meetlab-v2-staging-runner-task", "meetlab-v2-staging-bot-task"
-EGRESS = "user/meetlab-v2-staging-egress-writer"  # LiveKit uploads video with its key
-EGRESS_TASK = "meetlab-v2-staging-egress-task"  # our own egress uploads with this role (no key)
-EXECUTION = "meetlab-v2-staging-task-execution"  # ECS: image pulls and task secrets
+RUNNER, BOT = f"{NAME}-runner-task", f"{NAME}-bot-task"
+EGRESS = f"user/{NAME}-egress-writer"  # LiveKit uploads video with its key
+EGRESS_TASK = f"{NAME}-egress-task"  # our own egress uploads with this role (no key)
+EXECUTION = f"{NAME}-task-execution"  # ECS: image pulls and task secrets
 SECRET = f"arn:aws:secretsmanager:us-east-1:{ACCOUNT}:secret"
 GROUP = f"arn:aws:autoscaling:us-east-1:{ACCOUNT}:autoScalingGroup:00000000-0000-0000-0000-000000000000:autoScalingGroupName"
 IN_CLUSTER = {"ecs:cluster": CLUSTER}
-MEDIA = f"arn:aws:s3:::meetlab-v2-staging-media-{ACCOUNT}"
+MEDIA = f"arn:aws:s3:::{NAME}-media-{ACCOUNT}"
 TO_ECS = {"iam:PassedToService": "ecs-tasks.amazonaws.com"}
 
 
@@ -42,12 +45,12 @@ class Call:
 
 ALLOW = [
     # dispatch.py run_bot_task / stop_bot_task, heartbeat.py via runner._stop_bot
-    Call(RUNNER, "ecs:RunTask", f"{ARN}:task-definition/meetlab-v2-staging-bot:1", IN_CLUSTER),
-    Call(RUNNER, "iam:PassRole", f"{ROLE}/meetlab-v2-staging-task-execution", TO_ECS),
+    Call(RUNNER, "ecs:RunTask", f"{ARN}:task-definition/{NAME}-bot:1", IN_CLUSTER),
+    Call(RUNNER, "iam:PassRole", f"{ROLE}/{NAME}-task-execution", TO_ECS),
     Call(RUNNER, "iam:PassRole", f"{ROLE}/{BOT}", TO_ECS),
     Call(RUNNER, "ecs:ListTasks", "*", IN_CLUSTER),
-    Call(RUNNER, "ecs:StopTask", f"{ARN}:task/meetlab-v2-staging/0000"),
-    Call(RUNNER, "ecs:DescribeTasks", f"{ARN}:task/meetlab-v2-staging/0000"),
+    Call(RUNNER, "ecs:StopTask", f"{ARN}:task/{NAME}/0000"),
+    Call(RUNNER, "ecs:DescribeTasks", f"{ARN}:task/{NAME}/0000"),
     # storage.py: per-speaker audio written by the bot, read back by the runner
     Call(BOT, "s3:PutObject", f"{MEDIA}/recordings/speaker.wav"),
     Call(RUNNER, "s3:GetObject", f"{MEDIA}/recordings/speaker.wav"),
@@ -58,25 +61,25 @@ ALLOW = [
     Call(EGRESS_TASK, "s3:PutObject", f"{MEDIA}/recordings/room-recording.mp4"),
     Call(EGRESS_TASK, "s3:AbortMultipartUpload", f"{MEDIA}/recordings/room-recording.mp4"),
     # capacity.py: Prepare for study warms the bot pool, and AWS cools it at the end time
-    *[Call(RUNNER, f"autoscaling:{a}", f"{GROUP}/meetlab-v2-staging-bots") for a in
+    *[Call(RUNNER, f"autoscaling:{a}", f"{GROUP}/{NAME}-bots") for a in
       ("UpdateAutoScalingGroup", "PutScheduledUpdateGroupAction", "DeleteScheduledAction")],
     Call(RUNNER, "autoscaling:DescribeAutoScalingGroups", "*"),
     Call(RUNNER, "autoscaling:DescribeScheduledActions", "*"),
     Call(RUNNER, "ecs:ListContainerInstances", CLUSTER),
     # The STT NIM's image pull and NGC_API_KEY (staging stt_nim.tf)
-    Call(EXECUTION, "secretsmanager:GetSecretValue", f"{SECRET}:meetlab-v2/staging/ngc-AbCdEf"),
+    Call(EXECUTION, "secretsmanager:GetSecretValue", f"{SECRET}:meetlab-v2/{ENV}/ngc-AbCdEf"),
     # ECS Exec into a bot (the kill9 acceptance scenario; debugging)
     *[Call(BOT, f"ssmmessages:{a}", "*") for a in
       ("CreateControlChannel", "CreateDataChannel", "OpenControlChannel", "OpenDataChannel")],
 ]
 
 DENY = [
-    Call(RUNNER, "ecs:RunTask", f"{ARN}:task-definition/meetlab-v2-staging-meet:1", IN_CLUSTER),
+    Call(RUNNER, "ecs:RunTask", f"{ARN}:task-definition/{NAME}-meet:1", IN_CLUSTER),
     Call(RUNNER, "ecs:StopTask", f"{OTHER_CLUSTER.replace(':cluster/', ':task/')}/0000"),
     Call(RUNNER, "ecs:ListTasks", "*", {"ecs:cluster": OTHER_CLUSTER}),
     Call(RUNNER, "ecs:ListContainerInstances", OTHER_CLUSTER),
     Call(RUNNER, "iam:PassRole", f"{ROLE}/meetlab-v2-tf-apply", TO_ECS),
-    Call(BOT, "ecs:RunTask", f"{ARN}:task-definition/meetlab-v2-staging-bot:1", IN_CLUSTER),
+    Call(BOT, "ecs:RunTask", f"{ARN}:task-definition/{NAME}-bot:1", IN_CLUSTER),
     Call(BOT, "s3:GetObject", f"{MEDIA}/recordings/speaker.wav"),
     Call(BOT, "s3:DeleteObject", f"{MEDIA}/recordings/speaker.wav"),
     Call(BOT, "s3:PutObject", f"{MEDIA}/elsewhere/speaker.wav"),
@@ -91,10 +94,10 @@ DENY = [
     Call(EGRESS_TASK, "s3:ListBucket", MEDIA),
     Call(EGRESS_TASK, "s3:PutObject", f"{MEDIA}/elsewhere/room-recording.mp4"),
     Call(RUNNER, "s3:DeleteObject", f"{MEDIA}/recordings/speaker.wav"),
-    Call(EXECUTION, "secretsmanager:GetSecretValue", f"{SECRET}:meetlab-v2/staging/other-AbCdEf"),
-    Call(RUNNER, "autoscaling:UpdateAutoScalingGroup", f"{GROUP}/meetlab-v2-staging-ecs"),  # services
-    Call(RUNNER, "autoscaling:UpdateAutoScalingGroup", f"{GROUP}/meetlab-v2-staging-stt-nim"),  # the GPU
-    Call(BOT, "autoscaling:UpdateAutoScalingGroup", f"{GROUP}/meetlab-v2-staging-bots"),
+    Call(EXECUTION, "secretsmanager:GetSecretValue", f"{SECRET}:meetlab-v2/{ENV}/other-AbCdEf"),
+    Call(RUNNER, "autoscaling:UpdateAutoScalingGroup", f"{GROUP}/{NAME}-ecs"),  # services
+    Call(RUNNER, "autoscaling:UpdateAutoScalingGroup", f"{GROUP}/{NAME}-stt-nim"),  # the GPU
+    Call(BOT, "autoscaling:UpdateAutoScalingGroup", f"{GROUP}/{NAME}-bots"),
     Call(BOT, "ssm:GetParameter", f"arn:aws:ssm:us-east-1:{ACCOUNT}:parameter/copilot/bcfg-twilio-bot/dev/secrets/OPENAI_API_KEY"),
 ]
 

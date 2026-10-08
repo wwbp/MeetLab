@@ -1,4 +1,4 @@
-# Deploying v2 (staging) — a first-timer's guide
+# Deploying v2 — a first-timer's guide
 
 v2 is MeetLab rebuilt as code: every AWS resource is in Terraform under `infra/v2/`,
 and GitHub Actions deploys it. Nobody clicks around the AWS console or runs
@@ -7,6 +7,7 @@ time you deploy, and the few steps a **person** has to do because the pipeline i
 deliberately not allowed to.
 
 - Staging: <https://meet-staging.wwbp.org> (console at `/console`)
+- Production: <https://meet-v2.wwbp.org> until the cutover; then `meet.wwbp.org`, which is v1's until then
 - Branch: `v2`. **Never merge v2 work into `main`** — `main` is v1 and is frozen.
 - Decisions, costs and known issues: [`infra/v2/LEDGER.md`](https://github.com/wwbp/MeetLab/blob/v2/infra/v2/LEDGER.md)
 
@@ -37,6 +38,32 @@ flowchart LR
 
 Watch it under **Actions → Infra v2** on GitHub.
 
+## Releasing to production
+
+Production runs the **same images staging already passed**, never a new build. A release
+is a git tag on a `v2` commit whose staging deploy is green:
+
+```bash
+git fetch origin && git tag v2.0.0 origin/v2 && git push origin v2.0.0
+```
+
+Then, under **Actions → Release v2**:
+
+1. **staged** checks the commit is on `v2` and that its "Infra v2" deploy succeeded. If not,
+   it stops: release a commit staging passed.
+2. **deploy** waits for **your approval** (the `production` environment; only `v2.*` tags
+   may use it). Once approved, it tags the images with the release (release images never
+   expire), applies `infra/v2/stack` as production, and runs the live tests against
+   production (`infra/v2/live-tests.sh prod`).
+
+A release restarts production's services: **never release during a study.** Number
+releases `v2.MAJOR.MINOR.PATCH`; v1 stays as `v1.0.0`. To go back, release the earlier tag's
+commit again under a new tag.
+
+The live tests hold real meetings on production (rooms named `accept-…`), using the paid
+vendors for a few minutes. After the cutover, those rooms are test data in production's
+database; the console lists them like any other room.
+
 ## Things only a person does
 
 **Log every one of these** in the "Manual actions" table in
@@ -63,12 +90,12 @@ pipeline will fail with "AccessDenied".
 
 ### 2. Secrets (once per environment)
 
-Vendor keys live in SSM Parameter Store under `/meetlab-v2/staging/`. They are
-never in Terraform or in the repo. To fill them (copies v1's keys, generates the
-rest, prints no values):
+Vendor keys live in SSM Parameter Store under `/meetlab-v2/<env>/` (`staging` or
+`prod`). They are never in Terraform or in the repo. To fill them (copies v1's keys,
+generates the rest, puts placeholders for the recording key, prints no values):
 
 ```bash
-infra/v2/seed-staging-secrets.sh
+infra/v2/seed-secrets.sh staging    # or: prod
 ```
 
 Staging uses v1's vendor keys for sanity checks only — **no load tests** on them
@@ -78,17 +105,19 @@ Staging uses v1's vendor keys for sanity checks only — **no load tests** on th
 
 LiveKit Cloud records the room on *its* servers and uploads the mp4 to our bucket,
 so it needs an AWS access key. Terraform creates a user for this,
-`meetlab-v2-staging-egress-writer`, that can **only add files under
+`meetlab-v2-<env>-egress-writer`, that can **only add files under
 `recordings/`** — it can't read, list or delete anything. Terraform does **not**
 create its key (a key in Terraform would sit in the state file). You mint it:
 
 ```bash
-# once the egress user exists (after the PR that adds it is applied)
-aws iam create-access-key --user-name meetlab-v2-staging-egress-writer \
+# once the egress user exists (after the environment's first deploy); env=staging or prod
+env=prod
+aws iam create-access-key --user-name meetlab-v2-$env-egress-writer \
   --query 'AccessKey.[AccessKeyId,SecretAccessKey]' --output text \
 | { read -r id secret
-    aws ssm put-parameter --name /meetlab-v2/staging/EGRESS_S3_KEY_ID     --type SecureString --overwrite --value "$id"
-    aws ssm put-parameter --name /meetlab-v2/staging/EGRESS_S3_KEY_SECRET --type SecureString --overwrite --value "$secret"; }
+    aws ssm put-parameter --name /meetlab-v2/$env/EGRESS_S3_KEY_ID     --type SecureString --overwrite --value "$id"
+    aws ssm put-parameter --name /meetlab-v2/$env/EGRESS_S3_KEY_SECRET --type SecureString --overwrite --value "$secret"; }
+aws ecs update-service --cluster meetlab-v2-$env --service meetlab-v2-$env-agent-runner --force-new-deployment >/dev/null
 ```
 
 The key goes straight into SSM and is never shown. agent-runner hands it to
@@ -97,9 +126,10 @@ dashboard.
 
 !!! warning "Order matters"
     agent-runner won't start if those two parameters are missing (ECS can't
-    fetch the secret). Before the very first deploy that needs them, put
-    placeholder values in, deploy, mint the real key, then force a new
-    deployment of agent-runner (or just merge the next PR).
+    fetch the secret), so `seed-secrets.sh` puts placeholders in first. On an
+    environment's first deploy the video-recording live tests therefore fail; mint
+    the key (above: the last line restarts agent-runner so it reads the key), then
+    re-run the deploy's live tests.
 
 **Rotating the key:** create a second key (a user may have two), write it to SSM
 with the command above, redeploy agent-runner, then delete the old key with

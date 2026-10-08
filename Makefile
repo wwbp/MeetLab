@@ -72,6 +72,10 @@ test-static: test-dead-code test-image docs-build
 	docker build -q --target deps -t meetlab-meet:deps meet >/dev/null
 	docker run --rm -v $(CURDIR)/meet:/app -v /app/node_modules -w /app meetlab-meet:deps \
 		sh -c 'pnpm lint && pnpm exec tsc --noEmit && pnpm knip'
+	@# Workflows (actionlint: syntax, expressions, untrusted input in scripts) and scripts
+	@# (shellcheck); warnings and errors, not style notes.
+	docker run --rm -e SHELLCHECK_OPTS=--severity=warning -v $(CURDIR):/repo -w /repo rhysd/actionlint:1.7.7 -no-color -oneline
+	docker run --rm -v $(CURDIR):/mnt -w /mnt koalaman/shellcheck:v0.10.0 -S warning infra/v2/*.sh
 
 test-dead-code:
 	cd agent-runner && uvx vulture . vulture_whitelist.py --exclude ".venv,alembic" --min-confidence 80

@@ -186,5 +186,5 @@ resource "aws_ecs_service" "stt_cpu" {
     container_name   = "stt-cpu"
     container_port   = 8000
   }
-  depends_on = [aws_ecs_cluster_capacity_providers.this, aws_lb_listener.stt_cpu]
+  depends_on = [aws_ecs_cluster_capacity_providers.this, aws_lb_listener.stt_cpu, aws_iam_role_policy.execution_secrets]
 }

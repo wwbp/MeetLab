@@ -201,5 +201,5 @@ resource "aws_ecs_service" "egress" {
     capacity_provider = aws_ecs_capacity_provider.egress.name
     weight            = 1
   }
-  depends_on = [aws_ecs_cluster_capacity_providers.this]
+  depends_on = [aws_ecs_cluster_capacity_providers.this, aws_iam_role_policy.execution_secrets]
 }

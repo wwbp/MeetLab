@@ -111,6 +111,8 @@ test-infra:
 		terraform -chdir=$$d validate -no-color && \
 		terraform -chdir=$$d test -no-color || exit 1; \
 	done
+	@# Every ECS service waits for its tasks' secrets policy (a fresh stack: v2.0.0's meet).
+	python3 infra/v2/stack/tests/secrets_order.py
 
 test-integration:
 	$(COMPOSE) up -d transport-server agent-runner meet

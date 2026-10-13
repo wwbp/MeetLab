@@ -52,13 +52,14 @@ fails if anything else differs. It also proves the check catches a lost row and 
 | 0. Protect v1 | manual snapshot, deletion protection, bucket versioning, read-only inventory | ✅ 2026-10-06 (ledger, Manual actions) |
 | 1. The check, test-first | `migration_check.py` and its test | ✅ green in CI |
 | 2. Build v2 production | the staging Terraform as `prod`: production sizes, database across zones, its own versioned bucket; `meet-v2.wwbp.org` until cutover | ✅ 2026-10-08, release `v2.0.0`; live tests pass |
-| 3. Rehearse | restore today's v1 snapshot, upgrade, copy the bucket, run the check and the live tests, time each step; throw it away | `MATCH`; repeat until clean |
+| 3. Rehearse | restore a fresh v1 snapshot beside production's database, `migrate.sh run prod meetlab_rehearsal`, copy the kept files, then clean up | ✅ 2026-10-13: `MATCH` in 53 s; 508 files copied, every size equal |
 | 4. Cutover (~2 h, no study booked) | v1 stops taking sessions; final snapshot; restore, upgrade, remove our runs (`prune_harness`), copy the kept sessions' files; the check (`--real`); move the address; live tests and one real call | `MATCH`, then live tests, then the call; any failure, the address goes back to v1 |
 | 5. Hold | v1 stopped but whole | 2–4 weeks of real studies on v2 |
 | 6. Retire | staging, then v1: final snapshot, test-restore it, then remove; v1's bucket kept read-only | each final snapshot restores and matches |
 
-Before v1's machines are removed: 2 media rows hold local file paths (files on v1's own
-machines) and 32 recordings never finished; check both.
+The 2 kept media rows with local paths (`/recordings/…transcript.md`, two team tests of 3 June)
+point at files already gone from v1's machine (its container was replaced long ago); their
+sessions' turns are in the database, so only those two exported transcripts are lost.
 
 ## The check
 

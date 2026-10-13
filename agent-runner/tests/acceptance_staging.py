@@ -64,6 +64,8 @@ NAME = f"meetlab-v2-{ENV}"  # every resource's prefix (infra/v2/stack main.tf)
 LOGS = f"/meetlab-v2/{ENV}"
 CLUSTER = os.getenv("ECS_CLUSTER", NAME)
 MEET = os.getenv("MEET_URL", {"staging": "https://meet-staging.wwbp.org", "prod": "https://meet-v2.wwbp.org"}[ENV])
+# Bot machines kept warm between studies: bot_pool_min in infra/v2/stack/profiles.tf.
+POOL_BASELINE = {"staging": 0, "prod": 1}[ENV]
 REGION = "us-east-1"
 ecs = boto3.client("ecs", region_name=REGION)
 logs = boto3.client("logs", region_name=REGION)
@@ -383,8 +385,9 @@ APP_SERVICES = ["livekit", "meet", "agent-runner"]  # the GPU models have their 
 
 
 def still_deploying(services: list[dict]) -> list[str]:
-    """The switched-on services whose deploy has not finished. A LiveKit machine swap
-    (stop-first, minutes down) once made every scenario fail with a 500 (2026-10-04)."""
+    """The switched-on services whose deploy has not finished, or that run fewer tasks than
+    wanted. A LiveKit machine swap (stop-first, minutes down) once made every scenario fail with
+    a 500 (2026-10-04)."""
     waiting = []
     for svc in services:
         if svc["status"] != "ACTIVE" or svc["desiredCount"] == 0:
@@ -393,7 +396,9 @@ def still_deploying(services: list[dict]) -> list[str]:
         state, why = deploy_state(svc)
         if state == "failed":
             raise Fail(f"{name}'s deploy will not finish: {why}")
-        if state == "waiting":
+        # A finished deploy with fewer tasks running than wanted: a machine being replaced
+        # (a new machine image refreshes its group after the apply, 2026-10-13).
+        if state == "waiting" or svc["runningCount"] < svc["desiredCount"]:
             waiting.append(name)
     return waiting
 
@@ -458,7 +463,7 @@ def _capacity(method="GET", body=None):
 
 async def scenario_prewarm():
     """Prepare for study from the console: a warm bot machine comes up and stays;
-    Stop preparing drops the pool back to 0 (AWS would also do it at the end time)."""
+    Stop preparing drops the pool back to its baseline (AWS would also do it at the end time)."""
     from datetime import datetime, timezone
 
     _post("/api/console/login", {"password": os.environ["CONSOLE_PASSWORD"]})
@@ -473,7 +478,7 @@ async def scenario_prewarm():
         waited = await _until(lambda: _capacity()["ready_instances"] >= 1, 300, "a warm bot machine")
     finally:
         cold = _capacity("DELETE")  # never leave a test's pool warm
-    if (cold["min_instances"], cold["warm_until"]) != (0, None):
+    if (cold["min_instances"], cold["warm_until"]) != (POOL_BASELINE, None):
         raise Fail(f"Stop preparing left the pool warm: {cold}")
     return f"a bot machine ready {waited:.0f} s after Prepare; Stop preparing reset the pool"
 

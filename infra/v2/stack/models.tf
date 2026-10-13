@@ -260,5 +260,5 @@ resource "aws_ecs_service" "model" {
     container_name   = each.key
     container_port   = each.value.port
   }
-  depends_on = [aws_ecs_cluster_capacity_providers.this, aws_lb_listener.model]
+  depends_on = [aws_ecs_cluster_capacity_providers.this, aws_lb_listener.model, aws_iam_role_policy.execution_secrets]
 }

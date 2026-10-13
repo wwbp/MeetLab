@@ -37,6 +37,10 @@ class TestLiveTestEnv(unittest.TestCase):
         self.assertEqual(live.MEET, "https://meet-v2.wwbp.org")  # meet.wwbp.org stays v1's until cutover
         self.assertEqual(live.LOGS, "/meetlab-v2/prod")
         self.assertEqual(live.MEDIA_BUCKET, "meetlab-v2-prod-media-848180123498")
+        self.assertEqual(live.POOL_BASELINE, 1)  # production keeps one bot machine warm (profiles.tf)
+
+    def test_staging_keeps_no_bot_machine_warm(self):
+        self.assertEqual(load("acceptance_staging", "staging").POOL_BASELINE, 0)
 
     def test_the_contract_checks_production_roles_only(self):
         contract = load("permission_contract", "prod")

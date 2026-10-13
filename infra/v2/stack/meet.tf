@@ -72,7 +72,7 @@ resource "aws_ecs_service" "meet" {
     enabled   = true
     namespace = aws_service_discovery_http_namespace.this.arn
   }
-  depends_on = [aws_lb_listener.https, aws_ecs_cluster_capacity_providers.this]
+  depends_on = [aws_lb_listener.https, aws_ecs_cluster_capacity_providers.this, aws_iam_role_policy.execution_secrets]
 }
 
 # Revision 1 was recorded without skip_destroy, so replacing it would call

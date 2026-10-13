@@ -124,7 +124,7 @@ resource "aws_ecs_service" "runner" {
       }
     }
   }
-  depends_on = [aws_ecs_cluster_capacity_providers.this]
+  depends_on = [aws_ecs_cluster_capacity_providers.this, aws_iam_role_policy.execution_secrets]
 }
 
 # Same as meet's (meet.tf): the first revision's state predates skip_destroy.

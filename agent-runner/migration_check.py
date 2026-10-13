@@ -4,10 +4,15 @@ A fingerprint is one hash per row, keyed by primary key, over the source's colum
 columns a later schema adds don't count as differences. `compare` lists what is missing or
 changed; changes to `allowed` columns are reported apart (they're expected, but are counted).
 
-    uv run python migration_check.py SOURCE_DATABASE_URL TARGET_DATABASE_URL [--real]
+    uv run python migration_check.py SOURCE_DATABASE_URL TARGET_DATABASE_URL [--real] [--prune]
+
+TARGET `-` is this process's own database, read as the runner reads it (db/url.py: DATABASE_URL,
+or DB_* from ECS); `--prune` first removes our programmatic runs from the target (the migration
+task, infra/v2/stack/migrate.tf). It refuses to prune its source.
 """
 import asyncio
 import hashlib
+import os
 import sys
 from dataclasses import dataclass, field
 
@@ -155,9 +160,21 @@ def manifest(bucket: str, s3=None) -> dict[str, tuple]:
     return out
 
 
-async def _main(source_url: str, target_url: str, real: bool = False) -> int:
+def _asyncpg(url: str) -> str:
+    """A SQLAlchemy URL (db/url.py) as asyncpg takes it."""
+    return url.replace("postgresql+asyncpg://", "postgresql://").replace("ssl=require", "sslmode=require")
+
+
+async def _main(source_url: str, target_url: str, real: bool = False, prune: bool = False) -> int:
+    if target_url == "-":
+        from db.url import database_url
+        target_url = _asyncpg(database_url(os.environ))
+    if prune and target_url == source_url:
+        raise SystemExit("refusing to prune the source: never prune v1")
     src, dst = await asyncpg.connect(source_url), await asyncpg.connect(target_url)
     try:
+        if prune:
+            await prune_harness(dst)
         before = await fingerprint(src)
         if real:  # the target was pruned of our programmatic runs (prune_harness): compare the rest
             before = restrict(before, await kept_rows(src))
@@ -176,4 +193,4 @@ async def _main(source_url: str, target_url: str, real: bool = False) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(asyncio.run(_main(sys.argv[1], sys.argv[2], real="--real" in sys.argv[3:])))
+    sys.exit(asyncio.run(_main(sys.argv[1], sys.argv[2], real="--real" in sys.argv[3:], prune="--prune" in sys.argv[3:])))

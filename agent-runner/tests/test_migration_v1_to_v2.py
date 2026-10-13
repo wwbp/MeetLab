@@ -9,11 +9,13 @@ import asyncio
 import os
 import subprocess
 import unittest
+import unittest.mock
 import uuid
 
 import asyncpg
 
 from db.url import database_url
+import migration_check
 from migration_check import V1_TO_V2 as ALLOWED, compare, compare_files, fingerprint, kept_rows, prune_harness, restrict
 
 V1_HEAD = "e7c4b9a13d02"  # v1's (main's) last migration; v2 adds six on top
@@ -173,6 +175,42 @@ class RealDataOnlyTest(MigrationTest):
         self.assertEqual(len(events), len(kept["events"]))
         self.assertEqual(len(kept["events"]), 3, "the link session's, c-ended's and the admin action's")
         self.assertEqual(len(after["bot_config"]["rows"]), 3, "every Bot Config row stays (study conditions)")
+
+
+class CopyTaskTest(unittest.TestCase):
+    """The migration task's last step, end to end (infra/v2/stack/migrate.tf): a copy of v1 at
+    v1's head, upgraded, then `migration_check.py SOURCE - --real --prune` prunes our runs from
+    the target (this task's own database, from DB_* like the runner) and reports MATCH. It
+    refuses to prune when source and target are the same database: never prune v1."""
+
+    def setUp(self):
+        self.src, self.dst = Scratch(), Scratch()
+        for db in (self.src, self.dst):
+            asyncio.run(db.admin(f"CREATE DATABASE {db.name}"))
+            self.addCleanup(lambda db=db: asyncio.run(db.admin(f"DROP DATABASE {db.name} WITH (FORCE)")))
+            db.alembic(V1_HEAD)
+            asyncio.run(self._sql(db, V1_ROWS + RealDataOnlyTest.ROWS))  # the copy: same rows
+        self.dst.alembic("head")
+
+    @staticmethod
+    async def _sql(db, sql):
+        c = await asyncpg.connect(db.url)
+        try:
+            await c.execute(sql)
+        finally:
+            await c.close()
+
+    def _target_env(self):  # as the runner reads its database (db/url.py)
+        return {"DATABASE_URL": self.dst.url.replace("postgresql://", "postgresql+asyncpg://")}
+
+    def test_prune_then_check_matches(self):
+        with unittest.mock.patch.dict(os.environ, self._target_env()):
+            code = asyncio.run(migration_check._main(self.src.url, "-", real=True, prune=True))
+        self.assertEqual(code, 0, "the pruned, upgraded copy should MATCH")
+
+    def test_it_never_prunes_its_source(self):
+        with self.assertRaises(SystemExit):
+            asyncio.run(migration_check._main(self.src.url, self.src.url, real=True, prune=True))
 
 
 class FileCheckTest(unittest.TestCase):

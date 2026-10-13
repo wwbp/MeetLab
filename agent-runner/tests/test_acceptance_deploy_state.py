@@ -48,7 +48,7 @@ class TestStillDeploying(unittest.TestCase):
     swap (stop-first, minutes down) made every scenario fail with a 500 (2026-10-04)."""
 
     def named(self, name, **kw):
-        return {**service(**kw), "serviceName": f"meetlab-v2-staging-{name}", "status": "ACTIVE", "desiredCount": 1}
+        return {**service(**kw), "serviceName": f"meetlab-v2-staging-{name}", "status": "ACTIVE", "desiredCount": 1, "runningCount": 1}
 
     def test_names_the_services_still_coming_up(self):
         services = [self.named("livekit"), self.named("meet", rollout="COMPLETED"), self.named("agent-runner", rollout="COMPLETED")]
@@ -62,6 +62,12 @@ class TestStillDeploying(unittest.TestCase):
         with self.assertRaises(Exception) as e:
             still_deploying([stuck])
         self.assertIn("livekit", str(e.exception))
+
+    def test_a_service_with_its_task_gone_is_waited_for(self):
+        # 2026-10-13: a deploy's new machine image refreshed staging's one LiveKit machine after
+        # the apply; its deploy had long COMPLETED, but nothing ran for 6 min and 6 scenarios got 500s.
+        gone = {**self.named("livekit", rollout="COMPLETED"), "runningCount": 0}
+        self.assertEqual(still_deploying([gone, self.named("meet", rollout="COMPLETED")]), ["livekit"])
 
     def test_a_switched_off_service_is_not_waited_for(self):
         off = {**self.named("livekit"), "desiredCount": 0}

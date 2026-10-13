@@ -385,8 +385,9 @@ APP_SERVICES = ["livekit", "meet", "agent-runner"]  # the GPU models have their 
 
 
 def still_deploying(services: list[dict]) -> list[str]:
-    """The switched-on services whose deploy has not finished. A LiveKit machine swap
-    (stop-first, minutes down) once made every scenario fail with a 500 (2026-10-04)."""
+    """The switched-on services whose deploy has not finished, or that run fewer tasks than
+    wanted. A LiveKit machine swap (stop-first, minutes down) once made every scenario fail with
+    a 500 (2026-10-04)."""
     waiting = []
     for svc in services:
         if svc["status"] != "ACTIVE" or svc["desiredCount"] == 0:
@@ -395,7 +396,9 @@ def still_deploying(services: list[dict]) -> list[str]:
         state, why = deploy_state(svc)
         if state == "failed":
             raise Fail(f"{name}'s deploy will not finish: {why}")
-        if state == "waiting":
+        # A finished deploy with fewer tasks running than wanted: a machine being replaced
+        # (a new machine image refreshes its group after the apply, 2026-10-13).
+        if state == "waiting" or svc["runningCount"] < svc["desiredCount"]:
             waiting.append(name)
     return waiting
 

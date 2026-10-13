@@ -14,7 +14,7 @@ import uuid
 import asyncpg
 
 from db.url import database_url
-from migration_check import V1_TO_V2 as ALLOWED, compare, compare_files, fingerprint, pilot_rows, prune_to_pilot, restrict
+from migration_check import V1_TO_V2 as ALLOWED, compare, compare_files, fingerprint, kept_rows, prune_harness, restrict
 
 V1_HEAD = "e7c4b9a13d02"  # v1's (main's) last migration; v2 adds six on top
 AGENT_RUNNER = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -113,55 +113,65 @@ class MigrationTest(unittest.TestCase):
         self.assertIn("speakers: 1 row(s) that should not be there: stray", compare(before, after, allowed=ALLOWED).problems)
 
 
-class PilotOnlyTest(MigrationTest):
-    """v2 production keeps only the pilot (user, 2026-10-06): sessions from start links
-    (`link-*` rooms) and what belongs to them; Bot Config (the study conditions) stays.
-    Load tests, benches and developer tests stay in v1 and its snapshot only."""
+class RealDataOnlyTest(MigrationTest):
+    """v2 production keeps everything but our programmatic runs (user, 2026-10-13): sessions in
+    harness rooms (convo-, soak-, bench-, verify-live, concierge-load) and what is only theirs.
+    Start-link sessions, the team's hand-made sessions and Bot Config all arrive whole; a person
+    who joined but never spoke keeps their speaker row. v1 and its snapshot keep everything."""
 
-    PILOT = """
-    INSERT INTO speakers (id, meta) VALUES ('p-pilot', '{"prolific_id": "5f0c0ffee0000000000000b2"}');
+    ROWS = """
+    INSERT INTO speakers (id, meta) VALUES
+      ('p-link', '{"prolific_id": "5f0c0ffee0000000000000b2"}'), ('p-silent', '{"prolific_id": "5f0c0ffee0000000000000c3"}'),
+      ('p-team', '{}'), ('speaker_0_131f', '{}'), ('bot_link', '{}'), ('bot_convo', '{}');
     INSERT INTO conversations (id, room_name, bot_identity, started_at, ended_at, status, meta) VALUES
-      ('c-pilot', 'link-mubrfzcb-b79ceb1d', 'bot_x', '2026-09-21 14:00+00', '2026-09-21 14:06+00', 'ended', '{}');
+      ('c-link', 'link-mubrfzcb-b79ceb1d', 'bot_link', '2026-09-21 14:00+00', '2026-09-21 14:06+00', 'ended', '{}'),
+      ('c-team', 'test-aug', 'bot_x', '2026-08-10 09:00+00', '2026-08-10 09:02+00', 'ended', '{}'),
+      ('c-convo', 'convo-dafcfc-r03', 'bot_convo', '2026-08-26 10:00+00', '2026-08-26 10:03+00', 'ended', '{}'),
+      ('c-soak', 'soak-d56317-r15', 'bot_convo', '2026-08-20 10:00+00', '2026-08-20 10:08+00', 'ended', '{}'),
+      ('c-load', 'concierge-load-1', NULL, '2026-07-29 10:00+00', '2026-07-29 10:05+00', 'ended', '{}');
     INSERT INTO utterances (id, speaker_id, conv_id, ts, text, meta) VALUES
-      ('u-pilot', 'p-pilot', 'c-pilot', 1790000000.0, 'I think the second option.', '{}'),
-      ('u-pilot-bot', 'bot_x', 'c-pilot', 1790000001.5, 'Why that one?', '{}');
+      ('u-link', 'p-link', 'c-link', 1790000000.0, 'I think the second option.', '{}'),
+      ('u-link-bot', 'bot_link', 'c-link', 1790000001.5, 'Why that one?', '{}'),
+      ('u-team', 'p-team', 'c-team', 1786000000.0, 'Testing the timer.', '{}'),
+      ('u-convo', 'speaker_0_131f', 'c-convo', 1787000000.0, 'What is the weather like?', '{}'),
+      ('u-convo-bot', 'bot_convo', 'c-convo', 1787000001.0, 'Sunny.', '{}'),
+      ('u-soak-p1', 'p1', 'c-soak', 1786900000.0, 'Is this working?', '{}');
     INSERT INTO media_files (id, conv_id, type, status, path, created_at, meta) VALUES
-      ('m-pilot', 'c-pilot', 'audio_track', 'available', 'recordings/pilot.wav', '2026-09-21 14:06+00', '{}');
+      ('m-link', 'c-link', 'audio_track', 'available', 'recordings/link.wav', '2026-09-21 14:06+00', '{}'),
+      ('m-convo', 'c-convo', 'recording', 'available', 'recordings/convo.mp4', '2026-08-26 10:03+00', '{}');
     INSERT INTO events (conv_id, type, severity, room_name, payload, created_at) VALUES
-      ('c-pilot', 'room_finished', 'info', 'link-mubrfzcb-b79ceb1d', '{}', '2026-09-21 14:06+00'),
+      ('c-link', 'room_finished', 'info', 'link-mubrfzcb-b79ceb1d', '{}', '2026-09-21 14:06+00'),
+      ('c-convo', 'room_finished', 'info', 'convo-dafcfc-r03', '{}', '2026-08-26 10:03+00'),
+      (NULL, 'webhook', 'info', 'convo-dafcfc-r03', '{}', '2026-08-26 10:00+00'),
       (NULL, 'admin_action', 'info', NULL, '{}', '2026-09-21 13:00+00');
     """
 
-    def test_only_the_pilot_and_bot_config_arrive_and_every_pilot_row_is_whole(self):
-        asyncio.run(self._sql(self.PILOT))
-        before = asyncio.run(self._fingerprint())
+    async def _with(self, fn):
+        c = await asyncpg.connect(self.db.url)
+        try:
+            return await fn(c)
+        finally:
+            await c.close()
 
-        async def keep():
-            c = await asyncpg.connect(self.db.url)
-            try:
-                return await pilot_rows(c)
-            finally:
-                await c.close()
-        kept = asyncio.run(keep())
-        self.assertEqual(kept["conversations"], {"c-pilot"})
-        self.assertEqual(kept["utterances"], {"u-pilot", "u-pilot-bot"})
-        self.assertEqual(kept["speakers"], {"p-pilot", "bot_x"}, "the speakers of kept turns, the bot included")
+    def test_harness_runs_go_and_every_other_row_arrives_whole(self):
+        asyncio.run(self._sql(self.ROWS))
+        before = asyncio.run(self._fingerprint())
+        kept = asyncio.run(self._with(kept_rows))
+        self.assertEqual(kept["conversations"], {"c-ended", "c-old", "c-new", "c-link", "c-team"})
+        self.assertEqual(kept["media_files"], {"m-s3", "m-local", "m-link"})
+        self.assertEqual(kept["speakers"], {"p1", "bot_x", "p-link", "p-silent", "p-team", "bot_link"},
+                         "harness-only speakers go; a speaker with turns elsewhere (p1) or none (p-silent) stays")
+        self.assertNotIn("u-soak-p1", kept["utterances"], "a person's turn inside a load test goes with it")
 
         self.db.alembic("head")
-
-        async def prune():
-            c = await asyncpg.connect(self.db.url)
-            try:
-                await prune_to_pilot(c)
-            finally:
-                await c.close()
-        asyncio.run(prune())
+        asyncio.run(self._with(prune_harness))
         after = asyncio.run(self._fingerprint(like=before))
 
         report = compare(restrict(before, kept), after, allowed=ALLOWED)
-        self.assertEqual(report.problems, [], "a pilot row lost or changed")
-        self.assertEqual({t: set(v["rows"]) for t, v in after.items() if t != "bot_config"},
-                         {t: kept[t] for t in kept if t != "bot_config"}, "nothing but the pilot remains")
+        self.assertEqual(report.problems, [], "a kept row lost or changed, or a harness row left behind")
+        events = {r for r in after["events"]["rows"]}
+        self.assertEqual(len(events), len(kept["events"]))
+        self.assertEqual(len(kept["events"]), 3, "the link session's, c-ended's and the admin action's")
         self.assertEqual(len(after["bot_config"]["rows"]), 3, "every Bot Config row stays (study conditions)")
 
 

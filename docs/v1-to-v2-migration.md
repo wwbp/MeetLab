@@ -15,14 +15,23 @@ every row and every file arrived.
 Logs (CloudWatch, 90 days) and metrics (Grafana) stay where they are. Staging's data is test
 data; only the voiced conversation library is copied (`data/conversation-library/`).
 
-## Only the pilot arrives
+## Real data arrives, our programmatic runs don't
 
-v2 production keeps only the pilot (decided 2026-10-06): the sessions participants joined
-through start links (`link-*` rooms: 79 of v1's 558) with their turns, speakers, recordings and
-events, plus every Bot Config row (the study conditions). Load tests, benches and developer
-tests stay in v1 and its snapshot. After the upgrade, `migration_check.prune_to_pilot` deletes
-the rest from the copy (never from v1); `migration_check.py SOURCE TARGET --pilot` then checks
-that every pilot row arrived whole and nothing else did. Only the kept sessions' files are copied.
+v2 production keeps everything but our programmatic runs (decided 2026-10-13, replacing the
+pilot-only rule of 2026-10-06). Removed: every session in a harness room (`convo-`, `soak-`,
+`bench-`, `verify-live`, `concierge-load`), with its turns, files, events and the speakers that
+only it has. Kept: the start-link sessions (182, the 7 October study on v1 included), the team's
+hand-made sessions (84: `test…`, `weekly-sync`, `101`, …), every speaker with a turn elsewhere or
+none, and every Bot Config row. v1 and its final snapshot keep everything.
+
+Read-only on v1, 2026-10-13: 661 sessions → 395 removed, 266 kept; 14,299 turns → 6,327 kept;
+1,159 speakers → 480 kept (**no participant with a Prolific ID removed**); 1,046 file rows → 510
+kept; 11,905 events → 6,937 kept. No generated speaker (`speaker_0_…`, `soak_r…`, `bench_u…`)
+appears outside a harness room; one soak run had a person watching it, and goes with the run.
+
+After the upgrade, `migration_check.prune_harness` deletes the runs from the copy (never from
+v1); `migration_check.py SOURCE TARGET --real` then checks that every kept row arrived whole and
+nothing else did. Only the kept sessions' files are copied.
 
 ## What v2's upgrades change in v1's rows
 
@@ -42,9 +51,9 @@ fails if anything else differs. It also proves the check catches a lost row and 
 |---|---|---|
 | 0. Protect v1 | manual snapshot, deletion protection, bucket versioning, read-only inventory | ✅ 2026-10-06 (ledger, Manual actions) |
 | 1. The check, test-first | `migration_check.py` and its test | ✅ green in CI |
-| 2. Build v2 production | the staging Terraform as `prod`: production sizes, database across zones, its own versioned bucket; no public address | live tests pass on its private address |
+| 2. Build v2 production | the staging Terraform as `prod`: production sizes, database across zones, its own versioned bucket; `meet-v2.wwbp.org` until cutover | ✅ 2026-10-08, release `v2.0.0`; live tests pass |
 | 3. Rehearse | restore today's v1 snapshot, upgrade, copy the bucket, run the check and the live tests, time each step; throw it away | `MATCH`; repeat until clean |
-| 4. Cutover (~2 h, no study booked) | v1 stops taking sessions; final snapshot; restore, upgrade, prune to the pilot, copy the pilot's files; the check (`--pilot`); move the address; live tests and one real call | `MATCH`, then live tests, then the call; any failure, the address goes back to v1 |
+| 4. Cutover (~2 h, no study booked) | v1 stops taking sessions; final snapshot; restore, upgrade, remove our runs (`prune_harness`), copy the kept sessions' files; the check (`--real`); move the address; live tests and one real call | `MATCH`, then live tests, then the call; any failure, the address goes back to v1 |
 | 5. Hold | v1 stopped but whole | 2–4 weeks of real studies on v2 |
 | 6. Retire | staging, then v1: final snapshot, test-restore it, then remove; v1's bucket kept read-only | each final snapshot restores and matches |
 
@@ -54,9 +63,9 @@ machines) and 32 recordings never finished; check both.
 ## The check
 
 ```bash
-# Database: v1 (source) against v2 (target, pruned to the pilot); prints row counts, allowed
+# Database: v1 (source) against v2 (target, our runs removed); prints row counts, allowed
 # changes, then MATCH or NO MATCH (a missing, changed or extra row is a mismatch)
-uv run python migration_check.py "$V1_DATABASE_URL" "$V2_DATABASE_URL" --pilot
+uv run python migration_check.py "$V1_DATABASE_URL" "$V2_DATABASE_URL" --real
 ```
 
 Files: `migration_check.manifest(bucket)` lists every object with its size and SHA-256 (it reads

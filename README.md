@@ -1,72 +1,100 @@
 # MeetLab
 
-Browser meetings with a voice assistant, recorded for research. A participant joins a room from
-a link; a bot hears each person separately and answers; every session is stored (turns per
-speaker, per-speaker audio, video) for the study team.
+Browser video meetings with a voice AI participant, recorded for research.
 
-## Start here
+People join a room from a link. A bot joins with them, hears each person on a separate
+speech-to-text stream, and answers by voice. Every session is stored: each speaker's turns
+with timings, per-speaker audio, and the room's video.
 
-| | |
+- **Per-speaker listening:** overlapping speakers are transcribed as themselves.
+- **One bot per meeting, isolated:** a crashed bot is replaced within a minute and continues
+  the conversation from the stored turns.
+- **A console for researchers:** rooms, past meetings and transcripts, bot settings per room,
+  one-time participant links, an event log, and a database browser.
+- **Study support:** participant IDs, session time limits, completion codes.
+
+## Contents
+
+- [Quick start](#quick-start)
+- [Architecture](#architecture): C4 context, C4 containers, sequence diagram
+- [Design decisions](#design-decisions)
+- [Repository layout](#repository-layout)
+- [Development](#development)
+- [Deployment](#deployment)
+- [Contributing](#contributing)
+- [Documentation](#documentation)
+
+## Quick start
+
+**Prerequisites:** Docker (with Compose), `make`, and an OpenAI API key.
+
+```bash
+cp agent-runner/.env.runner.example agent-runner/.env.runner   # set OPENAI_API_KEY
+cp meet/.env.local.example meet/.env.local                     # set CONSOLE_PASSWORD and BOT_RUNNER_SECRET
+make start                                                     # build, start, run migrations
+```
+
+| URL | What it is |
 |---|---|
-| **Production** | <https://meet.wwbp.org>: the console at `/` (login: SSM `/meetlab-v2/prod/CONSOLE_PASSWORD`), rooms at `/rooms/<name>` |
-| **Code** | `main` is MeetLab v2, live since 2026-10-14. v1 is the tag [`v1.0.0`](https://github.com/wwbp/MeetLab/tree/v1.0.0) (archive branch `v1`) |
-| **Ship a change** | PR into `main` → merge (tests, images; production untouched) → release tag `v2.x.y` → your approval → production + live tests. [How](#ship-a-change) |
-| **Run it locally** | `make start`, then <http://localhost:3000>. [Quick start](#quick-start-local) |
-| **Decisions, costs, measurements** | [infra/LEDGER.md](infra/LEDGER.md) (every decision and manual action, with dates) |
-| **Never** | release during a study; change AWS by hand (Terraform and GitHub Actions only, except the steps the ledger lists); put a secret in the repo or Terraform |
+| <http://localhost:3000> | The console (sign in with `CONSOLE_PASSWORD`) |
+| `http://localhost:3000/rooms/<name>` | A meeting room |
+| <http://localhost:7860/health> | The bot runner's health check |
 
-New here? Read this page top to bottom, then [CLAUDE.md](CLAUDE.md) (the code's map) and
-[docs/infrastructure.md](docs/infrastructure.md) (the capacity decision matrix: what to run for N rooms).
+Open a room, then press **Start bot** for it in the console. `make stop` shuts everything down.
+The local stack runs the same images and the same speech-to-text server as production, with
+its own LiveKit server; bots start as Docker containers.
 
-## The lay of the land
+## Architecture
 
-**Who uses it and what it talks to** (C4, level 1: system context):
+### C4 level 1: System context
 
 ```mermaid
 flowchart LR
-  participant(["Participant<br/>(a study's start link,<br/>often from Prolific)"])
-  researcher(["Researcher<br/>(the console)"])
+  participant(["Participant<br/>joins from a link"])
+  researcher(["Researcher<br/>uses the console"])
   meetlab["<b>MeetLab</b><br/>meetings with a voice bot,<br/>recorded for research"]
-  livekit["LiveKit Cloud<br/>media and video recording"]
-  openai["OpenAI<br/>the bot's replies"]
-  eleven["ElevenLabs<br/>the bot's voice"]
+  livekit["LiveKit<br/>real-time media,<br/>video recording"]
+  llm["OpenAI<br/>replies"]
+  tts["ElevenLabs<br/>voice"]
   participant -- "joins a room, talks" --> meetlab
-  researcher -- "rooms, Bot settings, start links,<br/>meetings and recordings" --> meetlab
-  meetlab -- "audio and video, recordings" --> livekit
-  meetlab -- "the conversation so far" --> openai
-  meetlab -- "reply text" --> eleven
+  researcher -- "rooms, settings, links,<br/>meetings, recordings" --> meetlab
+  meetlab -- "audio, video, recordings" --> livekit
+  meetlab -- "the conversation so far" --> llm
+  meetlab -- "reply text" --> tts
 ```
 
-**What runs where** (C4, level 2: containers; all in AWS `us-east-1`, defined in
-[infra/stack](infra/stack)):
+### C4 level 2: Containers
 
 ```mermaid
 flowchart TB
   browser(["Browser<br/>participants and researchers"])
-  subgraph aws["AWS, Terraform: infra/stack"]
-    meet["<b>meet</b><br/>Next.js: rooms, console, login<br/>meet/"]
-    runner["<b>agent-runner</b><br/>FastAPI: sessions, bot starts,<br/>recordings, Bot settings<br/>agent-runner/runner.py"]
-    bots["<b>bot</b>, one ECS task per meeting<br/>Pipecat: hear, think, speak<br/>agent-runner/bot.py"]
+  subgraph system["MeetLab"]
+    meet["<b>meet</b><br/>Next.js: rooms, console, API<br/>meet/"]
+    runner["<b>agent-runner</b><br/>FastAPI: sessions, bot starts,<br/>recordings, settings<br/>agent-runner/runner.py"]
+    bots["<b>bot</b>, one per meeting<br/>Pipecat pipeline: hear, think, speak<br/>agent-runner/bot.py"]
     stt["<b>stt-cpu</b><br/>Parakeet speech-to-text on CPU<br/>stt-cpu/"]
-    db[("<b>Postgres</b><br/>sessions, turns, speakers,<br/>settings, events")]
-    s3[("<b>S3</b><br/>per-speaker audio, video,<br/>transcripts")]
+    db[("<b>PostgreSQL</b><br/>sessions, turns, speakers,<br/>settings, events")]
+    store[("<b>Object storage</b><br/>per-speaker audio, video,<br/>transcripts")]
   end
-  livekit["LiveKit Cloud"]
+  livekit["LiveKit"]
   vendors["OpenAI, ElevenLabs"]
   browser -- "HTTPS: pages, console API" --> meet
   browser -- "WebRTC: audio, video" --> livekit
   meet -- "start, stop, settings (bearer secret)" --> runner
-  runner -- "RunTask: one per meeting" --> bots
+  runner -- "starts one per meeting" --> bots
   runner -- "SQL" --> db
   bots -- "joins the room" --> livekit
   bots -- "each person's speech" --> stt
   bots -- "turns, heartbeats" --> db
-  bots -- "per-speaker WAV" --> s3
-  bots -- "prompt / reply text" --> vendors
-  livekit -- "room video (recording)" --> s3
+  bots -- "per-speaker WAV" --> store
+  bots -- "prompt, reply text" --> vendors
+  livekit -- "room video" --> store
 ```
 
-**One meeting, start to end** (the code is in [CLAUDE.md](CLAUDE.md#how-a-meeting-runs)):
+In production each bot is an ECS task and object storage is S3; locally each bot is a Docker
+container and recordings go to a local folder.
+
+### Sequence diagram: one meeting
 
 ```mermaid
 sequenceDiagram
@@ -74,15 +102,15 @@ sequenceDiagram
   actor P as Participant
   participant M as meet
   participant R as agent-runner
-  participant D as Postgres
-  participant B as bot (ECS task)
-  participant L as LiveKit Cloud
+  participant D as PostgreSQL
+  participant B as bot
+  participant L as LiveKit
   participant S as stt-cpu
-  P->>M: opens a start link or room
+  P->>M: opens a room link
   M->>L: creates the room, gives the browser a token
   M->>R: POST /start (room)
   R->>D: records a running session (one per room, enforced)
-  R->>B: starts the meeting's own bot task
+  R->>B: starts the meeting's own bot
   B->>D: reads its session, mints its LiveKit token
   B->>L: joins the room, greets
   loop every turn
@@ -90,108 +118,92 @@ sequenceDiagram
     L->>B: that person's audio track
     B->>S: their speech, cut at pauses
     S-->>B: text
-    B->>B: reply (OpenAI), voice (ElevenLabs)
+    B->>B: reply (LLM), voice (TTS)
     B->>L: the spoken reply
     B->>D: both turns, with timings
   end
   B->>D: heartbeat every 10 s
   Note over R,B: silent for 30 s: the runner fails the session and starts<br/>a new bot that resumes from the stored turns
   P->>L: leaves
-  B->>D: session ended, per-speaker audio to S3
+  B->>D: session ended, per-speaker audio to storage
 ```
 
-## Major design decisions
+## Design decisions
 
-Each has its reasons, numbers and date in the [ledger](infra/LEDGER.md).
+The full record, with the measurements and dates behind each one, is the decision log in
+[infra/LEDGER.md](infra/LEDGER.md#decisions).
 
-| Decision | Why |
+| Decision | Why | Consequence |
+|---|---|---|
+| **One bot process per meeting** | One faulty bot can't affect other meetings | Bots scale with meetings; a dead bot is detected by heartbeat and replaced |
+| **The database owns session state**: one running session per room, enforced by a constraint | Restarts of the web or runner services lose nothing | A second start for a room is refused (409) |
+| **A speech-to-text stream per participant** | Overlapping speech stays attributed to the right person | More streams per room; capped per room, and a participant past the cap is refused, not degraded |
+| **Self-hosted speech-to-text on CPU** (Parakeet) | Same accuracy as the GPU build, ~15 ms slower at p95, no per-minute fee, audio stays in our cloud | A GPU only pays off past ~100 concurrent rooms |
+| **Managed LiveKit for media and recording** | Cheaper than self-hosting at research volumes | A self-hosted LiveKit setup exists in Terraform as a switch |
+| **Sized for actual use, scaled on request** | Real use is a few hours a month | Capacity comes from measured load tests: [docs/infrastructure.md](docs/infrastructure.md) |
+| **Infrastructure as code, deployed only by CI** | No drift; every change is reviewed | Production changes only through a release tag and an approval |
+| **No staging environment** | The local stack mirrors production | Live tests run against production after every release |
+| **Least-privilege roles, secrets outside the repo** | Contain mistakes and leaks | Each role is checked against a permission contract before live tests |
+| **Tests first** | Each bug fix lands with the test that failed first | Static, unit, integration, contract and live levels ([docs/testing.md](docs/testing.md)) |
+
+## Repository layout
+
+| Path | What it is |
 |---|---|
-| **One bot per meeting, in its own container** (an ECS task; a Docker container locally) | One bad bot can't stop other meetings. A killed bot is detected in under 60 s and replaced by one that continues the conversation |
-| **The database decides who has a bot**: one running session per room, enforced by Postgres | A restart of meet or the runner loses nothing; a second Start is refused (409) |
-| **Each participant has their own speech-to-text stream** | Overlapping speakers are heard as themselves; the per-speaker audio is kept |
-| **Speech-to-text is ours** (Parakeet on CPU) | Same accuracy as the GPU version (only 15 ms slower at p95), no per-minute fee, audio stays in our AWS |
-| **Media and video recording on LiveKit Cloud** (Ship plan) | Cheaper than running our own until ~55–60 recorded room-hours a month; 100 recordings at once |
-| **Small by default, scaled on request**: one warm bot machine (5 rooms); *Prepare for study* adds machines | Real use is a few hours a month. Sizes come from measured load tests ([capacity_model.py](agent-runner/capacity_model.py)): 84 rooms within every pass criterion, 100 started at once |
-| **Everything in Terraform, deployed only by GitHub Actions**: a release tag plus a reviewer's approval for production | No drift, every change reviewed; CI's own permissions are in [infra/bootstrap](infra/bootstrap), applied by a person, so CI can't widen them |
-| **One production, no staging** | The local stack mirrors production (same images, same speech-to-text); live tests run on production after every release |
-| **Secrets only in AWS SSM; least-privilege roles**, checked by a permission contract before each live test run | A role can do exactly what the code calls, nothing more ([permission_contract.py](agent-runner/tests/permission_contract.py)) |
-| **Tests first**, at every level ([docs/testing.md](docs/testing.md)) | Static, unit, integration, contract, live meetings on production; each bug fix lands with the test that failed first |
+| [`meet/`](meet) | Next.js app: meeting rooms, the console, its API |
+| [`agent-runner/`](agent-runner) | Python: the runner API, the bot pipeline, database models and migrations |
+| [`stt-cpu/`](stt-cpu) | The CPU speech-to-text server |
+| [`infra/stack/`](infra/stack) | Terraform for the AWS deployment |
+| [`infra/bootstrap/`](infra/bootstrap) | Terraform for CI's own permissions (applied by a maintainer) |
+| [`.devcontainer/`](.devcontainer) | The local Docker Compose stack |
+| [`docs/`](docs) | Documentation site (`make docs`) |
+| [`CLAUDE.md`](CLAUDE.md) | A map of the code for contributors and coding agents |
 
-## Quick start: local
-
-**Prerequisites:** Docker Desktop, an OpenAI API key, `make`.
+## Development
 
 ```bash
-cp agent-runner/.env.runner.example agent-runner/.env.runner   # add OPENAI_API_KEY
-cp meet/.env.local.example meet/.env.local                     # set CONSOLE_PASSWORD + BOT_RUNNER_SECRET
-make start                                                     # build, start, migrate
+make start / make stop       # the local stack
+make logs SERVICE=agent-runner
+make test                    # unit and integration tests against the running stack
+make test-unit               # unit tests only
+make test-static             # dead code, image size, docs, lint, types, workflows, scripts
+make test-infra              # Terraform tests, offline
+make docs                    # the documentation site
 ```
 
-| URL | What it is |
-|-----|-----------|
-| <http://localhost:3000> | The console (sign in with `CONSOLE_PASSWORD`) |
-| `http://localhost:3000/rooms/<name>` | A meeting room |
-| <http://localhost:7860/health> | agent-runner health |
+The runner has no hot reload: `docker compose -f .devcontainer/docker-compose.yml restart agent-runner`
+after editing Python. Test levels and pass criteria: [docs/testing.md](docs/testing.md).
 
-The local stack runs the same images as production, with its own LiveKit and the same CPU
-speech-to-text server; bots start as Docker containers. Then:
+## Deployment
 
-```bash
-make test           # unit + integration tests against the running stack
-make test-static    # dead code, image size, docs, lint, types, workflows, scripts
-make test-infra     # Terraform tests, offline
-make docs           # the documentation site
-```
+MeetLab runs on AWS (ECS, RDS, S3) from the Terraform in [`infra/stack`](infra/stack), deployed
+only by GitHub Actions:
 
-## Quick start: cloud
+1. **Pull request:** tests run, and CI posts a read-only Terraform plan.
+2. **Merge to `main`:** tests run again and images are built. Nothing is deployed.
+3. **Release:** a `v2.x.y` tag on a green `main` commit. After a maintainer approves, CI applies
+   the plan and runs live tests.
 
-Production already exists; you change it through GitHub, never by hand.
+Set-up, secrets, releasing and operating: [docs/deployment.md](docs/deployment.md).
 
-### Ship a change
+## Contributing
 
-1. **PR into `main`.** CI runs every test and posts a read-only Terraform plan of production.
-   Read it: a "destroy" or "replace" on the database, bucket or load balancer needs a second look.
-2. **Merge.** CI runs the tests again and builds the images, tagged with the commit.
-   Production is not touched.
-3. **Release.** Tag a green `main` commit and push the tag:
-   ```bash
-   git fetch origin && git tag v2.1.2 origin/main && git push origin v2.1.2
-   ```
-   In GitHub, *Actions → Release → Review deployments → Approve*. Production is updated,
-   then live tests hold real meetings on meet.wwbp.org. **Never release during a study.**
+1. Branch from `main` and open a pull request into `main`.
+2. Write the failing test first; keep `make test`, `make test-static` and `make test-infra` green.
+3. Use [Conventional Commits](https://www.conventionalcommits.org/) (`feat(bot): …`, `fix(console): …`).
+4. Never commit secrets or participant data. Configuration goes in env files (local) or a secret
+   store (cloud).
+5. A new Bot settings field goes in three places (model and migration, runner API, console form);
+   `make test-config-parity` checks this.
 
-### Look at production
+## Documentation
 
-- **The console:** <https://meet.wwbp.org> (Meetings, Events, Bot settings, Start links,
-  Database).
-- **Logs:** CloudWatch, `/meetlab-v2/prod/<meet|agent-runner|bot|stt-cpu>`.
-- **Secrets:** SSM `/meetlab-v2/prod/*`.
-- **Before a study:** check the ElevenLabs quota (a used-up quota makes a silent bot) and press
-  *Prepare for study* about 10 minutes before.
-- **First-time AWS set-up and the steps only a person does** (bootstrap roles, secrets, the
-  recording key): [docs/deployment.md](docs/deployment.md).
-
-## The console
-
-- **Rooms**: create rooms, start and stop bots, record video, prepare for a study.
-- **Meetings**: past sessions with transcripts, per-speaker audio and recordings.
-- **Events**: the durable event log (errors and admin actions).
-- **Bot settings**: the bot's prompt, greeting, models, voice and timing, globally or per room.
-- **Start links**: one link per participant for a study.
-- **Database ↗**: SQLAdmin over Postgres (console login required).
-
-## Good to know
-
-- **Recording.** Video is recorded by LiveKit (locally the `egress` container writes to
-  `recordings/`; production records through LiveKit Cloud into S3). Per-speaker audio is
-  written by the bot itself and survives a failed video recording. With auto-record on, a session
-  that can't get a recorder within 10 minutes shows a failed recording.
-- **Participant cap.** One room admits `MAX_PARTICIPANT_WORKERS` speech-recognition streams
-  (default 6). A **new** participant past that is refused, not silently degraded (an overload
-  once dropped replies from 261 to 23), and it is logged as a WARNING in the event log.
-- **Bot identity** is any participant whose identity starts with `bot_`.
-- **meet keeps some display state in memory** (track subscriptions); a restart resets those
-  views, not sessions.
-- **v1's data** (its real sessions, 266 of 661; our own test runs left out) moved into v2 on
-  2026-10-14 and was checked row by row; v1's database snapshots and an archive of its files are
-  kept ([docs/v1-to-v2-migration.md](docs/v1-to-v2-migration.md)).
+| Topic | Where |
+|---|---|
+| Capacity: what to run for N rooms | [docs/infrastructure.md](docs/infrastructure.md) |
+| Deploying and operating | [docs/deployment.md](docs/deployment.md) |
+| Testing | [docs/testing.md](docs/testing.md), [docs/load-testing.md](docs/load-testing.md) |
+| Event log | [docs/event-log.md](docs/event-log.md) |
+| Session limits, study support | [docs/session-limits.md](docs/session-limits.md), [docs/study-support.md](docs/study-support.md) |
+| Decisions, costs, measurements | [infra/LEDGER.md](infra/LEDGER.md) |
+| v1 history | tag [`v1.0.0`](../../tree/v1.0.0), [docs/v1-to-v2-migration.md](docs/v1-to-v2-migration.md) |

@@ -1,15 +1,27 @@
-# Deploying v2 — a first-timer's guide
+# Deploying and operating
 
-v2 is MeetLab rebuilt as code: every AWS resource is in Terraform under `infra/`,
-and GitHub Actions deploys it. Nobody clicks around the AWS console or runs
-`terraform apply` against staging by hand. This page is what you need the first
-time you deploy, and the few steps a **person** has to do because the pipeline is
-deliberately not allowed to.
+Every AWS resource is in Terraform under `infra/`, and GitHub Actions deploys it. Nobody
+clicks around the AWS console or runs `terraform apply` against production by hand. This
+page is what you need the first time you deploy, how to look after production, and the few
+steps a **person** has to do because the pipeline is deliberately not allowed to.
 
-- Staging: <https://meet-staging.wwbp.org> (console at `/console`)
-- Production: <https://meet.wwbp.org> (since the cutover, 2026-10-13; `meet-v2.wwbp.org` before)
-- Branch: `main` (v2's code since 2026-10-14). v1 is the tag `v1.0.0` and the archive branch `v1`; never merge into `v1`.
-- Decisions, costs and known issues: [`infra/LEDGER.md`](https://github.com/wwbp/MeetLab/blob/v2/infra/LEDGER.md)
+## Operating production
+
+| | |
+|---|---|
+| **Production** | <https://meet.wwbp.org>: the console at `/`, rooms at `/rooms/<name>` |
+| **Console login** | SSM parameter `/meetlab-v2/prod/CONSOLE_PASSWORD` |
+| **Logs** | CloudWatch, `/meetlab-v2/prod/<meet\|agent-runner\|bot\|stt-cpu>` |
+| **Secrets** | SSM `/meetlab-v2/prod/*`, never in the repo or Terraform state |
+| **Code** | `main`; v1 is the tag `v1.0.0` (archive branch `v1`, never merge into it) |
+| **Decisions, costs, manual actions** | [`infra/LEDGER.md`](https://github.com/wwbp/MeetLab/blob/main/infra/LEDGER.md) |
+
+- **Never release during a study**, and never change AWS by hand: Terraform and GitHub Actions
+  only, apart from the steps under *Things only a person does* (log each in the ledger).
+- **Before a study:** check the ElevenLabs quota (a used-up quota makes a silent bot, with no
+  error), and press *Prepare for study* in the console about 10 minutes before.
+- **Bigger studies:** the decision matrix in [infrastructure.md](infrastructure.md) says what
+  to change for N rooms.
 
 ## How a deploy happens
 
@@ -43,8 +55,8 @@ Watch merges under **Actions → Build**, releases under **Actions → Release**
 
 ## Releasing to production
 
-Production runs the **same images staging already passed**, never a new build. A release
-is a git tag on a `main` commit whose Build build (tests and images) is green:
+Production runs the **same images the merge built and tested**, never a new build. A release
+is a git tag on a `main` commit whose Build run (tests and images) is green:
 
 ```bash
 git fetch origin && git tag v2.1.2 origin/main && git push origin v2.1.2
@@ -91,18 +103,15 @@ terraform apply
 When a PR changes `bootstrap/`, apply it **before** merging that PR, or the
 pipeline will fail with "AccessDenied".
 
-### 2. Secrets (once per environment)
+### 2. Secrets (once)
 
-Vendor keys live in SSM Parameter Store under `/meetlab-v2/<env>/` (`staging` or
-`prod`). They are never in Terraform or in the repo. To fill them (copies v1's keys,
-generates the rest, puts placeholders for the recording key, prints no values):
+Vendor keys live in SSM Parameter Store under `/meetlab-v2/prod/`. They are never in
+Terraform or in the repo. Production's are in place; to fill a fresh environment
+(generates what it can, puts placeholders for the recording key, prints no values):
 
 ```bash
-infra/seed-secrets.sh staging    # or: prod
+infra/seed-secrets.sh prod
 ```
-
-Staging uses v1's vendor keys for sanity checks only — **no load tests** on them
-(see "On hold" in the ledger).
 
 ### 3. The video-recording key for LiveKit
 
@@ -113,7 +122,7 @@ so it needs an AWS access key. Terraform creates a user for this,
 create its key (a key in Terraform would sit in the state file). You mint it:
 
 ```bash
-# once the egress user exists (after the environment's first deploy); env=staging or prod
+# once the egress user exists (after the environment's first deploy)
 env=prod
 aws iam create-access-key --user-name meetlab-v2-$env-egress-writer \
   --query 'AccessKey.[AccessKeyId,SecretAccessKey]' --output text \
@@ -138,64 +147,27 @@ dashboard.
 with the command above, redeploy agent-runner, then delete the old key with
 `aws iam delete-access-key`.
 
-### 4. The NVIDIA key for staging's speech-to-text server (once)
+### 4. The NVIDIA key, for the GPU speech-to-text server (once)
 
-Staging can run its own Parakeet speech-to-text server (the "NIM", on a GPU), as v1
-does. NVIDIA's registry needs a key both to download the server and its model. It
-lives in Secrets Manager, in the shape ECS expects for a private registry:
+Only needed if production switches to the GPU server (below). NVIDIA's registry needs a key to
+download the server and its model; it is in Secrets Manager as `meetlab-v2/prod/ngc`, in the shape
+ECS expects for a private registry (`{"username": "$oauthtoken", "password": "<NGC key>"}`).
+Development use is covered by NVIDIA's free developer program; production use needs an NVIDIA AI
+Enterprise licence (ledger).
 
-```bash
-# copies v1's key; nothing is printed
-aws secretsmanager create-secret --region us-east-1 --name meetlab-v2/staging/ngc \
-  --secret-string "$(aws ssm get-parameter --region us-east-1 --name /meetlab/stt-nim/ngc_api_key \
-      --with-decryption --query Parameter.Value --output text \
-    | python3 -c 'import json,sys; print(json.dumps({"username": "$oauthtoken", "password": sys.stdin.read().strip()}))')"
-```
+## Switching optional parts on and off
 
-Only needed before the NIM is first switched on. Staging/test use is covered by
-NVIDIA's free developer program; production needs a licence (ledger).
+Production's sizes and switches are its profile in `infra/stack/profiles.tf`. Every change is
+a PR, a merge, then a **release** (a merge alone deploys nothing). Never change the defaults in
+`variables.tf` for this. What to switch, and when, is the decision matrix in
+[infrastructure.md](infrastructure.md).
 
-## Switching staging's speech-to-text server on and off
-
-Off by default: bots use Deepgram and the GPU costs nothing. To turn it on, open a PR
-that sets `stt_nim_enabled = true` in the **staging** profile in
-`infra/stack/profiles.tf`, and merge it (merge = deploy). Never change the defaults in
-`variables.tf` for this: those apply to production too. What happens:
-
-- An on-demand `g6.xlarge` starts, downloads the server and **builds the model: about
-  20–30 minutes** before it answers. Bots started meanwhile still point at it and
-  their speech is not transcribed, so wait.
-- The `transcript` live test waits for it, then checks a bot's transcript came from it.
-- Turn it off again with a PR setting it back to `false`. It costs $0.805 per hour
-  while on (on-demand; spot was tried and AWS had none) plus a small load balancer,
-  so an hour-long test costs under $1. **Don't leave it on.**
-
-`g6.xlarge` is the smallest machine that can run it: the model needs 13.75 GB of GPU
-memory, and the fractional-GPU machines top out at 11.4 GB (ledger).
-
-## Switching our own LLM and voice on and off
-
-Same idea, for the language model (Qwen, on vLLM) and the voice (Kokoro): set
-`model_services = ["llm", "tts"]` in the staging profile in `infra/stack/profiles.tf`
-(or just one of them) and merge. Each starts its own `g6.xlarge` ($0.805/hour) and
-downloads its model first (minutes). Then, in the console's Bot Config, a room uses
-them by choosing `Qwen/Qwen2.5-7B-Instruct` as its model and `kokoro` as its voice
-provider (voice names like `alloy` work). The `our_models` live test waits for both,
-then checks a bot answers and speaks on them. Turn them off with `[]`.
-
-## Switching video recording on and off
-
-Our own LiveKit records rooms as video with LiveKit's egress server
-(`infra/stack/egress_server.tf`). It's off between studies. Switch it on **before** a
-study or a video test: set `egress_count = 1` in the staging profile in
-`infra/stack/profiles.tf` and merge (production always has one on). That starts one `c6i.2xlarge` ($0.34/hour),
-which records one room at a time; raise the number for more rooms at once.
-
-A recording asked for while no egress machine is up fails straight away (LiveKit doesn't
-wait). The audio of each speaker is recorded by the bot either way. With egress on, the
-`video_recording` and `auto_record` live tests run; with it off they show as "not run".
-Turn it off with `default = 0`. Redis (which hands LiveKit's recordings to egress) stays on:
-about $12 a month.
+| Switch | Profile setting | Notes |
+|---|---|---|
+| Bigger speech-to-text machine | `stt_cpu_instance_type` | c6i.xlarge past 26 rooms, c6i.2xlarge past 53 |
+| Speech-to-text on a GPU (Parakeet NIM) | `stt_nim_enabled = true`, `stt_cpu_enabled = false` | an on-demand `g6.xlarge` ($0.805/hour), the smallest that fits the model (13.75 GB of GPU memory); it **builds its model for 20–30 minutes** before it answers, so switch a day early |
+| Our own LLM and voice (Qwen on vLLM, Kokoro) | `model_services = ["llm", "tts"]` | one `g6.xlarge` each; a room uses them by choosing `Qwen/Qwen2.5-7B-Instruct` and the `kokoro` voice provider in Bot settings; the `our_models` live test checks them |
+| Self-hosted LiveKit and video recording | `livekit_self_hosted = true`, `egress_count = N` | each recorder is a `c6i.2xlarge` ($0.34/hour) and records about 3 rooms; with no recorder up, a recording request fails at once (the bot still records each speaker's audio) |
 
 ## Running the live tests yourself
 

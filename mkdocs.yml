@@ -27,7 +27,7 @@ nav:
       - Load and quality testing: load-testing.md
       - "Load test report, October 2026": load-test-report-2026-10.md
       - "Fastest options per stage": latency-options.md
-      - Deploying v2 (first time): deployment.md
+      - Deploying and operating: deployment.md
       - "Moving v1's data to v2": v1-to-v2-migration.md
 
 exclude_docs: |

@@ -1,6 +1,6 @@
 """One production, no staging (2026-10-14): what the workflows must and must never do.
 
-Merges into v2 run the tests and build the images (with the images-only role); PRs plan
+Merges into main (v2's code) run the tests and build the images (with the images-only role); PRs plan
 production read-only; only a release tag, after the reviewer's approval, applies anything,
 and its live tests run against production. Run from the repo root (make test-infra):
 
@@ -18,6 +18,8 @@ rules = {
     "nothing in the merge workflow targets staging":
         not any("staging" in l for l in infra.splitlines() if not l.lstrip().startswith("#")),
     "merges push images with the images-only role": "vars.IMAGES_ROLE_ARN" in infra,
+    "main is v2's branch (v1 is the tag v1.0.0)": "branches: [main]" in infra and "refs/heads/main" in infra
+        and "origin/main" in release and "v2" not in re.findall(r"branches: \[(\w+)\]", infra),
     "PRs plan production": "-backend-config=key=v2/prod/terraform.tfstate" in infra,
     "PR plans never lock (the plan role can't write production's state)": "-lock=false" in infra,
     "only a release applies, after approval": "environment: production" in release and "terraform apply" in release,

@@ -8,7 +8,7 @@ MeetLab v2: browser meetings with a voice bot, recorded for research. Production
 the Terraform stack `infra/v2/stack` (`env = prod`; `staging` remains a profile, unused), sizes in `profiles.tf`,
 one production at meet.wwbp.org, no staging (since 2026-10-14). A merge builds images (`infra-v2.yml`); only a `v2.*` release tag deploys, after an approval (`release-v2.yml`); CI's own permissions are
 `infra/v2/bootstrap`, applied by a person. Decisions, costs and measurements: `infra/v2/LEDGER.md`.
-v1 (Elastic Beanstalk) is frozen on `main` and tagged `v1.0.0`; nothing of it lives on `v2`.
+`main` is v2 (since 2026-10-14). v1 (Elastic Beanstalk, removed) is the tag `v1.0.0` and the archive branch `v1`.
 
 The local Docker stack (`.devcontainer/docker-compose.yml`) mirrors production so errors show up
 early: same images, same speech-to-text path.

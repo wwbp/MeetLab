@@ -1,8 +1,8 @@
 # Production: a release tag deploys the exact images a green build made (one production, no staging).
 #
-#   git tag v2.1.2 <a v2 commit whose Infra v2 build is green> && git push origin v2.1.2
+#   git tag v2.1.2 <a main commit whose Infra v2 build is green> && git push origin v2.1.2
 #
-#   staged  -> no credentials: the commit is on v2 and its "Infra v2" build (tests, images) succeeded
+#   staged  -> no credentials: the commit is on main and its "Infra v2" build (tests, images) succeeded
 #   deploy  -> waits for your approval (the `production` environment: required reviewer,
 #              v2.* tags only), then tags the images with the release (release images
 #              never expire: bootstrap images.tf), applies infra/v2/stack as prod, and runs
@@ -38,13 +38,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 }
-      - name: On v2, and its build green
+      - name: On main, and its build green
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          git merge-base --is-ancestor "$GITHUB_SHA" origin/v2 \
-            || { echo "::error::$GITHUB_REF_NAME ($GITHUB_SHA) is not on v2"; exit 1; }
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/main \
+            || { echo "::error::$GITHUB_REF_NAME ($GITHUB_SHA) is not on main"; exit 1; }
           green=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow infra-v2.yml --event push \
             --commit "$GITHUB_SHA" --status success --json databaseId -q length)
           [ "$green" -gt 0 ] \

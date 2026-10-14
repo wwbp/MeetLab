@@ -1,8 +1,8 @@
-# The v2 pipeline before production (one production, no staging, since 2026-10-14):
+# The pipeline before production (main is v2's code; v1 is the tag v1.0.0) (one production, no staging, since 2026-10-14):
 #
-#   PR into v2  -> offline tests + a read-only plan of production, posted on the PR;
+#   PR into main -> offline tests + a read-only plan of production, posted on the PR;
 #                  images built but not pushed
-#   merge to v2 -> the tests, then images pushed, tagged with the commit SHA (the images-only
+#   merge to main -> the tests, then images pushed, tagged with the commit SHA (the images-only
 #                  role). Nothing is deployed: a release tag deploys a green build's images
 #                  to production after the reviewer's approval (release-v2.yml).
 #
@@ -16,10 +16,10 @@ name: Infra v2
 
 on:
   pull_request:
-    branches: [v2]
+    branches: [main]
     paths: ["infra/v2/**", ".github/workflows/**", "Makefile", "meet/**", "agent-runner/**", "!**/*.md"]
   push:
-    branches: [v2]
+    branches: [main]
     paths: ["infra/v2/**", ".github/workflows/infra-v2.yml", "meet/**", "agent-runner/**", "!**/*.md"]
 
 permissions:
@@ -117,7 +117,7 @@ jobs:
 
   # Merges: push images tagged with the commit SHA; a release deploys them (release-v2.yml).
   images:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/v2'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: test
     runs-on: ubuntu-latest
     permissions:

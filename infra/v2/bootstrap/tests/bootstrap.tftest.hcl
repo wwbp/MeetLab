@@ -23,9 +23,9 @@ run "plan_role_trusts_only_this_repo_prs_and_v2_pushes" {
   assert {
     condition = toset(jsondecode(aws_iam_role.plan.assume_role_policy).Statement[0].Condition.StringEquals["token.actions.githubusercontent.com:sub"]) == toset([
       "repo:wwbp/MeetLab:pull_request",
-      "repo:wwbp/MeetLab:ref:refs/heads/v2",
+      "repo:wwbp/MeetLab:ref:refs/heads/main",
     ])
-    error_message = "plan role must trust exactly this repo's PRs and pushes to v2"
+    error_message = "plan role must trust exactly this repo's PRs and pushes to main (v2's code since 2026-10-14)"
   }
 
   assert {
@@ -577,8 +577,8 @@ run "the_images_role_pushes_images_from_v2_and_does_nothing_else" {
   command = plan
 
   assert {
-    condition     = jsondecode(aws_iam_role.images.assume_role_policy).Statement[0].Condition.StringEquals["token.actions.githubusercontent.com:sub"] == ["repo:wwbp/MeetLab:ref:refs/heads/v2"]
-    error_message = "only pushes to v2 build release images"
+    condition     = jsondecode(aws_iam_role.images.assume_role_policy).Statement[0].Condition.StringEquals["token.actions.githubusercontent.com:sub"] == ["repo:wwbp/MeetLab:ref:refs/heads/main"]
+    error_message = "only pushes to main build release images"
   }
   assert {
     condition = alltrue([for s in jsondecode(aws_iam_role_policy.images.policy).Statement :

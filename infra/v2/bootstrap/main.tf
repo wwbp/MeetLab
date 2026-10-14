@@ -63,8 +63,9 @@ locals {
   }
 
   trust_for = { for name, subjects in merge(
-    { plan = ["${local.repo}:pull_request", "${local.repo}:ref:refs/heads/v2"] },
-    { images = ["${local.repo}:ref:refs/heads/v2"] }, # merges build release images (infra-v2.yml)
+    # main is v2's code since 2026-10-14 (v1 is the tag v1.0.0)
+    { plan = ["${local.repo}:pull_request", "${local.repo}:ref:refs/heads/main"] },
+    { images = ["${local.repo}:ref:refs/heads/main"] }, # merges build release images (infra-v2.yml)
     { for env, e in local.envs : env => ["${local.repo}:environment:${e.github}"] },
     ) :
     name => jsonencode({
@@ -251,7 +252,7 @@ resource "aws_iam_role_policy" "plan" {
   policy   = each.value
 }
 
-# Merges into v2 build and push the images a release later deploys (infra-v2.yml): ECR only.
+# Merges into main build and push the images a release later deploys (infra-v2.yml): ECR only.
 resource "aws_iam_role" "images" {
   name                 = "meetlab-v2-images"
   assume_role_policy   = local.trust_for["images"]

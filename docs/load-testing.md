@@ -135,10 +135,10 @@ point, and run the big shapes on `ours`.
 1. **Switch on what the profile needs.** For `ours`: `model_services = ["llm", "tts"]` and
    `stt_nim_enabled = true` (see `v2-deployment.md`). Beyond about 6 rooms, also raise
    `bot_pool_max` (each bot machine holds about 3 sessions; default 2 machines).
-2. **Start it** from GitHub → Actions → *Load test v2* → *Run workflow* on branch `v2`,
+2. **Start it** from GitHub → Actions → *Load test v2* → *Run workflow* on branch `main`,
    or from a terminal:
    ```bash
-   gh workflow run loadtest-v2.yml --ref v2 -f profile=ours -f shape=smoke -f target=10
+   gh workflow run loadtest-v2.yml --ref main -f profile=ours -f shape=smoke -f target=10
    ```
    `hold_s=60` shortens every step for a quick rehearsal.
 3. **Read it.** The run's summary page shows one row per step and the verdict; the full

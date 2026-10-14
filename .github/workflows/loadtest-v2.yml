@@ -5,9 +5,9 @@ name: Load test v2
 on:
   # Only a run started by hand tests anything. The push trigger exists because a
   # workflow that isn't on main (frozen) can be dispatched only once GitHub has seen
-  # it run: start it with  gh workflow run loadtest-v2.yml --ref v2 -f shape=...
+  # it run: start it with  gh workflow run loadtest-v2.yml --ref main -f shape=...
   push:
-    branches: [v2]
+    branches: [main]
     paths: [.github/workflows/loadtest-v2.yml]
   workflow_dispatch:
     inputs:

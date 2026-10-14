@@ -5,7 +5,8 @@ other lab projects, and the old `github-actions-service-acc` trusts every `wwbp/
 
 | Role | Assumable from | Can do |
 |---|---|---|
-| `meetlab-v2-tf-plan` | PRs in `wwbp/MeetLab`, pushes to `v2` | Read staging; state under `v2/staging/` |
+| `meetlab-v2-tf-plan` | PRs in `wwbp/MeetLab`, pushes to `main` | Read production, read-only; state under `v2/prod/` |
+| `meetlab-v2-images` | Pushes to `main` | Push images to ECR (`meetlab-v2/*`) only |
 | `meetlab-v2-tf-apply` | The `staging` GitHub environment only (reviewer-gated, `v2` branch only) | Change staging's resources only; state under `v2/staging/` |
 | `meetlab-v2-tf-apply-prod` | The `production` GitHub environment only (your approval) | Change production's resources only; state under `v2/prod/` |
 | `meetlab-v2-acceptance`, `meetlab-v2-acceptance-prod` | Their environment only | The live tests after a deploy, in that environment |

@@ -33,6 +33,7 @@ resource "aws_ecs_task_definition" "migrate" {
   family                   = "${local.name}-migrate"
   requires_compatibilities = ["EC2"]
   network_mode             = "bridge"
+  skip_destroy             = true                       # CI may not deregister task definitions (as everywhere here)
   execution_role_arn       = aws_iam_role.execution.arn # pulls, SSM and the database secret; no task role
   container_definitions = jsonencode([
     {

@@ -47,3 +47,12 @@ run "it_needs_no_aws_permissions_and_holds_no_secret_in_the_definition" {
     error_message = "the source (a restored copy of v1) comes from SSM, never the definition"
   }
 }
+
+run "a_new_revision_never_deregisters_the_old" {
+  command = plan
+
+  assert {
+    condition     = aws_ecs_task_definition.migrate.skip_destroy == true
+    error_message = "CI may not deregister task definitions (#230's staging apply failed on it): keep old revisions, like every task here"
+  }
+}

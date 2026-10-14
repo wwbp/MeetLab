@@ -6,7 +6,7 @@ recorded turns (conversation_script.py), the console starts its bot, and a reply
 bot's audio arriving (conversation_soak.BotListener). Each step of the shape is judged
 by the same SLOs whatever the profile, so runs of different stacks compare directly.
 
-    MEET_URL=https://meet-staging.wwbp.org CONSOLE_PASSWORD=... \\
+    MEET_URL=https://meet.wwbp.org CONSOLE_PASSWORD=... \\
     LIVEKIT_URL=... LIVEKIT_API_KEY=... LIVEKIT_API_SECRET=... \\
     PROFILE=ours SHAPE=smoke TARGET=50 [HOLD_S=60] [WORKERS=8] [RESULTS=s3://bucket/key.json] \\
     uv run python tests/load_run.py
@@ -325,7 +325,7 @@ def main() -> int:
         t0 = float(os.getenv("T0") or time.time() + 5)
         time.sleep(max(0, t0 - 5 - time.time()))  # split runs start together
         bounds = step_bounds(steps, t0)
-        result["bounds"] = bounds  # load_report.py reads staging's side of each step by these
+        result["bounds"] = bounds  # load_report.py reads the environment's side of each step by these
         ctx = mp.get_context("spawn")
         q, abort = ctx.Queue(), ctx.Event()
         procs = [ctx.Process(target=_worker, args=(w, rooms[w::workers], run_id, steps, t0, profile, q, abort),

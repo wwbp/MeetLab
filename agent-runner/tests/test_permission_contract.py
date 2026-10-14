@@ -44,17 +44,17 @@ class ViolationsTest(unittest.TestCase):
 class ContractTest(unittest.TestCase):
     def test_the_contract_covers_the_calls_that_failed_live(self):
         needed = {(c.role, c.action) for c in ALLOW}
-        self.assertIn(("meetlab-v2-staging-runner-task", "ecs:ListTasks"), needed)   # #102
-        self.assertIn(("meetlab-v2-staging-runner-task", "ecs:RunTask"), needed)     # 4c PR 1
-        self.assertIn(("meetlab-v2-staging-runner-task", "ecs:StopTask"), needed)    # heartbeat stop
-        self.assertIn(("meetlab-v2-staging-bot-task", "ssmmessages:OpenDataChannel"), needed)  # ECS Exec
-        self.assertIn(("meetlab-v2-staging-bot-task", "s3:PutObject"), needed)      # per-speaker audio
-        self.assertIn(("meetlab-v2-staging-runner-task", "s3:GetObject"), needed)   # downloads
+        self.assertIn(("meetlab-v2-prod-runner-task", "ecs:ListTasks"), needed)   # #102
+        self.assertIn(("meetlab-v2-prod-runner-task", "ecs:RunTask"), needed)     # 4c PR 1
+        self.assertIn(("meetlab-v2-prod-runner-task", "ecs:StopTask"), needed)    # heartbeat stop
+        self.assertIn(("meetlab-v2-prod-bot-task", "ssmmessages:OpenDataChannel"), needed)  # ECS Exec
+        self.assertIn(("meetlab-v2-prod-bot-task", "s3:PutObject"), needed)      # per-speaker audio
+        self.assertIn(("meetlab-v2-prod-runner-task", "s3:GetObject"), needed)   # downloads
 
     def test_the_livekit_egress_key_can_only_add_recordings(self):
         # v1's egress key could read, list and delete every recording and switch off
         # the account-wide S3 public-access block; v2's must not be able to.
-        egress = "user/meetlab-v2-staging-egress-writer"
+        egress = "user/meetlab-v2-prod-egress-writer"
         self.assertIn((egress, "s3:PutObject"), {(c.role, c.action) for c in ALLOW})
         forbidden = {(c.role, c.action) for c in DENY}
         for action in ("s3:GetObject", "s3:DeleteObject", "s3:ListBucket", "s3:PutAccountPublicAccessBlock"):
@@ -62,7 +62,7 @@ class ContractTest(unittest.TestCase):
 
     def test_our_own_egress_role_can_only_add_recordings(self):
         # egress_server.tf: our egress uploads video with its task role, no key at all.
-        role = "meetlab-v2-staging-egress-task"
+        role = "meetlab-v2-prod-egress-task"
         self.assertTrue({(role, "s3:PutObject"), (role, "s3:AbortMultipartUpload")} <= {(c.role, c.action) for c in ALLOW})
         forbidden = {(c.role, c.action) for c in DENY}
         for action in ("s3:GetObject", "s3:DeleteObject", "s3:ListBucket"):
@@ -70,34 +70,34 @@ class ContractTest(unittest.TestCase):
 
     def test_users_and_roles_are_simulated_by_their_own_arns(self):
         from permission_contract import principal_arn
-        self.assertTrue(principal_arn("user/meetlab-v2-staging-egress-writer").endswith(":user/meetlab-v2-staging-egress-writer"))
-        self.assertTrue(principal_arn("meetlab-v2-staging-bot-task").endswith(":role/meetlab-v2-staging-bot-task"))
+        self.assertTrue(principal_arn("user/meetlab-v2-prod-egress-writer").endswith(":user/meetlab-v2-prod-egress-writer"))
+        self.assertTrue(principal_arn("meetlab-v2-prod-bot-task").endswith(":role/meetlab-v2-prod-bot-task"))
 
     def test_recordings_cannot_be_read_or_deleted_by_the_bot(self):
         forbidden = {(c.role, c.action) for c in DENY}
-        self.assertIn(("meetlab-v2-staging-bot-task", "s3:DeleteObject"), forbidden)
-        self.assertIn(("meetlab-v2-staging-runner-task", "s3:DeleteObject"), forbidden)
+        self.assertIn(("meetlab-v2-prod-bot-task", "s3:DeleteObject"), forbidden)
+        self.assertIn(("meetlab-v2-prod-runner-task", "s3:DeleteObject"), forbidden)
 
     def test_the_execution_role_reads_the_ngc_secret_and_no_other(self):
         # ECS pulls the STT NIM image and passes its NGC key with the execution role.
-        ex = "meetlab-v2-staging-task-execution"
+        ex = "meetlab-v2-prod-task-execution"
         allowed = [c.resource for c in ALLOW if (c.role, c.action) == (ex, "secretsmanager:GetSecretValue")]
         denied = [c.resource for c in DENY if (c.role, c.action) == (ex, "secretsmanager:GetSecretValue")]
-        self.assertTrue(allowed and all(":secret:meetlab-v2/staging/ngc-" in r for r in allowed))
-        self.assertTrue(denied and not any(":secret:meetlab-v2/staging/ngc-" in r for r in denied))
+        self.assertTrue(allowed and all(":secret:meetlab-v2/prod/ngc-" in r for r in allowed))
+        self.assertTrue(denied and not any(":secret:meetlab-v2/prod/ngc-" in r for r in denied))
 
     def test_the_runner_can_prewarm_the_bot_pool_and_no_other_group(self):
-        runner = "meetlab-v2-staging-runner-task"
+        runner = "meetlab-v2-prod-runner-task"
         allowed = {c.resource for c in ALLOW if (c.role, c.action) == (runner, "autoscaling:UpdateAutoScalingGroup")}
         denied = {c.resource for c in DENY if (c.role, c.action) == (runner, "autoscaling:UpdateAutoScalingGroup")}
-        self.assertTrue(allowed and all(r.endswith("/meetlab-v2-staging-bots") for r in allowed))
-        self.assertTrue({r.rsplit("/", 1)[-1] for r in denied} >= {"meetlab-v2-staging-ecs", "meetlab-v2-staging-stt-nim"})
+        self.assertTrue(allowed and all(r.endswith("/meetlab-v2-prod-bots") for r in allowed))
+        self.assertTrue({r.rsplit("/", 1)[-1] for r in denied} >= {"meetlab-v2-prod-ecs", "meetlab-v2-prod-stt-nim"})
 
     def test_the_runner_can_see_which_machines_ecs_can_use_in_its_own_cluster_only(self):
-        runner = "meetlab-v2-staging-runner-task"
+        runner = "meetlab-v2-prod-runner-task"
         calls = lambda lst: {c.resource for c in lst if (c.role, c.action) == (runner, "ecs:ListContainerInstances")}
-        self.assertTrue(calls(ALLOW) and all(r.endswith("cluster/meetlab-v2-staging") for r in calls(ALLOW)))
-        self.assertTrue(calls(DENY) and not any(r.endswith("cluster/meetlab-v2-staging") for r in calls(DENY)))
+        self.assertTrue(calls(ALLOW) and all(r.endswith("cluster/meetlab-v2-prod") for r in calls(ALLOW)))
+        self.assertTrue(calls(DENY) and not any(r.endswith("cluster/meetlab-v2-prod") for r in calls(DENY)))
 
     def test_every_role_has_something_it_must_never_do(self):
         self.assertTrue({c.role for c in ALLOW} <= {c.role for c in DENY})

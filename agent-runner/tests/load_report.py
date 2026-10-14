@@ -1,10 +1,10 @@
 """A load test's report: what participants heard (the load generator's result) and, step
-by step, what each part of staging was doing meanwhile, so a failing step says why.
+by step, what each part of the environment was doing meanwhile, so a failing step says why.
 
 Quality, per step (quality.py): what the bot heard against what the participant said
 (word error rate, fragmented and missed sentences) and how long its replies ran.
 
-Inside staging, per step: the bot's own stage timings (its "bot reply" log lines:
+Inside the environment, per step: the bot's own stage timings (its "bot reply" log lines:
 turn-end wait, LLM first token, first sentence, TTS first audio) and CloudWatch maxima (CPU and memory
 of each service, CPU of each machine group, database CPU and connections).
 
@@ -24,7 +24,9 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from load_plan import parse_reply, stage_summary, step_of  # noqa: E402
 from quality import clip_reply, reply_for, score_rooms, voice  # noqa: E402
 
-REGION, CLUSTER, DB = "us-east-1", "meetlab-v2-staging", "meetlab-v2-staging"
+# The environment under load (MEETLAB_ENV: prod by default; staging was removed 2026-10-14).
+ENV = os.getenv("MEETLAB_ENV", "prod")
+REGION, CLUSTER, DB, LOGS = "us-east-1", f"meetlab-v2-{ENV}", f"meetlab-v2-{ENV}", f"/meetlab-v2/{ENV}"
 SERVICES = ["meet", "agent-runner", "livekit"]          # ECS services with their own CPU/memory
 GROUPS = ["bots", "ecs", "livekit", "llm", "tts", "stt-nim", "stt-cpu", "egress"]  # machine groups (CPU)
 
@@ -66,7 +68,7 @@ def _stages(bounds) -> list[dict]:
     logs = boto3.client("logs", region_name=REGION)
     per_step = [[] for _ in bounds]
     pages = logs.get_paginator("filter_log_events").paginate(
-        logGroupName=f"/meetlab-v2/staging/bot", filterPattern='"bot reply"',
+        logGroupName=f"{LOGS}/bot", filterPattern='"bot reply"',
         startTime=int(bounds[0][0] * 1000), endTime=int(bounds[-1][1] * 1000))
     for page in pages:
         for e in page["events"]:
@@ -140,7 +142,7 @@ def markdown(r: dict) -> str:
         lines.append(f"| {k} | {m['rooms']} | {m['turns']} | {reply} | {_ms(m['p50_ms'])} | {_ms(m['p95_ms'])} | "
                      f"{_ms(m['p99_ms'])} | {_ms(m['join_p95_s'])} | {verdict} |")
     if any("server" in m for m in r["steps"]):
-        lines += ["", "**Inside staging** (p95 of the bot's own stage timings; maximum CPU/memory %)", "",
+        lines += ["", f"**Inside {ENV}** (p95 of the bot's own stage timings; maximum CPU/memory %)", "",
                   "| step | rooms | turn-end wait ms | LLM first token ms | first sentence ms | TTS first audio ms | meet CPU/mem | runner CPU/mem | "
                   "LiveKit CPU | bot machines CPU | heaviest bot task CPU units / MB (reserved 512 / 1024) | "
                   "LLM / TTS / STT GPU / STT CPU machine CPU | recording machines CPU | DB CPU / connections |",

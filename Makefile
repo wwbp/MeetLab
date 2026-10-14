@@ -113,6 +113,8 @@ test-infra:
 	done
 	@# Every ECS service waits for its tasks' secrets policy (a fresh stack: v2.0.0's meet).
 	python3 infra/v2/stack/tests/secrets_order.py
+	@# One production, no staging: merges build, releases deploy (the workflows).
+	python3 infra/v2/stack/tests/pipeline_check.py
 
 test-integration:
 	$(COMPOSE) up -d transport-server agent-runner meet

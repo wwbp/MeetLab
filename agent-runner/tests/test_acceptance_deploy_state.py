@@ -48,7 +48,7 @@ class TestStillDeploying(unittest.TestCase):
     swap (stop-first, minutes down) made every scenario fail with a 500 (2026-10-04)."""
 
     def named(self, name, **kw):
-        return {**service(**kw), "serviceName": f"meetlab-v2-staging-{name}", "status": "ACTIVE", "desiredCount": 1, "runningCount": 1}
+        return {**service(**kw), "serviceName": f"meetlab-v2-prod-{name}", "status": "ACTIVE", "desiredCount": 1, "runningCount": 1}
 
     def test_names_the_services_still_coming_up(self):
         services = [self.named("livekit"), self.named("meet", rollout="COMPLETED"), self.named("agent-runner", rollout="COMPLETED")]

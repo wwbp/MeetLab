@@ -8,49 +8,52 @@ deliberately not allowed to.
 
 - Staging: <https://meet-staging.wwbp.org> (console at `/console`)
 - Production: <https://meet.wwbp.org> (since the cutover, 2026-10-13; `meet-v2.wwbp.org` before)
-- Branch: `v2`. **Never merge v2 work into `main`** — `main` is v1 and is frozen.
+- Branch: `main` (v2's code since 2026-10-14). v1 is the tag `v1.0.0` and the archive branch `v1`; never merge into `v1`.
 - Decisions, costs and known issues: [`infra/v2/LEDGER.md`](https://github.com/wwbp/MeetLab/blob/v2/infra/v2/LEDGER.md)
 
 ## How a deploy happens
 
+There is one production and no staging (since 2026-10-14). Merging builds; only a release
+deploys, after your approval.
+
 ```mermaid
 flowchart LR
-  PR[PR into v2] --> T[tests + terraform plan<br/>posted on the PR]
-  T --> M[merge = deploy]
-  M --> I[build images<br/>tagged with the commit]
-  I --> A[terraform apply<br/>waits for healthy services]
-  A --> C[permission contract<br/>+ live acceptance tests]
+  PR[PR into main] --> T[tests + a read-only plan<br/>of production, on the PR]
+  T --> M[merge]
+  M --> I[tests again, then images<br/>tagged with the commit]
+  I --> R[release tag v2.x.y]
+  R --> A[your approval]
+  A --> D[apply to production<br/>+ live tests on meet.wwbp.org]
 ```
 
-1. Open a PR into `v2`. CI runs the unit and Terraform tests and posts the
-   Terraform plan as a comment. **Read the plan**: anything "destroy" or "replace"
-   on the database, bucket or load balancer deserves a second look.
-2. **Merging is the deploy.** There is no separate approval button (GitHub's free
-   plan has none for private repos).
-3. Every merge restarts the services, so a call in progress can drop. **Time
-   merges around studies.** Instances also pick up the latest Amazon ECS image on
-   replacement; we chose not to pin it.
-4. After the apply, the `acceptance` job checks every AWS permission the code uses
-   (and ones it must never have), then runs real meetings against staging: a bot
-   joins, is stopped several ways, is killed, and recordings land in S3. A red
-   acceptance job means the deploy is live but broken — look at it before the
-   next merge.
+1. Open a PR into `main`. CI runs the unit and Terraform tests and posts a plan of
+   **production** as a comment. **Read the plan**: anything "destroy" or "replace" on the
+   database, bucket or load balancer deserves a second look.
+2. **Merging deploys nothing.** It runs the tests again and builds the images, tagged with
+   the commit. Production is untouched until a release.
+3. A release (next section) deploys a green build's images to production after your
+   approval, then the live tests run real meetings on meet.wwbp.org: a bot joins, is
+   stopped several ways, is killed, and recordings land in S3. A red live test means
+   production is live but broken: look at it at once.
+4. Test locally before a release (`make start`, `make test`): the local stack mirrors
+   production. A release restarts production's services, so **never release during a
+   study.**
 
-Watch it under **Actions → Infra v2** on GitHub.
+Watch merges under **Actions → Infra v2**, releases under **Actions → Release v2**.
 
 ## Releasing to production
 
 Production runs the **same images staging already passed**, never a new build. A release
-is a git tag on a `v2` commit whose staging deploy is green:
+is a git tag on a `main` commit whose Infra v2 build (tests and images) is green:
 
 ```bash
-git fetch origin && git tag v2.0.0 origin/v2 && git push origin v2.0.0
+git fetch origin && git tag v2.1.2 origin/main && git push origin v2.1.2
 ```
 
 Then, under **Actions → Release v2**:
 
-1. **staged** checks the commit is on `v2` and that its "Infra v2" deploy succeeded. If not,
-   it stops: release a commit staging passed.
+1. **staged** checks the commit is on `main` and that its "Infra v2" build succeeded. If not,
+   it stops: release a commit whose build passed.
 2. **deploy** waits for **your approval** (the `production` environment; only `v2.*` tags
    may use it). Once approved, it tags the images with the release (release images never
    expire), applies `infra/v2/stack` as production, and runs the live tests against

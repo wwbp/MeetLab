@@ -23,9 +23,9 @@ run "plan_role_trusts_only_this_repo_prs_and_v2_pushes" {
   assert {
     condition = toset(jsondecode(aws_iam_role.plan.assume_role_policy).Statement[0].Condition.StringEquals["token.actions.githubusercontent.com:sub"]) == toset([
       "repo:wwbp/MeetLab:pull_request",
-      "repo:wwbp/MeetLab:ref:refs/heads/v2",
+      "repo:wwbp/MeetLab:ref:refs/heads/main",
     ])
-    error_message = "plan role must trust exactly this repo's PRs and pushes to v2"
+    error_message = "plan role must trust exactly this repo's PRs and pushes to main (v2's code since 2026-10-14)"
   }
 
   assert {
@@ -568,5 +568,52 @@ run "production_may_move_meet_wwbp_org_from_v1" {
   assert {
     condition     = !contains(local.envs.staging.hostnames, "meet.wwbp.org")
     error_message = "staging must never be able to touch meet.wwbp.org"
+  }
+}
+
+# One production, no staging (2026-10-14): merges only build images, PRs plan production.
+
+run "the_images_role_pushes_images_from_v2_and_does_nothing_else" {
+  command = plan
+
+  assert {
+    condition     = jsondecode(aws_iam_role.images.assume_role_policy).Statement[0].Condition.StringEquals["token.actions.githubusercontent.com:sub"] == ["repo:wwbp/MeetLab:ref:refs/heads/main"]
+    error_message = "only pushes to main build release images"
+  }
+  assert {
+    condition = alltrue([for s in jsondecode(aws_iam_role_policy.images.policy).Statement :
+    alltrue([for a in flatten([s.Action]) : startswith(a, "ecr:")])])
+    error_message = "the images role reaches ECR only"
+  }
+}
+
+run "pr_plans_read_production_and_never_write_its_state" {
+  command = plan
+
+  assert {
+    condition     = anytrue([for p in values(aws_iam_role_policy.plan) : strcontains(p.policy, "v2/prod/*")]) && !anytrue([for p in values(aws_iam_role_policy.plan) : strcontains(p.policy, "v2/staging")])
+    error_message = "PR plans show production"
+  }
+  assert {
+    condition = !anytrue([for p in values(aws_iam_role_policy.plan) : anytrue([for s in jsondecode(p.policy).Statement :
+    contains(flatten([s.Action]), "s3:PutObject") && strcontains(jsonencode(s.Resource), "v2/prod")])])
+    error_message = "a PR can never write production's state"
+  }
+}
+
+run "the_boundary_lets_live_test_files_be_deleted_and_nothing_else" {
+  command = plan
+
+  assert {
+    condition = alltrue([for env, p in aws_iam_policy.boundary : alltrue([
+      for s in jsondecode(p.policy).Statement : !contains(flatten([s.Action]), "s3:DeleteObject")
+      || flatten([s.Resource]) == ["arn:aws:s3:::meetlab-v2-${env}-media-*/recordings/*-accept-*"]
+    ])])
+    error_message = "the only deletes a CI-created role may ever make are the live tests' own files"
+  }
+  assert {
+    condition = alltrue([for p in values(aws_iam_policy.boundary) : anytrue([
+    for s in jsondecode(p.policy).Statement : contains(flatten([s.Action]), "s3:DeleteObject")])])
+    error_message = "the runner purges the live tests' files after each run (runner.purge_test_data)"
   }
 }

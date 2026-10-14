@@ -5,7 +5,7 @@
 #   infra/live-tests.sh <staging|prod> '<terraform output -json livekit>' [scenario ...]
 #
 # Reads the environment's secrets from SSM (masked in CI logs, never printed), checks the
-# deployed roles' permissions, then runs agent-runner/tests/acceptance_staging.py.
+# deployed roles' permissions, then runs tests/system/acceptance.py.
 set -euo pipefail
 
 env="$1" lk="$2"
@@ -22,7 +22,7 @@ secret() {
 
 # Seconds, before any bot starts: every AWS call the code makes, simulated against the
 # deployed roles (and calls they must never make).
-uv run --no-project --with boto3 python agent-runner/tests/permission_contract.py
+uv run --no-project --with boto3 python tests/system/permission_contract.py
 
 secret CONSOLE_PASSWORD CONSOLE_PASSWORD
 secret LIVEKIT_API_KEY "$(jq -r .key_parameter <<<"$lk")"
@@ -36,4 +36,4 @@ if [ -n "$url" ]; then export LIVEKIT_URL="$url"; else secret LIVEKIT_URL LIVEKI
 # for the whole job twice on 2026-10-07. In CI a stall fails in 10 min.
 ${GITHUB_ACTIONS:+timeout 600} uvx --with playwright playwright install chromium # macOS has no timeout
 uv run --no-project --with livekit --with livekit-api --with boto3 --with playwright \
-  python agent-runner/tests/acceptance_staging.py "$@"
+  python tests/system/acceptance.py "$@"

@@ -1,0 +1,78 @@
+"""A GPU service's deploy, read from ECS's own description (acceptance.deploy_state):
+ready, still coming up, or one that will never finish, said at once with ECS's reason."""
+import os
+import sys
+import unittest
+from datetime import datetime, timedelta, timezone
+
+sys.path.insert(0, os.path.dirname(__file__))
+from acceptance import deploy_state, still_deploying  # noqa: E402
+
+T0 = datetime(2026, 10, 3, 3, 45, tzinfo=timezone.utc)
+
+
+def service(rollout="IN_PROGRESS", events=(), old=False, reason=""):
+    deployments = [{"status": "PRIMARY", "rolloutState": rollout, "rolloutStateReason": reason, "createdAt": T0}]
+    if old:
+        deployments.append({"status": "ACTIVE", "rolloutState": "COMPLETED", "createdAt": T0 - timedelta(hours=2)})
+    return {"deployments": deployments, "events": [{"createdAt": T0 + timedelta(minutes=m), "message": msg} for m, msg in events]}
+
+
+class TestDeployState(unittest.TestCase):
+    def test_a_finished_deploy_is_ready(self):
+        self.assertEqual(deploy_state(service("COMPLETED")), ("ready", ""))
+
+    def test_a_deploy_coming_up_is_waited_for(self):
+        self.assertEqual(deploy_state(service(events=[(1, "(service x) has started 1 tasks: (task a).")]))[0], "waiting")
+
+    def test_a_task_that_cannot_be_placed_fails_at_once_with_ecs_reason(self):
+        # The FP8 deploy, 2026-10-03: one GPU machine, the old task holding it.
+        state, why = deploy_state(service(old=True, events=[
+            (30, "(service x) was unable to place a task. Reason: TaskFailedToStart: RESOURCE:GPU."),
+            (1, "(service x) has started 1 tasks: (task a)."),
+        ]))
+        self.assertEqual(state, "failed")
+        self.assertIn("RESOURCE:GPU", why)
+
+    def test_placement_trouble_from_an_earlier_deploy_is_history(self):
+        self.assertEqual(deploy_state(service(events=[(-60, "(service x) was unable to place a task. Reason: x")]))[0], "waiting")
+
+    def test_a_deploy_the_circuit_breaker_failed_is_failed(self):
+        state, why = deploy_state(service("FAILED", reason="ECS deployment circuit breaker: tasks failed to start."))
+        self.assertEqual(state, "failed")
+        self.assertIn("circuit breaker", why)
+
+
+class TestStillDeploying(unittest.TestCase):
+    """Scenarios start only once the app's services have finished deploying: a LiveKit machine
+    swap (stop-first, minutes down) made every scenario fail with a 500 (2026-10-04)."""
+
+    def named(self, name, **kw):
+        return {**service(**kw), "serviceName": f"meetlab-v2-prod-{name}", "status": "ACTIVE", "desiredCount": 1, "runningCount": 1}
+
+    def test_names_the_services_still_coming_up(self):
+        services = [self.named("livekit"), self.named("meet", rollout="COMPLETED"), self.named("agent-runner", rollout="COMPLETED")]
+        self.assertEqual(still_deploying(services), ["livekit"])
+
+    def test_none_when_all_are_up(self):
+        self.assertEqual(still_deploying([self.named("meet", rollout="COMPLETED")]), [])
+
+    def test_a_deploy_that_will_never_finish_fails_at_once(self):
+        stuck = self.named("livekit", events=[(1, "(service x) was unable to place a task. Reason: RESOURCE:CPU")])
+        with self.assertRaises(Exception) as e:
+            still_deploying([stuck])
+        self.assertIn("livekit", str(e.exception))
+
+    def test_a_service_with_its_task_gone_is_waited_for(self):
+        # 2026-10-13: a deploy's new machine image refreshed staging's one LiveKit machine after
+        # the apply; its deploy had long COMPLETED, but nothing ran for 6 min and 6 scenarios got 500s.
+        gone = {**self.named("livekit", rollout="COMPLETED"), "runningCount": 0}
+        self.assertEqual(still_deploying([gone, self.named("meet", rollout="COMPLETED")]), ["livekit"])
+
+    def test_a_switched_off_service_is_not_waited_for(self):
+        off = {**self.named("livekit"), "desiredCount": 0}
+        self.assertEqual(still_deploying([off]), [])
+
+
+if __name__ == "__main__":
+    unittest.main()

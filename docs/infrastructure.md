@@ -8,7 +8,7 @@ every decision, with its date, is in [`infra/LEDGER.md`](https://github.com/wwbp
 ## Decision matrix: rooms at once → machines
 
 One room = one meeting with its bot (about 1.7 people). The table is
-[`capacity_model.matrix()`](https://github.com/wwbp/MeetLab/blob/main/agent-runner/capacity_model.py);
+[`capacity_model.matrix()`](https://github.com/wwbp/MeetLab/blob/main/services/api/meetlab_api/capacity_model.py);
 `make test-static` fails if the two differ.
 
 | Rooms at once | Bot machines (c6i.large) | Speech-to-text (CPU) | Database | What grows first | Cost / hour | If held a whole month |
@@ -47,7 +47,7 @@ Lower a size again after the study, the same way. Don't release during a study.
 
 ## Decision: speech-to-text on CPU, not GPU
 
-Production runs Parakeet (int8, `stt-cpu/`) on a CPU machine. The same model also runs as an
+Production runs Parakeet (int8, `services/stt/`) on a CPU machine. The same model also runs as an
 NVIDIA NIM on a GPU (g6.xlarge), behind the same endpoint, so the bots work with either.
 
 | | CPU (c6i.large → 2xlarge) | GPU (g6.xlarge, NIM) |

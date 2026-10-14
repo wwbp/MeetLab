@@ -1,0 +1,95 @@
+from dataclasses import dataclass
+
+from sqlalchemy import select
+
+from meetlab_core.db.engine import AsyncSessionLocal
+from meetlab_core.db.models import BotConfig
+from meetlab_core.db.models import CLOSING_MESSAGE
+
+
+@dataclass
+class EffectiveBotConfig:
+    system_prompt: str
+    greeting: str
+    llm_model: str
+    tts_voice: str
+    stt_model: str
+    stt_delay: str | None  # "minimal" | "low" | "medium" | "high" | "xhigh" | None
+    tts_provider: str  # "elevenlabs" | "openai"
+    tts_aggregation_mode: str  # "sentence" | "token"
+    # The pause that splits turns (450 ms, calibrated on pilot audio). The reply then waits
+    # user_speech_timeout_ms after the transcript: pure delay (B4) — tests/integration/test_turn_calibration.py.
+    stt_endpointing_ms: int
+    auto_record: bool  # auto-start recording when the first participant joins
+    # Advisory session cap in minutes, measured from the first human join; 0 = unlimited.
+    # Defaulted so callers predating the field keep the old (uncapped) behaviour.
+    session_limit_minutes: int = 0
+    # The wait after the transcript (see stt_endpointing_ms above): 50 ms since B4.
+    user_speech_timeout_ms: int = 50
+    # Spoken when the session limit elapses. Only used when a limit is set.
+    closing_message: str = CLOSING_MESSAGE
+    turn_detection: str = "silence"  # "silence" | "smart_turn" (smart_turn.py)
+    smart_turn_wait_ms: int = 3000
+
+
+async def load_bot_config(room_name: str | None = None) -> EffectiveBotConfig:
+    """Return the effective bot config: room-specific row if it exists, else global."""
+    async with AsyncSessionLocal() as db:
+        row: BotConfig | None = None
+
+        if room_name:
+            result = await db.execute(
+                select(BotConfig).where(BotConfig.scope == room_name)
+            )
+            row = result.scalar_one_or_none()
+
+        if row is None:
+            result = await db.execute(
+                select(BotConfig).where(BotConfig.scope == "global")
+            )
+            row = result.scalar_one_or_none()
+
+        if row is None:
+            # Fallback hardcoded defaults if the table is somehow empty
+            return EffectiveBotConfig(
+                system_prompt=(
+                    "You are a helpful assistant in a WebRTC call. "
+                    "Your output will be converted to audio so don't include special characters. "
+                    "Respond to what the user said in a creative and helpful way."
+                ),
+                greeting="Hello! How are you doing today?",
+                llm_model="gpt-5.4-nano",
+                tts_voice="WhMcMcvXQ8T2QfmQmlYh",
+                stt_model="parakeet-tdt-0.6b-v2",
+                stt_delay=None,
+                tts_provider="elevenlabs",
+                tts_aggregation_mode="sentence",
+                turn_detection="silence",
+                smart_turn_wait_ms=3000,
+                # Must track the bot_config column defaults. This said 100 —
+                # the pilot value RC2 fixed — so an empty table silently
+                # reinstated the behaviour that cut participants off.
+                stt_endpointing_ms=450,
+                user_speech_timeout_ms=50,
+                auto_record=False,
+                session_limit_minutes=0,
+                closing_message=CLOSING_MESSAGE,
+            )
+
+        return EffectiveBotConfig(
+            system_prompt=row.system_prompt,
+            greeting=row.greeting,
+            llm_model=row.llm_model,
+            tts_voice=row.tts_voice,
+            stt_model=row.stt_model,
+            stt_delay=getattr(row, "stt_delay", None),
+            tts_provider=getattr(row, "tts_provider", "elevenlabs"),
+            tts_aggregation_mode=getattr(row, "tts_aggregation_mode", "sentence"),
+            turn_detection=getattr(row, "turn_detection", None) or "silence",
+            smart_turn_wait_ms=int(getattr(row, "smart_turn_wait_ms", None) or 3000),
+            stt_endpointing_ms=getattr(row, "stt_endpointing_ms", 450),
+            user_speech_timeout_ms=int(getattr(row, "user_speech_timeout_ms", 50) or 50),
+            auto_record=bool(getattr(row, "auto_record", False)),
+            session_limit_minutes=int(getattr(row, "session_limit_minutes", 0) or 0),
+            closing_message=getattr(row, "closing_message", None) or CLOSING_MESSAGE,
+        )

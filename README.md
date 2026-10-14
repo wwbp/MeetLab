@@ -16,7 +16,7 @@ with timings, per-speaker audio, and the room's video.
 ## Contents
 
 - [Quick start](#quick-start)
-- [Architecture](#architecture): C4 context, C4 containers, sequence diagram
+- [Architecture](#architecture): C4 context, containers and bot components; sequence diagram
 - [Design decisions](#design-decisions)
 - [Repository layout](#repository-layout)
 - [Development](#development)
@@ -29,8 +29,8 @@ with timings, per-speaker audio, and the room's video.
 **Prerequisites:** Docker (with Compose), `make`, and an OpenAI API key.
 
 ```bash
-cp agent-runner/.env.runner.example agent-runner/.env.runner   # set OPENAI_API_KEY
-cp meet/.env.local.example meet/.env.local                     # set CONSOLE_PASSWORD and BOT_RUNNER_SECRET
+cp .env.example .env                                           # set OPENAI_API_KEY
+cp services/web/.env.local.example services/web/.env.local                     # set CONSOLE_PASSWORD and BOT_RUNNER_SECRET
 make start                                                     # build, start, run migrations
 ```
 
@@ -69,30 +69,65 @@ flowchart LR
 flowchart TB
   browser(["Browser<br/>participants and researchers"])
   subgraph system["MeetLab"]
-    meet["<b>meet</b><br/>Next.js: rooms, console, API<br/>meet/"]
-    runner["<b>agent-runner</b><br/>FastAPI: sessions, bot starts,<br/>recordings, settings<br/>agent-runner/runner.py"]
-    bots["<b>bot</b>, one per meeting<br/>Pipecat pipeline: hear, think, speak<br/>agent-runner/bot.py"]
-    stt["<b>stt-cpu</b><br/>Parakeet speech-to-text on CPU<br/>stt-cpu/"]
+    web["<b>web</b><br/>Next.js: rooms, console, API<br/>services/web"]
+    api["<b>api</b><br/>FastAPI: sessions, bot starts,<br/>recordings, settings<br/>services/api"]
+    bots["<b>bot</b>, one per meeting<br/>Pipecat: hear, think, speak<br/>services/bot"]
+    stt["<b>stt</b><br/>the bots' speech-to-text<br/>(Parakeet on CPU)<br/>services/stt"]
     db[("<b>PostgreSQL</b><br/>sessions, turns, speakers,<br/>settings, events")]
     store[("<b>Object storage</b><br/>per-speaker audio, video,<br/>transcripts")]
   end
   livekit["LiveKit"]
   vendors["OpenAI, ElevenLabs"]
-  browser -- "HTTPS: pages, console API" --> meet
+  browser -- "HTTPS: pages, console API" --> web
   browser -- "WebRTC: audio, video" --> livekit
-  meet -- "start, stop, settings (bearer secret)" --> runner
-  runner -- "starts one per meeting" --> bots
-  runner -- "SQL" --> db
+  web -- "start, stop, settings (bearer secret)" --> api
+  api -- "starts one per meeting" --> bots
+  api -- "SQL" --> db
   bots -- "joins the room" --> livekit
-  bots -- "each person's speech" --> stt
+  bots -- "speech" --> stt
   bots -- "turns, heartbeats" --> db
   bots -- "per-speaker WAV" --> store
   bots -- "prompt, reply text" --> vendors
   livekit -- "room video" --> store
 ```
 
-In production each bot is an ECS task and object storage is S3; locally each bot is a Docker
-container and recordings go to a local folder.
+The speech-to-text server is part of the bot's job, run as its own service so one model serves
+every bot: it is loaded once, on a machine sized by the number of rooms. In production each bot
+is an ECS task and object storage is S3; locally each bot is a Docker container and recordings
+go to a local folder. Shared Python code (config, database models and migrations, sessions,
+storage) is `packages/core`.
+
+### C4 level 3: Components of the bot
+
+```mermaid
+flowchart LR
+  subgraph bot["bot (services/bot), one per meeting"]
+    direction LR
+    task["<b>bot_task</b><br/>reads its session, mints its<br/>LiveKit token, heartbeats"]
+    input["<b>LiveKit input</b><br/>one audio track<br/>per participant"]
+    rec["<b>Recorder</b><br/>per-speaker WAV"]
+    hear["<b>Per-speaker speech-to-text</b><br/>and turn detection<br/>(smart turn, interruption)"]
+    ctx["<b>Context</b><br/>labelled turns"]
+    llm["<b>LLM step</b>"]
+    tts["<b>TTS step</b>"]
+    out["<b>LiveKit output</b>"]
+    input --> rec --> hear --> ctx --> llm --> tts --> out
+  end
+  livekit["LiveKit"]
+  sttsvc["stt service<br/>(ours)"]
+  openai["OpenAI"]
+  eleven["ElevenLabs"]
+  db[("PostgreSQL")]
+  store[("Object storage")]
+  livekit --> input
+  out --> livekit
+  hear -- "speech" --> sttsvc
+  llm -- "conversation" --> openai
+  tts -- "reply text" --> eleven
+  rec --> store
+  ctx -- "turns" --> db
+  task -- "session, heartbeat" --> db
+```
 
 ### Sequence diagram: one meeting
 
@@ -100,30 +135,27 @@ container and recordings go to a local folder.
 sequenceDiagram
   autonumber
   actor P as Participant
-  participant M as meet
-  participant R as agent-runner
+  participant W as web
+  participant A as api
   participant D as PostgreSQL
   participant B as bot
   participant L as LiveKit
-  participant S as stt-cpu
-  P->>M: opens a room link
-  M->>L: creates the room, gives the browser a token
-  M->>R: POST /start (room)
-  R->>D: records a running session (one per room, enforced)
-  R->>B: starts the meeting's own bot
+  P->>W: opens a room link
+  W->>L: creates the room, gives the browser a token
+  W->>A: POST /start (room)
+  A->>D: records a running session (one per room, enforced)
+  A->>B: starts the meeting's own bot
   B->>D: reads its session, mints its LiveKit token
   B->>L: joins the room, greets
   loop every turn
     P->>L: speaks
     L->>B: that person's audio track
-    B->>S: their speech, cut at pauses
-    S-->>B: text
-    B->>B: reply (LLM), voice (TTS)
+    B->>B: hears (speech-to-text), replies (LLM), speaks (TTS)
     B->>L: the spoken reply
     B->>D: both turns, with timings
   end
   B->>D: heartbeat every 10 s
-  Note over R,B: silent for 30 s: the runner fails the session and starts<br/>a new bot that resumes from the stored turns
+  Note over A,B: silent for 30 s: the api fails the session and starts<br/>a new bot that resumes from the stored turns
   P->>L: leaves
   B->>D: session ended, per-speaker audio to storage
 ```
@@ -150,9 +182,13 @@ The full record, with the measurements and dates behind each one, is the decisio
 
 | Path | What it is |
 |---|---|
-| [`meet/`](meet) | Next.js app: meeting rooms, the console, its API |
-| [`agent-runner/`](agent-runner) | Python: the runner API, the bot pipeline, database models and migrations |
-| [`stt-cpu/`](stt-cpu) | The CPU speech-to-text server |
+| [`services/web/`](services/web) | Next.js: meeting rooms, the console, its API |
+| [`services/api/`](services/api) | Python (FastAPI): sessions, bot dispatch, recordings, settings |
+| [`services/bot/`](services/bot) | Python (Pipecat): one meeting's bot pipeline |
+| [`services/stt/`](services/stt) | The bot's speech-to-text server (Parakeet on CPU) |
+| [`packages/core/`](packages/core) | Python shared by API and bot: config, database models and migrations, sessions, storage, events |
+| [`tools/loadtest/`](tools/loadtest) | The load-test harness |
+| [`tests/`](tests) | Cross-service integration tests and live system tests |
 | [`infra/stack/`](infra/stack) | Terraform for the AWS deployment |
 | [`infra/bootstrap/`](infra/bootstrap) | Terraform for CI's own permissions (applied by a maintainer) |
 | [`.devcontainer/`](.devcontainer) | The local Docker Compose stack |

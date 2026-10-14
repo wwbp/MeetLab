@@ -11,7 +11,7 @@ Pair the segment counts with the real turn count from the database:
     WHERE c.room_name = '<room>' AND u.speaker_id NOT LIKE 'bot\\_%' AND u.text <> '';
 
 The threshold where predicted segments == real turns is the target. See
-tests/test_turn_calibration.py for the values this produced on 2026-07-30.
+tests/integration/test_turn_calibration.py for the values this produced on 2026-07-30.
 
 Get audio with:
     aws s3 ls s3://<bucket>/recordings/ | grep audio- | grep -v audio-bot_

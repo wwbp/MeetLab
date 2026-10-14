@@ -1,5 +1,5 @@
 # The role each environment's CI `acceptance` job uses to run
-# agent-runner/tests/acceptance_staging.py after a deploy: read the secrets the test needs,
+# tests/system/acceptance.py after a deploy: read the secrets the test needs,
 # watch and stop bot tasks, exec into one to kill -9 it, read the environment's logs, and
 # simulate its roles' permissions (permission_contract.py); and, for the load test workflow,
 # start the load generator and read its results. Nothing else, and only in its environment.
@@ -90,7 +90,7 @@ resource "aws_iam_role_policy" "acceptance" {
         Resource = "arn:aws:s3:::${each.value.p}-media-${local.account}/loadtests/*"
       },
       {
-        # agent-runner/tests/permission_contract.py
+        # tests/system/permission_contract.py
         Effect   = "Allow"
         Action   = "iam:SimulatePrincipalPolicy"
         Resource = ["arn:aws:iam::${local.account}:role/${each.value.p}-*", "arn:aws:iam::${local.account}:user/${each.value.p}-*"]

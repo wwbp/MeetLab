@@ -43,13 +43,13 @@ list — "no events" and "cannot read events" must not look the same.
 
 | Piece | File |
 |---|---|
-| Table + severity column | `agent-runner/db/models.py` |
-| `record_event()` and the log-mirroring sink | `agent-runner/event_log.py` |
-| `POST /events`, `GET /events` | `agent-runner/runner.py` |
-| meet's writer, reader, and error reporter | `meet/lib/concierge/event-log.ts` |
-| `pushConciergeEvent` façade | `meet/lib/concierge/events-store.ts` |
-| Console API | `meet/app/api/concierge/events/route.ts` |
-| Console view | `meet/components/desk/events-tab.tsx` |
+| Table + severity column | `packages/core/meetlab_core/db/models.py` |
+| `record_event()` and the log-mirroring sink | `packages/core/meetlab_core/event_log.py` |
+| `POST /events`, `GET /events` | `services/api/meetlab_api/runner.py` |
+| meet's writer, reader, and error reporter | `services/web/lib/concierge/event-log.ts` |
+| `pushConciergeEvent` façade | `services/web/lib/concierge/events-store.ts` |
+| Console API | `services/web/app/api/concierge/events/route.ts` |
+| Console view | `services/web/components/desk/events-tab.tsx` |
 
 Two rules the code follows, both load-bearing:
 
@@ -77,8 +77,8 @@ noteRouteError('POST /api/concierge/rooms', error, { roomName });
 
 ## Console auth
 
-The console is protected by a path allow-list in `meet/middleware.ts`, which means a
-new page or admin API is **public until it is added there**. `meet/middleware.test.ts`
+The console is protected by a path allow-list in `services/web/middleware.ts`, which means a
+new page or admin API is **public until it is added there**. `services/web/middleware.test.ts`
 enumerates the console shell from the filesystem and asserts every page and admin
 route is covered, so that mistake fails a test instead of shipping.
 

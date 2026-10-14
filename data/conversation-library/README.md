@@ -11,7 +11,7 @@ reads it from there. Every run speaks the same lines in the same voices, so runs
 | Source | [DailyDialog](https://huggingface.co/datasets/ConvLab/dailydialog) (Li et al., 2017), ConvLab mirror, revision `745c179` | [Topical-Chat](https://github.com/alexa/Topical-Chat) (Gopalakrishnan et al., 2019), commit `7c93922` |
 | Licence | CC BY-NC-SA 4.0 (research use) | CDLA-Sharing-1.0 |
 | Kind of talk | everyday two-person dialogues | real human-to-human chats about a topic |
-| Selection (`agent-runner/conversation_library.py`) | `select`: test split, 6–10 turns, lines of 2–30 words, topics taken in turn; 100 dialogues | `select_topical`: held-out (test) conversations, 16+ turns, lines of 2–40 words, fixed order; 280 conversations |
+| Selection (`tools/loadtest/meetlab_loadtest/conversation_library.py`) | `select`: test split, 6–10 turns, lines of 2–30 words, topics taken in turn; 100 dialogues | `select_topical`: held-out (test) conversations, 16+ turns, lines of 2–40 words, fixed order; 280 conversations |
 | Size | 100 dialogues, 795 lines | 280 conversations, 6,072 lines (1,052 with a pause) |
 | Used for | the load tests up to 2026-10-04 (L6, B2, B3) | the 100-room spike (10-minute holds), 2026-10-05 |
 | S3 | `loadtests/library/v1/` | `loadtests/library/v2/` |
@@ -32,11 +32,11 @@ data/conversation-library/fetch.sh ~/meetlab-library
 
 # 2. Voice every line and write library.json (Kokoro on a laptop CPU, ~47 lines/min: v1 ~20 min, v2 ~2 h)
 uv run --no-project --with kokoro-onnx --with soundfile --with numpy --with boto3 \
-  python agent-runner/tests/build_conversation_library.py ~/meetlab-library "" v2
+  PYTHONPATH=packages/core:tools/loadtest python -m meetlab_loadtest.build_conversation_library ~/meetlab-library "" v2
 
 # 3. Upload (needs write access to the media bucket; log it in infra/LEDGER.md, Manual actions)
 uv run --no-project --with kokoro-onnx --with soundfile --with numpy --with boto3 \
-  python agent-runner/tests/build_conversation_library.py ~/meetlab-library \
+  PYTHONPATH=packages/core:tools/loadtest python -m meetlab_loadtest.build_conversation_library ~/meetlab-library \
   s3://meetlab-v2-staging-media-<account>/loadtests/library v2
 ```
 

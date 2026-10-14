@@ -12,12 +12,12 @@ on:
   workflow_dispatch:
     inputs:
       profile:
-        description: "Stack profile (agent-runner/load_profiles): ours = our models, ours-short = ours + a short-replies instruction, v1 = v1's vendors, stored = the console's config"
+        description: "Stack profile (tools/loadtest/meetlab_loadtest/load_profiles): ours = our models, ours-short = ours + a short-replies instruction, v1 = v1's vendors, stored = the console's config"
         type: choice
         options: [ours, ours-short, v1, stored]
         default: ours
       shape:
-        description: "smoke | load | stress | spike | soak | breakpoint (agent-runner/load_plan.py)"
+        description: "smoke | load | stress | spike | soak | breakpoint (tools/loadtest/meetlab_loadtest/load_plan.py)"
         type: choice
         options: [smoke, load, stress, spike, soak, breakpoint]
         default: smoke
@@ -163,9 +163,9 @@ jobs:
           done
           # The voice scores' listener (faster-whisper) and naturalness model (UTMOS) run here,
           # never in the bot's image; CPU-only PyTorch wheels. Several files: one split run, merged.
-          uv run --no-project --index https://download.pytorch.org/whl/cpu \
+          PYTHONPATH=packages/core:tools/loadtest uv run --no-project --index https://download.pytorch.org/whl/cpu \
             --with boto3 --with faster-whisper --with soundfile --with torch --with torchaudio --with numpy \
-            python agent-runner/tests/load_report.py $files | tee -a "$GITHUB_STEP_SUMMARY"
+            python -m meetlab_loadtest.load_report $files | tee -a "$GITHUB_STEP_SUMMARY"
           echo "Results: \`$RESULTS\`" >> "$GITHUB_STEP_SUMMARY"
           set -- $files; cp "$1" result.json  # merged (written back into the first)
           [ "$(cat .code 2>/dev/null)" = 0 ]

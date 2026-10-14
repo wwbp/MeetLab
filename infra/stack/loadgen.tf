@@ -1,5 +1,5 @@
 # The load generator (load-test readiness L5): synthetic participants (agent-runner's
-# tests/load_run.py) run inside AWS as a one-off Fargate task, started by the "Load test
+# tools/loadtest/meetlab_loadtest/load_run.py) run inside AWS as a one-off Fargate task, started by the "Load test
 # v2" workflow, so a run measures staging rather than a laptop's network. They come in
 # the front door as people do: meet's console and LiveKit's public address. Fargate:
 # no machines to keep, billed only while a run lasts, and each run picks its size.
@@ -32,7 +32,7 @@ resource "aws_iam_role_policy" "loadgen_results" {
     Version = "2012-10-17"
     Statement = [
       { Effect = "Allow", Action = "s3:PutObject", Resource = "${aws_s3_bucket.media.arn}/loadtests/*" },
-      # The conversation library (tests/build_conversation_library.py): read, never written here.
+      # The conversation library (tools/loadtest/meetlab_loadtest/build_conversation_library.py): read, never written here.
       { Effect = "Allow", Action = "s3:GetObject", Resource = "${aws_s3_bucket.media.arn}/loadtests/library/*" },
       { Effect = "Allow", Action = "s3:ListBucket", Resource = aws_s3_bucket.media.arn, Condition = { StringLike = { "s3:prefix" = "loadtests/library/*" } } },
     ]
@@ -57,7 +57,7 @@ resource "aws_ecs_task_definition" "loadgen" {
     name        = "loadgen"
     image       = "${data.aws_ecr_repository.this["agent-runner"].repository_url}:${var.image_tag}"
     essential   = true
-    command     = ["python", "tests/load_run.py"]
+    command     = ["python", "-m", "meetlab_loadtest.load_run"]
     environment = concat(local.livekit_environment, [{ name = "MEET_URL", value = "https://meet${var.hostname_suffix}.wwbp.org" }])
     secrets = concat(local.livekit_secrets, [
       { name = "CONSOLE_PASSWORD", valueFrom = "${local.parameters}/CONSOLE_PASSWORD" },

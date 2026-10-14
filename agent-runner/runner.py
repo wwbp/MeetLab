@@ -200,7 +200,6 @@ class BotConfigAdmin(ModelView, model=BotConfig):
     column_list = [
         BotConfig.scope,
         BotConfig.stt_model,
-        BotConfig.stt_vad_mode,
         BotConfig.llm_model,
         BotConfig.tts_provider,
         BotConfig.tts_voice,
@@ -214,7 +213,6 @@ class BotConfigAdmin(ModelView, model=BotConfig):
     form_overrides = {
         "llm_model": SelectField,
         "stt_model": SelectField,
-        "stt_vad_mode": SelectField,
         "stt_delay": _NullableSelectField,
         "tts_provider": SelectField,
         "tts_aggregation_mode": SelectField,
@@ -225,7 +223,6 @@ class BotConfigAdmin(ModelView, model=BotConfig):
     form_args = {
         "llm_model": {"choices": _LLM_CHOICES},
         "stt_model": {"choices": _STT_MODEL_CHOICES},
-        "stt_vad_mode": {"choices": [("local", "local")]},
         "stt_delay": {"choices": [("", "— (none)")]},
         "tts_provider": {"choices": [("elevenlabs", "ElevenLabs — paid service: ElevenLabs (default)"), ("openai", "OpenAI voices — paid service: OpenAI"), ("kokoro", "Kokoro — our own server (staging only)")]},
         "tts_aggregation_mode": {"choices": [("sentence", "sentence (default)"), ("clause", "first clause, then sentences"), ("token", "token (lower latency)")]},
@@ -677,7 +674,6 @@ async def get_config(room: str | None = None, _=Depends(verify_api_key)):
         "turn_detection": cfg.turn_detection,
         "smart_turn_wait_ms": cfg.smart_turn_wait_ms,
         "stt_model": cfg.stt_model,
-        "stt_vad_mode": cfg.stt_vad_mode,
         "stt_delay": cfg.stt_delay,
         "stt_endpointing_ms": cfg.stt_endpointing_ms,
         "user_speech_timeout_ms": cfg.user_speech_timeout_ms,
@@ -733,10 +729,6 @@ async def update_config(request: Request, _=Depends(verify_api_key)):
         if body["stt_model"] not in _valid_stt:
             return JSONResponse({"error": f"stt_model must be one of: {', '.join(sorted(_valid_stt))}"}, status_code=400)
         fields["stt_model"] = body["stt_model"]
-    if "stt_vad_mode" in body:
-        if body["stt_vad_mode"] not in ("local",):
-            return JSONResponse({"error": "stt_vad_mode must be 'local'"}, status_code=400)
-        fields["stt_vad_mode"] = body["stt_vad_mode"]
     if "stt_delay" in body:
         v = body["stt_delay"]
         if v is not None and v not in ("minimal", "low", "medium", "high", "xhigh"):
@@ -823,7 +815,6 @@ async def update_config(request: Request, _=Depends(verify_api_key)):
         "turn_detection": cfg.turn_detection,
         "smart_turn_wait_ms": cfg.smart_turn_wait_ms,
         "stt_model": cfg.stt_model,
-        "stt_vad_mode": cfg.stt_vad_mode,
         "stt_delay": cfg.stt_delay,
         "stt_endpointing_ms": cfg.stt_endpointing_ms,
         "user_speech_timeout_ms": cfg.user_speech_timeout_ms,

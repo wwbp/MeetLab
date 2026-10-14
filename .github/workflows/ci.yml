@@ -39,6 +39,19 @@ jobs:
         if: failure()
         run: docker compose -f .devcontainer/docker-compose.yml logs --tail=300
 
+      # The whole run's logs, not just the tail: a flaky test's evidence is usually earlier (the
+      # room-delete test, 3 failures in a week, whose LiveKit and runner lines fell outside the
+      # last 300). LiveKit's log records every join, leave, create and close.
+      - name: Keep every service's full log on failure
+        if: failure()
+        run: docker compose -f .devcontainer/docker-compose.yml logs --no-color --timestamps > compose.log
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: compose-logs
+          path: compose.log
+          retention-days: 14
+
       - name: Stop compose services
         if: always()
         run: make stop

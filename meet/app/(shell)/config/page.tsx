@@ -54,7 +54,6 @@ export default function ConfigPage() {
         smart_turn_wait_ms: data.smart_turn_wait_ms ?? 3000,
         stt_endpointing_ms: data.stt_endpointing_ms ?? 450,
         user_speech_timeout_ms: data.user_speech_timeout_ms ?? 50,
-        stt_vad_mode: data.stt_vad_mode ?? 'local',
         stt_delay: data.stt_delay ?? null,
         auto_record: data.auto_record ?? false,
         session_limit_minutes: data.session_limit_minutes ?? 0,
@@ -198,11 +197,6 @@ export default function ConfigPage() {
                       {['minimal', 'low', 'medium', 'high', 'xhigh'].map((d) => (
                         <option key={d} value={d}>{d}</option>
                       ))}
-                    </select>
-                  </Field>
-                  <Field name="stt_vad_mode" label="Voice detection (OpenAI)" help="Who decides when someone is speaking: always the bot’s own per-speaker detector.">
-                    <select value={form.stt_vad_mode} className={sel} disabled>
-                      <option value="local">local: the bot&apos;s own per-speaker detector</option>
                     </select>
                   </Field>
                 </>

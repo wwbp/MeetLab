@@ -17,7 +17,7 @@ export const SECTIONS: { id: string; label: string; about: string; fields: strin
     label: 'Speech-to-text and turn-taking',
     about:
       'How people’s speech becomes text, and when the bot decides someone has finished. Each person in the room is transcribed separately, so overlapping speakers keep their own words.',
-    fields: ['stt_model', 'stt_delay', 'stt_vad_mode', 'turn_detection', 'smart_turn_wait_ms', 'stt_endpointing_ms', 'user_speech_timeout_ms'],
+    fields: ['stt_model', 'stt_delay', 'turn_detection', 'smart_turn_wait_ms', 'stt_endpointing_ms', 'user_speech_timeout_ms'],
   },
   {
     id: 'llm',
@@ -79,10 +79,6 @@ export const CONFIG_INFO: Record<string, Info> = {
   stt_delay: {
     title: 'Transcription delay (OpenAI)',
     about: 'How long OpenAI waits for more words before finalising.',
-  },
-  stt_vad_mode: {
-    title: 'Voice detection (OpenAI)',
-    about: 'Who detects speech: always the bot, per speaker.',
   },
   turn_detection: {
     title: 'Smart turn',

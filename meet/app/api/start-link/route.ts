@@ -38,9 +38,6 @@ async function copyConfigToRoom(chosenScope: string, roomName: string): Promise<
   if (!getRes.ok) throw new Error(`config read failed (${getRes.status})`);
   const fields = await getRes.json();
 
-  // PUT validation only accepts stt_vad_mode='local'; drop legacy values.
-  if (fields.stt_vad_mode !== 'local') delete fields.stt_vad_mode;
-
   const putRes = await fetch(`${base}config`, {
     method: 'PUT',
     headers,

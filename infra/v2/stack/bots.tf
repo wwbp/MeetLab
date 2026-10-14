@@ -157,6 +157,17 @@ resource "aws_iam_role_policy" "runner_recordings" {
   })
 }
 
+# Make transcript (transcript.py): the runner writes the meeting's Markdown transcript, and
+# only that; it never writes or overwrites a recording (permission_contract.py).
+resource "aws_iam_role_policy" "runner_transcripts" {
+  name = "write-transcripts"
+  role = aws_iam_role.runner_task.id
+  policy = jsonencode({
+    Version   = "2012-10-17"
+    Statement = [{ Effect = "Allow", Action = "s3:PutObject", Resource = "${aws_s3_bucket.media.arn}/recordings/*-transcript.md" }]
+  })
+}
+
 # Prepare for study (capacity.py): the runner raises the bot pool's minimum and
 # schedules its return to 0. This group only; the rest of autoscaling is read-only.
 resource "aws_iam_role_policy" "runner_prewarm" {

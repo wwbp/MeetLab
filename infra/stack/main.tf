@@ -24,6 +24,8 @@ locals {
 provider "aws" {
   region = "us-east-1"
   default_tags {
-    tags = { Project = "meetlab-v2", Environment = var.env, ManagedBy = "terraform/infra/${var.env}" }
+    # ManagedBy keeps its deployed value: changing it retags every resource, and CI may not
+    # retag the Cloud Map namespace (v2.1.3, 2026-10-14). It is a label, not a path.
+    tags = { Project = "meetlab-v2", Environment = var.env, ManagedBy = "terraform/infra/v2/${var.env}" }
   }
 }

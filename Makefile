@@ -69,6 +69,7 @@ test-config-parity:
 # Static testing (ISTQB, docs/testing.md): defects found without running the code. No stack:
 # meet's checks run in its deps stage, node_modules seeded from the image (anonymous volume).
 test-static: test-dead-code test-image docs-build
+	python3 agent-runner/tests/capacity_doc_check.py
 	docker build -q --target deps -t meetlab-meet:deps meet >/dev/null
 	docker run --rm -v $(CURDIR)/meet:/app -v /app/node_modules -w /app meetlab-meet:deps \
 		sh -c 'pnpm lint && pnpm exec tsc --noEmit && pnpm knip'

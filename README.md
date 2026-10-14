@@ -16,7 +16,7 @@ speaker, per-speaker audio, video) for the study team.
 | **Never** | release during a study; change AWS by hand (Terraform and GitHub Actions only, except the steps the ledger lists); put a secret in the repo or Terraform |
 
 New here? Read this page top to bottom, then [CLAUDE.md](CLAUDE.md) (the code's map) and
-[docs/v2-infrastructure.md](docs/v2-infrastructure.md) (sizes and measured capacity).
+[docs/v2-infrastructure.md](docs/v2-infrastructure.md) (the capacity decision matrix: what to run for N rooms).
 
 ## The lay of the land
 

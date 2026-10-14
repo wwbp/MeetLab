@@ -1,9 +1,9 @@
-# The two image repositories are shared by staging and production and outlive both, so
-# infra/bootstrap owns them (release images never expire there); the stack only reads them.
-# The bot task reuses agent-runner with another command.
+# The image repositories outlive any one stack, so infra/bootstrap owns them (release images
+# never expire there); the stack only reads them. agent-runner is the API's image; bot is the
+# bot's (bot tasks and the load generator).
 
 data "aws_ecr_repository" "this" {
-  for_each = toset(["meet", "agent-runner", "stt-cpu"])
+  for_each = toset(["meet", "agent-runner", "bot", "stt-cpu"])
   name     = "meetlab-v2/${each.key}"
 }
 

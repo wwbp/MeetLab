@@ -19,7 +19,7 @@ resource "aws_ecs_task_definition" "bot" {
   task_role_arn            = aws_iam_role.bot_task.arn
   container_definitions = jsonencode([{
     name              = "bot"
-    image             = "${data.aws_ecr_repository.this["agent-runner"].repository_url}:${var.image_tag}"
+    image             = "${data.aws_ecr_repository.this["bot"].repository_url}:${var.image_tag}"
     essential         = true
     cpu               = local.bot_cpu # sized by measurement (profiles.tf)
     memoryReservation = local.bot_memory

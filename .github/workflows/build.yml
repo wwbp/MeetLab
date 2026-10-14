@@ -102,7 +102,8 @@ jobs:
       matrix:
         include:
           - { name: meet, context: services/web, file: services/web/Dockerfile, target: runner }
-          - { name: agent-runner, context: ., file: services/api/Dockerfile, target: "" } # API and bots
+          - { name: agent-runner, context: ., file: services/api/Dockerfile, target: "" } # the API
+          - { name: bot, context: ., file: services/bot/Dockerfile, target: "" } # bots, load generator
           - { name: stt-cpu, context: services/stt, file: services/stt/Dockerfile, target: "" }
     steps:
       - uses: actions/checkout@v4
@@ -128,7 +129,8 @@ jobs:
       matrix:
         include:
           - { name: meet, context: services/web, file: services/web/Dockerfile, target: runner }
-          - { name: agent-runner, context: ., file: services/api/Dockerfile, target: "" } # API and bots
+          - { name: agent-runner, context: ., file: services/api/Dockerfile, target: "" } # the API
+          - { name: bot, context: ., file: services/bot/Dockerfile, target: "" } # bots, load generator
           - { name: stt-cpu, context: services/stt, file: services/stt/Dockerfile, target: "" }
     steps:
       - uses: actions/checkout@v4

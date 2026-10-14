@@ -38,9 +38,9 @@ make test-stt-cpu               # the CPU speech server against recorded clips
 make test-config-parity         # a Bot settings field exists in DB, API and form
 make sim-attribution            # overlapping speakers each heard as themselves
 
-# one test file, inside the stack, from its package's directory (each package has a `tests`
-# package; the image's PYTHONPATH finds the code):
-docker compose -f .devcontainer/docker-compose.yml exec -T -w /app/services/api agent-runner \
+# one test file, in the `tests` container (both services' dependencies), from its package's
+# directory (each package has a `tests` package):
+docker compose -f .devcontainer/docker-compose.yml run --rm --no-deps -T -w /app/services/api tests \
   python -m unittest tests.test_runner_start -v
 ```
 
@@ -81,10 +81,14 @@ In AWS, secrets live in SSM under `/meetlab-v2/<env>/`, never in Terraform state
 
 - **Boundaries** (`.importlinter`, checked by `make test-static`): the API and the bot never import
   each other; `meetlab_core` imports neither; services never import `meetlab_loadtest`.
-- One `pyproject.toml` / `uv.lock` at the root (package manager `uv`). Image:
-  `services/api/Dockerfile`, built from the repo root; the venv is `/venv` (outside `/app`, so the
-  dev mount of the repo doesn't hide it), the code is found through `PYTHONPATH`; bots start as
-  `python -m meetlab_bot.bot_task` under an init (PID 1).
+- One `pyproject.toml` / `uv.lock` at the root (package manager `uv`): core's dependencies, plus a
+  dependency group per service (`api`, `bot`; development installs both).
+- Two images, built from the repo root: `services/api/Dockerfile` (core + `api`, no Pipecat; ECR
+  `meetlab-v2/agent-runner`) and `services/bot/Dockerfile` (core + `bot` + `tools/loadtest`; ECR
+  `meetlab-v2/bot`). The venv is `/venv` (outside `/app`, so the dev mount of the repo doesn't
+  hide it), the code is found through `PYTHONPATH`. Bots start as `python -m meetlab_bot.bot_task`
+  under an init (PID 1): ECS tasks in AWS, containers of `BOT_IMAGE` locally (compose builds
+  `meetlab-bot:local`). `make test-image` checks both (budgets, entry points, no Pipecat in the API).
 - `config.py` loads the root `.env`, then `.env.local`.
 
 ## web (`services/web`)

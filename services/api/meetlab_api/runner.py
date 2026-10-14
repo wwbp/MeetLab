@@ -1204,7 +1204,7 @@ async def _start_session(room_name: str, bot_identity: str, conv_meta: dict, dis
                 run_bot_task, _ecs_client(), session_id, EcsBotTarget.from_env(os.environ))
         else:
             task_arn = await asyncio.to_thread(
-                run_bot_container, _docker_api(), session_id, socket.gethostname())
+                run_bot_container, _docker_api(), session_id, socket.gethostname(), os.environ.get("BOT_IMAGE", ""))
     except DispatchError as e:
         async with AsyncSessionLocal() as session, session.begin():
             await sessions.end(session, [session_id], "dispatch_failed")

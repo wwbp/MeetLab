@@ -1,5 +1,10 @@
 # Moving v1's data to v2 production
 
+!!! note "History"
+    The migration ran once, for the cutover on 2026-10-14 (MATCH; `infra/LEDGER.md`). Its tooling
+    (`migration_check.py`, `infra/migrate.sh`, `migrate.tf`) has since been removed; the release tag
+    `v2.1.2` has it. Paths below are as they were then.
+
 v2 production starts from a **copy** of v1's data. v1 is never changed, so until the first real
 study runs on v2, switching back is moving the address back. Nothing moves until a check shows
 every row and every file arrived.

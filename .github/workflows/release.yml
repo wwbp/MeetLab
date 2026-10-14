@@ -70,7 +70,7 @@ jobs:
         run: |
           set -euo pipefail
           types="application/vnd.oci.image.index.v1+json application/vnd.docker.distribution.manifest.list.v2+json application/vnd.oci.image.manifest.v1+json application/vnd.docker.distribution.manifest.v2+json"
-          for name in meet agent-runner stt-cpu; do
+          for name in meet agent-runner bot stt-cpu; do
             repo="meetlab-v2/$name"
             if aws ecr describe-images --repository-name "$repo" --image-ids imageTag="$GITHUB_REF_NAME" >/dev/null 2>&1; then
               echo "$repo:$GITHUB_REF_NAME exists"; continue

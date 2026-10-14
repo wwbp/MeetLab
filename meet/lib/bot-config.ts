@@ -13,7 +13,6 @@ export type BotConfig = {
   smart_turn_wait_ms: number;
   stt_endpointing_ms: number;
   user_speech_timeout_ms: number;
-  stt_vad_mode: string;
   stt_delay: string | null;
   auto_record: boolean;
   session_limit_minutes: number;
@@ -32,7 +31,6 @@ export const EMPTY_CONFIG: Omit<BotConfig, 'scope'> = {
   smart_turn_wait_ms: 3000,
   stt_endpointing_ms: 450,
   user_speech_timeout_ms: 50,
-  stt_vad_mode: 'local',
   stt_delay: null,
   auto_record: false,
   session_limit_minutes: 0,

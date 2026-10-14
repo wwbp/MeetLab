@@ -196,7 +196,6 @@ class BotConfig(Base):
     llm_model: Mapped[str] = mapped_column(String(128), default="gpt-5.4-nano")
     tts_voice: Mapped[str] = mapped_column(String(64), default="WhMcMcvXQ8T2QfmQmlYh")
     stt_model: Mapped[str] = mapped_column(String(128), default="parakeet-tdt-0.6b-v2")
-    stt_vad_mode: Mapped[str] = mapped_column(String(32), default="local")
     stt_delay: Mapped[str | None] = mapped_column(String(32), nullable=True)
     tts_provider: Mapped[str] = mapped_column(String(32), default="elevenlabs")
     tts_aggregation_mode: Mapped[str] = mapped_column(String(16), default="sentence")

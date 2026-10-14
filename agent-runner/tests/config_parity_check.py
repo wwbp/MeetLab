@@ -3,7 +3,7 @@ the database (agent-runner/db/models.py), the runner's /config API (agent-runner
 and the console's Bot Config form (meet/app/(shell)/config/page.tsx). The two services' own
 tests can't see each other (each container mounts only its own directory), so this runs from
 the repository root in CI (make test-config-parity). Whether the bot *uses* each field is
-tests/test_config_contract.py. tts_aggregation_mode was missing from the form, and stt_vad_mode
+tests/test_config_contract.py. tts_aggregation_mode was missing from the form, and stt_vad_mode (dropped 2026-10-14)
 and stt_delay had no input on screen (2026-10-04).
 
     python3 agent-runner/tests/config_parity_check.py

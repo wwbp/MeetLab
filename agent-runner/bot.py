@@ -371,11 +371,6 @@ def _apply_stt_model_override(bot_config):
     return bot_config
 
 
-def _turn_detection_for_vad_mode(vad_mode: str):
-    """Return turn_detection=False (local Silero VAD) — the only supported mode."""
-    return False
-
-
 def _build_stt(bot_config, openai_api_key: str, deepgram_api_key: str | None):
     """Instantiate the STT service based on stt_model prefix.
 
@@ -385,7 +380,7 @@ def _build_stt(bot_config, openai_api_key: str, deepgram_api_key: str | None):
     if bot_config.stt_model.startswith("gpt-"):
         return _OpenAIRealtimeSTT(
             api_key=openai_api_key,
-            turn_detection=_turn_detection_for_vad_mode(bot_config.stt_vad_mode),
+            turn_detection=False,  # our local VAD decides turns (server VAD was removed)
             transcription_delay=bot_config.stt_delay,
             settings=_OpenAIRealtimeSTT.Settings(
                 model=bot_config.stt_model,

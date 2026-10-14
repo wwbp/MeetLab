@@ -21,7 +21,6 @@ from bot import (
     _find_participant,
     _normalize_words,
     _text_similarity,
-    _turn_detection_for_vad_mode,
     _OpenAIRealtimeSTT,
 )
 from pipecat.processors.audio.vad_processor import VADProcessor
@@ -32,7 +31,6 @@ from pipecat.services.openai.stt import OpenAIRealtimeSTTService
 @dataclass
 class _FakeBotConfig:
     stt_model: str
-    stt_vad_mode: str = "local"
     stt_delay: str | None = None
     stt_endpointing_ms: int = 200
 
@@ -57,18 +55,6 @@ class TestFindParticipant(unittest.TestCase):
 
     def test_returns_none_for_an_unknown_participant(self):
         self.assertIsNone(_find_participant({}, "alice"))
-
-
-class TestTurnDetectionForVadMode(unittest.TestCase):
-    """_turn_detection_for_vad_mode always returns False (local Silero VAD only)."""
-
-    def test_local_returns_false(self):
-        self.assertIs(_turn_detection_for_vad_mode("local"), False)
-
-    def test_any_input_returns_false(self):
-        # Server VAD was removed — all inputs fall through to local behaviour
-        for mode in ("local", "server", "unknown", ""):
-            self.assertIs(_turn_detection_for_vad_mode(mode), False)
 
 
 class TestBuildStt(unittest.TestCase):
@@ -256,7 +242,7 @@ class TestConfigLoaderDefaults(unittest.TestCase):
         cfg = EffectiveBotConfig(
             system_prompt="", greeting="",
             llm_model="gpt-5.4-nano", tts_voice="WhMcMcvXQ8T2QfmQmlYh",
-            stt_model="parakeet-tdt-0.6b-v2", stt_vad_mode="local",
+            stt_model="parakeet-tdt-0.6b-v2",
             stt_delay=None, tts_provider="elevenlabs",
             tts_aggregation_mode="sentence", stt_endpointing_ms=450,
             auto_record=False,
@@ -267,7 +253,6 @@ class TestConfigLoaderDefaults(unittest.TestCase):
         self.assertEqual(cfg.stt_model, "parakeet-tdt-0.6b-v2")
         self.assertEqual(cfg.llm_model, "gpt-5.4-nano")
         self.assertEqual(cfg.tts_provider, "elevenlabs")
-        self.assertEqual(cfg.stt_vad_mode, "local")
         self.assertIsNone(cfg.stt_delay)
 
     def test_fallback_constants_match_benchmark_winner(self):
@@ -396,7 +381,7 @@ class TestSmartTurnChain(unittest.TestCase):
     def chain(self, turn_detection):
         from types import SimpleNamespace
         from bot import _build_parakeet_chain
-        cfg = SimpleNamespace(stt_model="parakeet-tdt-0.6b-v2", turn_detection=turn_detection, stt_vad_mode="local",
+        cfg = SimpleNamespace(stt_model="parakeet-tdt-0.6b-v2", turn_detection=turn_detection,
                               smart_turn_wait_ms=1500)
         with mock.patch.dict(os.environ, {"NEMOTRON_STT_URL": "http://nim.internal:9000"}):
             return _build_parakeet_chain(cfg)

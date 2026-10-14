@@ -714,6 +714,24 @@ async def scenario_smart_turn():
         return f"answered with smart turn on ({server}); latency_ms={reply}"
 
 
+async def scenario_transcript_file():
+    """Make transcript, as the console's button does (meet -> the runner): the meeting's
+    Markdown transcript lands in the media bucket. On production it failed (2026-10-14): the
+    runner may not write recordings, and the transcript had no permission of its own."""
+    s3 = boto3.client("s3", region_name=REGION)
+    async with Meeting() as m:
+        await _until(lambda: any("bot line" in l for l in _log_lines(f"{LOGS}/bot", m.session, m.started)),
+                     60, "the greeting spoken and stored")
+        _post("/api/console/login", {"password": os.environ["CONSOLE_PASSWORD"]})
+        _post(f"/api/meetings/{m.session}/transcript", {})
+
+        def transcript_in_bucket():
+            listed = s3.list_objects_v2(Bucket=MEDIA_BUCKET, Prefix="recordings/").get("Contents", [])
+            return [o["Key"] for o in listed if m.room in o["Key"] and o["Key"].endswith("-transcript.md")]
+        await _until(transcript_in_bucket, 60, "the meeting's transcript in the media bucket")
+        return f"{transcript_in_bucket()[0]} in s3://{MEDIA_BUCKET}"
+
+
 # Every peer connection the page opens, so the check can read Chromium's own stats.
 _RECORD_PCS = """(() => { const PC = window.RTCPeerConnection; window.__pcs = [];
   window.RTCPeerConnection = function (...a) { const pc = new PC(...a); window.__pcs.push(pc); return pc; };
@@ -769,7 +787,7 @@ SCENARIOS = {"start": scenario_start, "stoptask": scenario_stoptask, "removed": 
              "transcript": scenario_transcript, "two_humans": scenario_two_humans, "refresh": scenario_refresh,
              "chat": scenario_chat, "auto_record": scenario_auto_record, "our_models": scenario_our_models, "record_auth": scenario_record_auth,
              "study_prolific": scenario_study_prolific, "session_limit": scenario_session_limit,
-             "turn_relay": scenario_turn_relay, "bot_ready": scenario_bot_ready, "smart_turn": scenario_smart_turn,
+             "turn_relay": scenario_turn_relay, "bot_ready": scenario_bot_ready, "smart_turn": scenario_smart_turn, "transcript_file": scenario_transcript_file,
              "prewarm": scenario_prewarm}  # last: its Stop preparing cools the pool the run prepared
 
 

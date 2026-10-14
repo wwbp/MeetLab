@@ -4,8 +4,14 @@ const dynamic = 'force-dynamic';
 
 export async function proxyToSqlAdmin(request: NextRequest): Promise<Response> {
   const botRunnerBase = (process.env.BOT_RUNNER_URL || 'http://localhost:7860').replace(/\/$/, '');
-  const subPath = request.nextUrl.pathname || '/';
+  // SQLAdmin's root is /api/db/, but Next drops trailing slashes: ask for it directly, or the
+  // runner's redirect to /api/db/ and Next's back to /api/db loop.
+  const path = request.nextUrl.pathname || '/';
+  const subPath = path === '/api/db' ? '/api/db/' : path;
   const targetUrl = `${botRunnerBase}${subPath}${request.nextUrl.search}`;
+  // The runner's own absolute links, http or https (behind the load balancer meet forwards
+  // X-Forwarded-Proto: https), become same-site ones: the browser can't reach agent-runner:7860.
+  const runnerOrigin = new RegExp(`https?://${new URL(botRunnerBase).host.replace(/[.]/g, '\\.')}`, 'g');
 
   const forwardHeaders = new Headers();
   for (const [key, val] of request.headers.entries()) {
@@ -38,14 +44,11 @@ export async function proxyToSqlAdmin(request: NextRequest): Promise<Response> {
     return new Response(`DB Admin unavailable: ${message}`, { status: 502 });
   }
 
-  const publicOrigin = `${request.nextUrl.protocol}//${request.headers.get('host') ?? 'localhost:3000'}`;
   const resHeaders = new Headers();
 
   for (const [key, val] of upstream.headers.entries()) {
     if (key === 'location') {
-      // Rewrite absolute redirects pointing at the bot runner back to the public origin.
-      const loc = val.startsWith(botRunnerBase) ? publicOrigin + val.slice(botRunnerBase.length) : val;
-      resHeaders.set(key, loc);
+      resHeaders.set(key, val.replace(runnerOrigin, ''));
     } else if (key === 'content-length') {
       // Omit — may be wrong after HTML body rewrite below.
     } else {
@@ -57,7 +60,7 @@ export async function proxyToSqlAdmin(request: NextRequest): Promise<Response> {
   if (contentType.includes('text/html')) {
     const text = await upstream.text();
     const rewritten = text
-      .replaceAll(botRunnerBase, publicOrigin)
+      .replace(runnerOrigin, '')
       .replace(
         '<body>',
         `<body><div style="position:fixed;top:0;left:0;right:0;z-index:9999;background:#1e293b;padding:6px 16px;font-family:sans-serif;font-size:13px;"><a href="/" style="color:#94a3b8;text-decoration:none;">← Console</a></div><div style="height:36px;"></div>`

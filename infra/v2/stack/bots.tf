@@ -168,6 +168,17 @@ resource "aws_iam_role_policy" "runner_transcripts" {
   })
 }
 
+# The live tests' own files (runner.purge_test_data, after each run): rooms accept-xxxxxx only;
+# every other recording stays undeletable by the runner (permission_contract.py).
+resource "aws_iam_role_policy" "runner_test_files" {
+  name = "delete-live-test-files"
+  role = aws_iam_role.runner_task.id
+  policy = jsonencode({
+    Version   = "2012-10-17"
+    Statement = [{ Effect = "Allow", Action = "s3:DeleteObject", Resource = "${aws_s3_bucket.media.arn}/recordings/*-accept-*" }]
+  })
+}
+
 # Prepare for study (capacity.py): the runner raises the bot pool's minimum and
 # schedules its return to 0. This group only; the rest of autoscaling is read-only.
 resource "aws_iam_role_policy" "runner_prewarm" {

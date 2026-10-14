@@ -35,6 +35,8 @@ export const config = {
     '/api/console/config',
     '/api/console/configs',
     '/api/console/start-link',
+    // Deletes the live tests' data (runner.TEST_ROOMS only); console only.
+    '/api/console/test-data',
   ],
 };
 

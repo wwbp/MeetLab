@@ -55,6 +55,7 @@ ALLOW = [
     Call(BOT, "s3:PutObject", f"{MEDIA}/recordings/speaker.wav"),
     Call(RUNNER, "s3:GetObject", f"{MEDIA}/recordings/speaker.wav"),
     Call(RUNNER, "s3:PutObject", f"{MEDIA}/recordings/20261014T013644Z-room-transcript.md"),  # Make transcript
+    Call(RUNNER, "s3:DeleteObject", f"{MEDIA}/recordings/20261014T013644Z-accept-0a1b2c-recording.mp4"),  # purge_test_data
     # LiveKit Cloud egress, with the key the runner sends in each recording request
     Call(EGRESS, "s3:PutObject", f"{MEDIA}/recordings/room-recording.mp4"),
     Call(EGRESS, "s3:AbortMultipartUpload", f"{MEDIA}/recordings/room-recording.mp4"),

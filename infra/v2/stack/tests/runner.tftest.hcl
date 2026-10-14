@@ -152,3 +152,12 @@ run "only_the_runner_gets_the_egress_key" {
     error_message = "bots never need the egress key"
   }
 }
+
+run "the_runner_may_delete_only_live_test_files" {
+  command = plan
+
+  assert {
+    condition     = jsondecode(aws_iam_role_policy.runner_test_files.policy).Statement[0].Action == "s3:DeleteObject" && endswith(jsondecode(aws_iam_role_policy.runner_test_files.policy).Statement[0].Resource, "/recordings/*-accept-*")
+    error_message = "purge_test_data deletes the live tests' files only (rooms accept-xxxxxx); never another recording"
+  }
+}

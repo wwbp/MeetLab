@@ -60,6 +60,20 @@ describe('console auth matcher', () => {
     }
   });
 
+  it('protects every console API route but login, by enumeration', () => {
+    // A hand-written list missed DELETE /api/console/test-data when it was added (2026-10-14):
+    // derive the console's admin routes from the directory instead.
+    const dir = path.join(__dirname, 'app', 'api', 'console');
+    const routes = fs
+      .readdirSync(dir, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory() && entry.name !== 'login')
+      .map((entry) => `/api/console/${entry.name}`);
+    expect(routes.length).toBeGreaterThan(3);
+    for (const route of routes) {
+      expect(isProtected(route), `${route} is not behind auth`).toBe(true);
+    }
+  });
+
   it('leaves the genuinely public surface open', () => {
     // Participants are not logged in, so these must stay reachable.
     for (const route of [

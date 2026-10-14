@@ -819,6 +819,12 @@ async def main(names):
         return await _run(names)
     finally:
         _capacity("DELETE")  # the pool returns to its baseline even if a scenario hangs
+        # Leave nothing behind (user, 2026-10-14): the runner deletes exactly the test rooms'
+        # sessions, turns, events, settings and files (runner.TEST_ROOMS), nothing else.
+        _post("/api/console/login", {"password": os.environ["CONSOLE_PASSWORD"]})
+        purged = json.loads(_web.open(urllib.request.Request(f"{MEET}/api/console/test-data", method="DELETE"),
+                                      timeout=120).read())
+        print(f"test data removed: {purged}", flush=True)
 
 
 async def _run(names):

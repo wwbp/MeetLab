@@ -434,6 +434,44 @@ async def stop_bot(request: Request, _=Depends(verify_api_key)):
     return {"stopped": running.id}
 
 
+# Production's live tests leave nothing behind (user, 2026-10-14). A test room is exactly the
+# pattern acceptance_staging.Meeting names, never a parameter, so no call can reach real data.
+TEST_ROOMS = r"^accept-[0-9a-f]{6}$"
+
+
+async def purge_test_data() -> dict:
+    """Delete everything of the live tests' rooms: sessions, turns, events, recording rows and
+    their files, per-room settings, and the speakers only they had. Nothing else."""
+    from sqlalchemy import delete, or_
+    test = Conversation.room_name.op("~")(TEST_ROOMS)
+    async with AsyncSessionLocal() as db, db.begin():
+        convs = select(Conversation.id).where(test)
+        files = (await db.execute(select(MediaFile.path).where(MediaFile.conv_id.in_(convs)))).scalars().all()
+        only_theirs = select(Utterance.speaker_id).where(Utterance.conv_id.in_(convs)).except_(
+            select(Utterance.speaker_id).where(Utterance.conv_id.not_in(convs)))
+        speakers = (await db.execute(only_theirs)).scalars().all()
+        counts = {
+            "events": (await db.execute(delete(Event).where(or_(
+                Event.conv_id.in_(convs), Event.room_name.op("~")(TEST_ROOMS))))).rowcount,
+            "media_files": (await db.execute(delete(MediaFile).where(MediaFile.conv_id.in_(convs)))).rowcount,
+            "utterances": (await db.execute(delete(Utterance).where(Utterance.conv_id.in_(convs)))).rowcount,
+            "conversations": (await db.execute(delete(Conversation).where(test))).rowcount,
+            "speakers": (await db.execute(delete(Speaker).where(Speaker.id.in_(speakers)))).rowcount,
+            "settings": (await db.execute(delete(BotConfig).where(BotConfig.scope.op("~")(TEST_ROOMS)))).rowcount,
+        }
+    for path in files:  # after the rows are gone: a file left over is harmless, a row without its file is not
+        if path:
+            storage.delete_file(path)
+    counts["files"] = len([p for p in files if p])
+    logger.info(f"purged live-test data: {counts}")
+    return counts
+
+
+@app.delete("/test-data")
+async def delete_test_data(_=Depends(verify_api_key)):
+    return await purge_test_data()
+
+
 @app.get("/rooms/{room_name}/session")
 async def room_session(room_name: str, _=Depends(verify_api_key)):
     """The room's running session, or null: meet's view of which bot a room has (iteration 9)."""

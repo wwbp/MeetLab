@@ -153,6 +153,17 @@ def exists(path: str) -> bool:
         raise
 
 
+def delete_file(path: str) -> None:
+    """Delete a stored file; a file already gone is fine. Used only to remove live-test data
+    (runner.purge_test_data): the runner's role may delete nothing else."""
+    cfg = _cfg()
+    if cfg["backend"] != "s3":
+        Path(path).unlink(missing_ok=True)
+        return
+    _require(cfg, "S3 delete")
+    _s3(cfg).delete_object(Bucket=cfg["bucket"], Key=path)
+
+
 def is_local() -> bool:
     return _cfg()["backend"] != "s3"
 

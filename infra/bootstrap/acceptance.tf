@@ -105,13 +105,3 @@ resource "aws_iam_role_policy" "acceptance" {
 }
 
 output "acceptance_role_arns" { value = { for env, r in aws_iam_role.acceptance : env => r.arn } }
-
-moved {
-  from = aws_iam_role.acceptance
-  to   = aws_iam_role.acceptance["staging"]
-}
-
-moved {
-  from = aws_iam_role_policy.acceptance
-  to   = aws_iam_role_policy.acceptance["staging"]
-}

@@ -44,16 +44,10 @@ data "aws_iam_openid_connect_provider" "github" {
   url = "https://${local.oidc}"
 }
 
-# The two environments infra/stack is applied as. Every per-environment policy below
-# is built once for each and names only that environment's resources (p = name prefix),
-# so neither environment's CI can reach the other's database, recordings or tasks.
+# The environment infra/stack is applied as: production only since staging was removed
+# (2026-10-14). Per-environment policies name only its resources (p = name prefix).
 locals {
   envs = {
-    staging = {
-      p               = "meetlab-v2-staging", github = "staging", apply_role = "meetlab-v2-tf-apply",
-      acceptance_role = "meetlab-v2-acceptance", boundary = "meetlab-v2-boundary",
-      hostnames       = ["meet-staging.wwbp.org", "livekit-staging.wwbp.org", "turn-staging.wwbp.org"],
-    }
     prod = {
       p               = "meetlab-v2-prod", github = "production", apply_role = "meetlab-v2-tf-apply-prod",
       acceptance_role = "meetlab-v2-acceptance-prod", boundary = "meetlab-v2-prod-boundary",
@@ -282,64 +276,3 @@ resource "aws_iam_role_policy" "apply" {
 output "plan_role_arn" { value = aws_iam_role.plan.arn }
 output "images_role_arn" { value = aws_iam_role.images.arn }
 output "apply_role_arns" { value = { for env, r in aws_iam_role.apply : env => r.arn } }
-
-# Staging's role and policies, from before there were two environments: same names, moved.
-moved {
-  from = aws_iam_role.apply
-  to   = aws_iam_role.apply["staging"]
-}
-
-moved {
-  from = aws_iam_role_policy.plan
-  to   = aws_iam_role_policy.plan["state"]
-}
-
-moved {
-  from = aws_iam_role_policy.apply["state"]
-  to   = aws_iam_role_policy.apply["staging/state"]
-}
-
-moved {
-  from = aws_iam_role_policy.apply["ec2"]
-  to   = aws_iam_role_policy.apply["staging/ec2"]
-}
-
-moved {
-  from = aws_iam_role_policy.apply["ec2_write"]
-  to   = aws_iam_role_policy.apply["staging/ec2_write"]
-}
-
-moved {
-  from = aws_iam_role_policy.apply["data"]
-  to   = aws_iam_role_policy.apply["staging/data"]
-}
-
-moved {
-  from = aws_iam_role_policy.apply["data_write"]
-  to   = aws_iam_role_policy.apply["staging/data_write"]
-}
-
-moved {
-  from = aws_iam_role_policy.apply["images_read"]
-  to   = aws_iam_role_policy.apply["staging/images_read"]
-}
-
-moved {
-  from = aws_iam_role_policy.apply["images"]
-  to   = aws_iam_role_policy.apply["staging/images"]
-}
-
-moved {
-  from = aws_iam_role_policy.apply["compute_read"]
-  to   = aws_iam_role_policy.apply["staging/compute_read"]
-}
-
-moved {
-  from = aws_iam_role_policy.apply["compute"]
-  to   = aws_iam_role_policy.apply["staging/compute"]
-}
-
-moved {
-  from = aws_iam_role_policy.apply["iam"]
-  to   = aws_iam_role_policy.apply["staging/iam"]
-}

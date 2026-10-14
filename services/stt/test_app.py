@@ -12,7 +12,7 @@ from fastapi.testclient import TestClient
 
 import app
 
-FIXTURES = pathlib.Path(__file__).resolve().parent.parent / "tools/loadtest/fixtures/conversations"
+FIXTURES = pathlib.Path(__file__).resolve().parents[2] / "tools/loadtest/fixtures/conversations"
 
 
 def clip(text: str) -> bytes:

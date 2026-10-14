@@ -178,7 +178,7 @@ class _NullableSelectField(SelectField):
 
 
 _LLM_CHOICES = [
-    # Named as the console names them (meet/lib/model-choices.ts): plain name, who runs it.
+    # Named as the console names them (services/web/lib/model-choices.ts): plain name, who runs it.
     ("gpt-5.4-nano", "GPT nano — paid service: OpenAI (default)"),
     ("gpt-5.4-mini", "GPT mini — paid service: OpenAI"),
     ("Qwen/Qwen2.5-7B-Instruct", "Qwen — our own server (staging only)"),

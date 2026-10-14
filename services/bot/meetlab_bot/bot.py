@@ -1027,7 +1027,7 @@ async def _bot(runner_args: LiveKitRunnerArguments):
         """Tell the participant the session is over, once, when time runs out.
 
         bot_config.session_limit_minutes has existed since July but only the
-        browser ever read it (meet/lib/SessionTimer.tsx): the countdown hit zero
+        browser ever read it (services/web/lib/SessionTimer.tsx): the countdown hit zero
         and the bot carried on as if nothing had happened. A paid study needs the
         opposite — the participant has to know the session ended and that they
         must copy their completion code into the survey, or the run is unpaid

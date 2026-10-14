@@ -15,9 +15,9 @@ early: same images, same speech-to-text path.
 
 | Service | Dir | Role |
 |---|---|---|
-| `meet` | `meet/` | Next.js 16: participant rooms, the console (Rooms, Meetings, Events, Bot settings, Start links, Database) |
+| `meet` | `services/web` | Next.js 16: participant rooms, the console (Rooms, Meetings, Events, Bot settings, Start links, Database) |
 | `agent-runner` | `services/api`, `services/bot`, `packages/core` | FastAPI on 7860: sessions in Postgres, starts one bot per meeting, recordings, Bot settings API, SQLAdmin at `/api/db` |
-| `stt-cpu` | `stt-cpu/` | Speech-to-text: Parakeet int8 on CPU, `/v1/audio/transcriptions` (production's default; the GPU NIM is for studies past the measured switch point) |
+| `stt-cpu` | `services/stt` | The bot's speech-to-text, one server shared by every bot: Parakeet int8 on CPU, `/v1/audio/transcriptions` (production's default; the GPU NIM is for studies past the measured switch point) |
 | `transport-server` | — | LiveKit (production uses LiveKit Cloud; staging self-hosts) |
 | `egress`, `redis` | — | local video recording |
 | `postgres` | — | the database |
@@ -52,7 +52,7 @@ every release, on production (`infra/live-tests.sh`). The runner has no hot relo
 
 ```bash
 cp .env.example .env   # OPENAI_API_KEY, ...
-cp meet/.env.local.example meet/.env.local
+cp services/web/.env.local.example services/web/.env.local
 ```
 `LIVEKIT_API_KEY` / `LIVEKIT_API_SECRET` must match across both (local: `devkey` / `secret`).
 In AWS, secrets live in SSM under `/meetlab-v2/<env>/`, never in Terraform state.
@@ -71,9 +71,11 @@ In AWS, secrets live in SSM under `/meetlab-v2/<env>/`, never in Terraform state
 
 | Dir | Python package | What it is |
 |---|---|---|
+| `services/web` | — | Next.js: rooms and the console (below) |
 | `services/api` | `meetlab_api` | `runner.py` (API, background loop), `dispatch.py`, `capacity.py` / `capacity_model.py` (Prepare for study; how much to run for N rooms), `transcript.py` |
 | `services/bot` | `meetlab_bot` | `bot.py` (pipeline), `bot_task.py` (a bot's process), `multi_speaker_stt.py`, `smart_turn.py`, `interruption.py`, … |
 | `packages/core` | `meetlab_core` | shared by both: `config.py`, `db/` (models, engine) and `migrations/` (Alembic, `packages/core/alembic.ini`), `sessions.py`, `heartbeat.py`, `rejoin.py`, `storage.py` (S3 via task roles), `event_log.py` |
+| `services/stt` | — | the speech-to-text server (FastAPI + Parakeet ONNX), its own image |
 | `tools/loadtest` | `meetlab_loadtest` | the load-test harness (runs in AWS as the load generator), the conversation library, quality scores |
 | `tests/integration`, `tests/system` | — | tests across services; live tests (`acceptance.py`), permission contract, parity checks |
 
@@ -85,7 +87,7 @@ In AWS, secrets live in SSM under `/meetlab-v2/<env>/`, never in Terraform state
   `python -m meetlab_bot.bot_task` under an init (PID 1).
 - `config.py` loads the root `.env`, then `.env.local`.
 
-## meet
+## web (`services/web`)
 
 - Next.js App Router. The console lives in `app/(shell)` and renders `components/desk/*` and
   `components/console/*`; participants use `app/rooms/[roomName]` and `/api/connection-details`.

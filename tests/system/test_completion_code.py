@@ -1,6 +1,6 @@
-"""The completion code, recomputed in Python exactly as meet makes it (meet/lib/completion-code.ts):
+"""The completion code, recomputed in Python exactly as meet makes it (services/web/lib/completion-code.ts):
 the live study-flow test checks the code a participant gets, and a researcher can check codes from
-the Prolific export. Pinned to the same example as meet/lib/completion-code.test.ts."""
+the Prolific export. Pinned to the same example as services/web/lib/completion-code.test.ts."""
 import os
 import sys
 import unittest

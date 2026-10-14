@@ -83,7 +83,7 @@ def _post(path, body, method="POST"):
 
 
 def completion_code(room: str, participant_id: str, secret: str) -> str:
-    """meet/lib/completion-code.ts in Python: the code a participant pastes into the survey,
+    """services/web/lib/completion-code.ts in Python: the code a participant pastes into the survey,
     HMAC-SHA256(secret, "<room>:<id>"), 8 characters with no 0/O or 1/I."""
     import hashlib
     import hmac

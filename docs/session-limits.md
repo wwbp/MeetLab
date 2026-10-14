@@ -75,10 +75,10 @@ Two other things it deliberately does not do:
 | Config column (`bot_config.session_limit_minutes`) | `packages/core/meetlab_core/db/models.py` |
 | Effective-config resolution | `packages/core/meetlab_core/db/config_loader.py` |
 | `GET`/`PUT /config` validation | `services/api/meetlab_api/runner.py` |
-| Console field | `meet/app/(shell)/config/page.tsx` |
-| Handed to the browser at join | `meet/app/api/connection-details/route.ts` |
-| All the logic (pure, unit-tested) | `meet/lib/session-limit.ts` |
-| Countdown pill + notifications | `meet/lib/SessionTimer.tsx` |
+| Console field | `services/web/app/(shell)/config/page.tsx` |
+| Handed to the browser at join | `services/web/app/api/connection-details/route.ts` |
+| All the logic (pure, unit-tested) | `services/web/lib/session-limit.ts` |
+| Countdown pill + notifications | `services/web/lib/SessionTimer.tsx` |
 
 There is no stored deadline anywhere and no timer on the server. The browser derives
 everything each second from three values: the configured limit, the earliest
@@ -91,11 +91,11 @@ Adding real enforcement later would mean one scheduled `remove_participant` call
 
 Tests, all under `make test-unit`:
 
-- `meet/lib/session-limit.test.ts` — phase thresholds, anchor selection, clock
+- `services/web/lib/session-limit.test.ts` — phase thresholds, anchor selection, clock
   formatting, notification copy and de-duplication, plus a second-by-second walk of
   a whole session at five different limits asserting the countdown only ever counts
   down, the phase only ever escalates, and each notification fires exactly once.
-- `meet/app/api/connection-details/connection-details.test.ts` — the limit reaches
+- `services/web/app/api/connection-details/connection-details.test.ts` — the limit reaches
   the browser, and a bot runner that is down, erroring, or returning junk still
   yields a joinable room with no limit.
 - `services/api/tests/test_runner_start.py` — validation (including `True`, which is

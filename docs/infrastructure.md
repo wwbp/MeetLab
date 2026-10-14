@@ -47,7 +47,7 @@ Lower a size again after the study, the same way. Don't release during a study.
 
 ## Decision: speech-to-text on CPU, not GPU
 
-Production runs Parakeet (int8, `stt-cpu/`) on a CPU machine. The same model also runs as an
+Production runs Parakeet (int8, `services/stt/`) on a CPU machine. The same model also runs as an
 NVIDIA NIM on a GPU (g6.xlarge), behind the same endpoint, so the bots work with either.
 
 | | CPU (c6i.large → 2xlarge) | GPU (g6.xlarge, NIM) |

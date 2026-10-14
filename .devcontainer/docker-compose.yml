@@ -61,10 +61,10 @@ services:
       - redis
 
 
-  # Production's speech-to-text (stt-cpu/, the same image CI builds): Parakeet int8 on CPU.
+  # Production's speech-to-text (services/stt/, the same image CI builds): Parakeet int8 on CPU.
   stt-cpu:
     build:
-      context: ../stt-cpu
+      context: ../services/stt
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request,json,sys; sys.exit(0 if json.load(urllib.request.urlopen('http://localhost:8000/health'))['ready'] else 1)"]
       interval: 10s
@@ -133,16 +133,16 @@ services:
 
   meet:
     build:
-      context: ../meet
+      context: ../services/web
       dockerfile: Dockerfile
       target: dev
     env_file:
-      - ../meet/.env.local
+      - ../services/web/.env.local
     environment:
       - BOT_RUNNER_URL=http://agent-runner:7860/
       - BOT_RUNNER_SECRET=${BOT_RUNNER_SECRET:-}
     volumes:
-      - ../meet:/app:cached
+      - ../services/web:/app:cached
       # Anonymous, so `make up` (--renew-anon-volumes) reseeds it from the image: a named
       # volume kept the first install forever and dev ran other packages than CI.
       - /app/node_modules

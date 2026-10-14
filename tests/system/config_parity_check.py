@@ -1,6 +1,6 @@
 """Every Bot Config field is in all three places it must be, or researchers can't use it:
 the database (packages/core/meetlab_core/db/models.py), the runner's /config API (services/api/meetlab_api/runner.py)
-and the console's Bot Config form (meet/app/(shell)/config/page.tsx). The two services' own
+and the console's Bot Config form (services/web/app/(shell)/config/page.tsx). The two services' own
 tests can't see each other (each container mounts only its own directory), so this runs from
 the repository root in CI (make test-config-parity). Whether the bot *uses* each field is
 tests/integration/test_config_contract.py. tts_aggregation_mode was missing from the form, and stt_vad_mode (dropped 2026-10-14)
@@ -33,7 +33,7 @@ def missing(models: str, runner: str, form: str) -> dict[str, list[str]]:
 
 def main() -> int:
     gaps = missing((ROOT / "packages/core/meetlab_core/db/models.py").read_text(), (ROOT / "services/api/meetlab_api/runner.py").read_text(),
-                   (ROOT / "meet/app/(shell)/config/page.tsx").read_text())
+                   (ROOT / "services/web/app/(shell)/config/page.tsx").read_text())
     bad = {where: fields for where, fields in gaps.items() if fields}
     for where, fields in bad.items():
         print(f"Bot Config fields missing from the {where}: {', '.join(fields)}")

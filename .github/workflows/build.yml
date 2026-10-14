@@ -17,10 +17,10 @@ name: Build
 on:
   pull_request:
     branches: [main]
-    paths: ["infra/**", ".github/workflows/**", "Makefile", "meet/**", "services/**", "packages/**", "tools/**", "tests/**", "pyproject.toml", "uv.lock", "!**/*.md"]
+    paths: ["infra/**", ".github/workflows/**", "Makefile", "services/web/**", "services/**", "packages/**", "tools/**", "tests/**", "pyproject.toml", "uv.lock", "!**/*.md"]
   push:
     branches: [main]
-    paths: ["infra/**", ".github/workflows/build.yml", "meet/**", "services/**", "packages/**", "tools/**", "tests/**", "pyproject.toml", "uv.lock", "!**/*.md"]
+    paths: ["infra/**", ".github/workflows/build.yml", "services/web/**", "services/**", "packages/**", "tools/**", "tests/**", "pyproject.toml", "uv.lock", "!**/*.md"]
 
 permissions:
   contents: read
@@ -101,9 +101,9 @@ jobs:
     strategy:
       matrix:
         include:
-          - { name: meet, context: meet, file: meet/Dockerfile, target: runner }
+          - { name: meet, context: services/web, file: services/web/Dockerfile, target: runner }
           - { name: agent-runner, context: ., file: services/api/Dockerfile, target: "" } # API and bots
-          - { name: stt-cpu, context: stt-cpu, file: stt-cpu/Dockerfile, target: "" }
+          - { name: stt-cpu, context: services/stt, file: services/stt/Dockerfile, target: "" }
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
@@ -127,9 +127,9 @@ jobs:
     strategy:
       matrix:
         include:
-          - { name: meet, context: meet, file: meet/Dockerfile, target: runner }
+          - { name: meet, context: services/web, file: services/web/Dockerfile, target: runner }
           - { name: agent-runner, context: ., file: services/api/Dockerfile, target: "" } # API and bots
-          - { name: stt-cpu, context: stt-cpu, file: stt-cpu/Dockerfile, target: "" }
+          - { name: stt-cpu, context: services/stt, file: services/stt/Dockerfile, target: "" }
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3

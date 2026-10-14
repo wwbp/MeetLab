@@ -8,8 +8,8 @@
 **/.mypy_cache
 **/.ruff_cache
 .env*
-meet
-stt-cpu
+services/web
+services/stt
 docs
 site
 infra

@@ -1,4 +1,4 @@
-# Speech-to-text on CPU (the stt-cpu image, stt-cpu/app.py): Parakeet TDT 0.6B v2, int8,
+# Speech-to-text on CPU (the stt-cpu image, services/stt/app.py): Parakeet TDT 0.6B v2, int8,
 # behind the same endpoint as the GPU NIM, so bots use either unchanged (runner.tf). No GPU and
 # no NVIDIA licence; the model is in the image, so a machine is ready in about a minute.
 # Production keeps it on for unscheduled sessions; a study past the measured switch point turns

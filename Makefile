@@ -79,8 +79,8 @@ test-static: test-dead-code test-image docs-build
 	@# import each other; core imports neither (.importlinter).
 	python3 tests/system/layout_check.py
 	PYTHONPATH=$(PYTHONPATH_ALL) uv run --with import-linter lint-imports
-	docker build -q --target deps -t meetlab-meet:deps meet >/dev/null
-	docker run --rm -v $(CURDIR)/meet:/app -v /app/node_modules -w /app meetlab-meet:deps \
+	docker build -q --target deps -t meetlab-meet:deps services/web >/dev/null
+	docker run --rm -v $(CURDIR)/services/web:/app -v /app/node_modules -w /app meetlab-meet:deps \
 		sh -c 'pnpm lint && pnpm exec tsc --noEmit && pnpm knip'
 	@# Workflows (actionlint: syntax, expressions, untrusted input in scripts) and scripts
 	@# (shellcheck); warnings and errors, not style notes.
@@ -107,10 +107,10 @@ test-image:
 		meetlab-agent-runner:budget python -c \
 		"import meetlab_api.runner, meetlab_bot.bot, meetlab_bot.bot_task, meetlab_loadtest.load_run, soundfile; print('entry points import')"
 
-# Speech-to-text on CPU (stt-cpu/): the server against recorded fixture clips. Downloads the
+# Speech-to-text on CPU (services/stt/): the server against recorded fixture clips. Downloads the
 # model once (~650 MB) into the Hugging Face cache; no AWS, no Docker.
 test-stt-cpu:
-	cd stt-cpu && uv run --no-project --with "onnx-asr[cpu,hub]==0.12.*" --with soundfile --with fastapi \
+	cd services/stt && uv run --no-project --with "onnx-asr[cpu,hub]==0.12.*" --with soundfile --with fastapi \
 		--with httpx --with python-multipart python -m unittest test_app -v
 
 # Offline: fmt, validate and `terraform test` (mock provider) for every infra stack.

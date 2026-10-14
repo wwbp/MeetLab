@@ -10,14 +10,14 @@ from tests.load_report import _queries, markdown
 class BotTaskMetricsTest(unittest.TestCase):
     def test_the_report_asks_for_the_cpu_speech_servers_machine(self):
         q = {x["Label"]: x["MetricStat"] for x in _queries()}
-        self.assertIn({"Name": "AutoScalingGroupName", "Value": "meetlab-v2-staging-stt-cpu"}, q["stt-cpu_hosts_cpu"]["Metric"]["Dimensions"])
+        self.assertIn({"Name": "AutoScalingGroupName", "Value": "meetlab-v2-prod-stt-cpu"}, q["stt-cpu_hosts_cpu"]["Metric"]["Dimensions"])
 
     def test_the_report_asks_for_each_bot_tasks_cpu_and_memory(self):
         q = {x["Label"]: x["MetricStat"] for x in _queries()}
         for label, metric in (("bot_task_cpu", "CpuUtilized"), ("bot_task_mem", "MemoryUtilized")):
             self.assertEqual(q[label]["Metric"]["Namespace"], "ECS/ContainerInsights")
             self.assertEqual(q[label]["Metric"]["MetricName"], metric)
-            self.assertIn({"Name": "TaskDefinitionFamily", "Value": "meetlab-v2-staging-bot"}, q[label]["Metric"]["Dimensions"])
+            self.assertIn({"Name": "TaskDefinitionFamily", "Value": "meetlab-v2-prod-bot"}, q[label]["Metric"]["Dimensions"])
             self.assertEqual(q[label]["Stat"], "Maximum", "the heaviest task decides the reservation")
 
     def test_the_report_shows_the_heaviest_bot_against_its_reservation(self):

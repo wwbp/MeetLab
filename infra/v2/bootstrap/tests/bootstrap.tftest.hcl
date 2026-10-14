@@ -508,7 +508,7 @@ run "production_roles_trust_only_the_production_environment" {
   assert {
     condition = toset(flatten([for s in flatten([for k, p in aws_iam_role_policy.apply : jsondecode(p.policy).Statement if startswith(k, "prod/")]) :
       try(s.Condition["ForAllValues:StringEquals"]["route53:ChangeResourceRecordSetsNormalizedRecordNames"], [])
-    ])) == toset(["meet-v2.wwbp.org", "livekit-v2.wwbp.org", "turn-v2.wwbp.org"])
+    ])) == toset(["meet.wwbp.org", "meet-v2.wwbp.org", "livekit-v2.wwbp.org", "turn-v2.wwbp.org"])
     error_message = "production's names until cutover; meet.wwbp.org is v1's until then"
   }
 }
@@ -555,5 +555,18 @@ run "release_images_never_expire" {
       jsondecode(p.policy).rules[1].selection.countNumber == 30
     ])
     error_message = "the first rule holds every release image (a lower rule can't expire what a higher one matches); then the last 30 builds"
+  }
+}
+
+run "production_may_move_meet_wwbp_org_from_v1" {
+  command = plan
+
+  assert {
+    condition     = contains(local.envs.prod.hostnames, "meet.wwbp.org") && contains(local.envs.prod.hostnames, "meet-v2.wwbp.org")
+    error_message = "the cutover renames production's record meet-v2 -> meet: its role must change both names"
+  }
+  assert {
+    condition     = !contains(local.envs.staging.hostnames, "meet.wwbp.org")
+    error_message = "staging must never be able to touch meet.wwbp.org"
   }
 }

@@ -27,7 +27,7 @@ env:
   AWS_REGION: us-east-1
   TF_IN_AUTOMATION: "1"
   TF_VAR_env: prod
-  TF_VAR_hostname_suffix: "-v2" # meet-v2.wwbp.org until cutover; meet.wwbp.org is v1's
+  TF_VAR_hostname_suffix: "" # meet.wwbp.org since the cutover (2026-10-13); was meet-v2
 
 jobs:
   staged:

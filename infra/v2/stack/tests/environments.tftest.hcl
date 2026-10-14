@@ -63,3 +63,17 @@ run "only_staging_and_prod" {
 
   expect_failures = [var.env]
 }
+
+run "production_takes_over_meet_wwbp_org_at_cutover" {
+  command = plan
+
+  variables {
+    env             = "prod"
+    hostname_suffix = "" # release-v2.yml, from the cutover (2026-10-13)
+  }
+
+  assert {
+    condition     = aws_route53_record.meet.name == "meet.wwbp.org" && aws_route53_record.meet.allow_overwrite == true
+    error_message = "production answers at meet.wwbp.org, taking over v1's hand-made record instead of failing on it"
+  }
+}

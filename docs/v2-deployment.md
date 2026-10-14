@@ -7,7 +7,7 @@ time you deploy, and the few steps a **person** has to do because the pipeline i
 deliberately not allowed to.
 
 - Staging: <https://meet-staging.wwbp.org> (console at `/console`)
-- Production: <https://meet-v2.wwbp.org> until the cutover; then `meet.wwbp.org`, which is v1's until then
+- Production: <https://meet.wwbp.org> (since the cutover, 2026-10-13; `meet-v2.wwbp.org` before)
 - Branch: `v2`. **Never merge v2 work into `main`** — `main` is v1 and is frozen.
 - Decisions, costs and known issues: [`infra/v2/LEDGER.md`](https://github.com/wwbp/MeetLab/blob/v2/infra/v2/LEDGER.md)
 

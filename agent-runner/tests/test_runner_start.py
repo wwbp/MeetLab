@@ -525,11 +525,13 @@ class RunnerStartApiTests(unittest.TestCase):
             "scope", "system_prompt", "greeting",
             "stt_endpointing_ms", "user_speech_timeout_ms",
             "llm_model", "tts_voice", "tts_provider",
-            "stt_model", "stt_vad_mode", "stt_delay", "auto_record",
+            "stt_model", "stt_delay", "auto_record",
             "session_limit_minutes",
         ):
             self.assertIn(key, body, f"GET /config response missing field: {key}")
         self.assertEqual(body["scope"], "global")
+        # Dropped 2026-10-14: it was always "local" and changed nothing (a dead knob).
+        self.assertNotIn("stt_vad_mode", body)
 
     def test_config_get_with_room_param_returns_scope_field(self):
         response = self.client.get("/config?room=some-room")

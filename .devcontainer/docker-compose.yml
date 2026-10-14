@@ -88,6 +88,15 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
 
+  # The bot's image (services/bot/Dockerfile), as ECS runs it. Built, never started here: the
+  # runner starts one container from it per meeting (BOT_DISPATCHER=docker).
+  bot:
+    image: meetlab-bot:local
+    build:
+      context: ..
+      dockerfile: services/bot/Dockerfile
+    profiles: ["build-only"]
+
   agent-runner:
     build:
       context: ..
@@ -95,19 +104,21 @@ services:
     restart: unless-stopped
     env_file:
       - ../.env
-    environment:
-      - DATABASE_URL=postgresql+asyncpg://meetlab:meetlab@postgres:5432/meetlab
-      - BOT_RUNNER_SECRET=${BOT_RUNNER_SECRET:-}
+    environment: &runner-env
+      DATABASE_URL: "postgresql+asyncpg://meetlab:meetlab@postgres:5432/meetlab"
+      BOT_RUNNER_SECRET: "${BOT_RUNNER_SECRET:-}"
       # Speech-to-text as production runs it: Parakeet on our CPU server (stt-cpu below,
       # infra/stack/stt_cpu.tf), so dev catches what prod would hit.
-      - STT_MODEL_OVERRIDE=${STT_MODEL_OVERRIDE-parakeet-tdt-0.6b-v2}
-      - NEMOTRON_STT_URL=${NEMOTRON_STT_URL:-http://stt-cpu:8000}
+      STT_MODEL_OVERRIDE: "${STT_MODEL_OVERRIDE-parakeet-tdt-0.6b-v2}"
+      NEMOTRON_STT_URL: "${NEMOTRON_STT_URL:-http://stt-cpu:8000}"
       # Bot JWT lifetime (min). Default 15.
-      - BOT_TOKEN_TTL_MINUTES=${BOT_TOKEN_TTL_MINUTES:-15}
+      BOT_TOKEN_TTL_MINUTES: "${BOT_TOKEN_TTL_MINUTES:-15}"
       # Each meeting's bot runs as its own container, as each is its own ECS task in
       # staging (dispatch.py). There is no in-process mode: /start refuses without one.
-      - BOT_DISPATCHER=${BOT_DISPATCHER:-docker}
-      - DOCKER_HOST=tcp://docker-socket-proxy:2375
+      BOT_DISPATCHER: "${BOT_DISPATCHER:-docker}"
+      # The image each meeting's bot container runs (the `bot` service below builds it).
+      BOT_IMAGE: "meetlab-bot:local"
+      DOCKER_HOST: "tcp://docker-socket-proxy:2375"
     volumes:
       # The repo over /app (the image's PYTHONPATH points into it), so code edits reach the
       # runner on restart and every bot it starts.
@@ -130,6 +141,28 @@ services:
       timeout: 5s
       retries: 60
       start_period: 10s
+
+  # Where the Python tests run (make test-unit): the bot's image with the API's dependencies
+  # added, since the cross-service tests import both. The runner and the bots keep production's
+  # images; this container only runs tests against them.
+  tests:
+    image: meetlab-tests:local
+    build:
+      context: ..
+      dockerfile: services/bot/Dockerfile
+      args:
+        EXTRAS: "--extra bot --extra api"
+    profiles: ["build-only"]
+    env_file:
+      - ../.env
+    environment:
+      # The runner's settings (the in-process API tests need them), plus where the live one is.
+      <<: *runner-env
+      AGENT_RUNNER_URL: http://agent-runner:7860
+      PYTHONPATH: /app/packages/core:/app/services/api:/app/services/bot:/app/tools/loadtest
+    volumes:
+      - ..:/app:cached
+      - ../recordings:/recordings
 
   meet:
     build:

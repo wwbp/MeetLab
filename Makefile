@@ -21,6 +21,7 @@ UNIT_SUITES = packages/core services/api services/bot tools/loadtest
 .PHONY: test-static test-config-parity up down start stop logs migrate migration test test-unit test-integration test-infra test-stt-cpu test-image test-dead-code scan scan-agent-runner scan-meet sim-attribution
 
 up:
+	$(COMPOSE) build bot tests
 	$(COMPOSE) up --build -d --renew-anon-volumes
 
 down:
@@ -54,7 +55,7 @@ test: test-unit test-integration
 test-unit:
 	$(COMPOSE) up -d transport-server agent-runner meet
 	$(COMPOSE) exec -T agent-runner $(ALEMBIC) upgrade head
-	$(COMPOSE) exec -T agent-runner sh -ec 'for d in $(UNIT_SUITES); do echo "== $$d"; (cd $$d && python -m unittest discover -s tests -t . -p "test_*.py"); done; \
+	$(COMPOSE) run --rm --no-deps -T tests sh -ec 'for d in $(UNIT_SUITES); do echo "== $$d"; (cd $$d && python -m unittest discover -s tests -t . -p "test_*.py"); done; \
 	  echo "== tests"; python -m unittest discover -s tests -t . -p "test_*.py"'
 	@# Tests that call the live runner start real bot containers in rooms nobody joins;
 	@# a bot alone never leaves yet (design iteration 4, should_leave). Clean them up.
@@ -91,21 +92,28 @@ PY_DIRS = packages/core services/api services/bot tools/loadtest tests
 PYTHONPATH_ALL = packages/core:services/api:services/bot:tools/loadtest
 test-dead-code:
 	uvx vulture $(PY_DIRS) vulture_whitelist.py --exclude ".venv,migrations" --min-confidence 80
-	PYTHONPATH=$(PYTHONPATH_ALL) uv run --python 3.12 --with deptry deptry packages/core services/api services/bot --extend-exclude ".*/tests/.*"
+	PYTHONPATH=$(PYTHONPATH_ALL) uv run --python 3.12 --all-extras --with deptry deptry packages/core services/api services/bot --extend-exclude ".*/tests/.*"
 
-# The API/bot image (services/api/Dockerfile, ECR meetlab-v2/agent-runner): within budget, and every runtime entry point imports inside
-# it (a cut that removes something used fails here). Budget: the files in the image (du), the same
-# on any Docker. Before the deep cut (2026-10-06): 1,879 MB (978 MB compressed in ECR): ffmpeg, a
-# second uv sync, local Whisper; after: 779 MB (262 MB compressed).
-IMAGE_BUDGET_MB ?= 850
+# The two Python images, each within budget, each one's entry points importing inside it, and
+# the API's without Pipecat (the point of splitting them). Budget: the files in the image (du), the
+# same on any Docker. One image before the split (2026-10-14): 767 MB.
+API_IMAGE_BUDGET_MB ?= 400
+BOT_IMAGE_BUDGET_MB ?= 850
+IMAGE_TEST_ENV = -e DATABASE_URL=postgresql+asyncpg://x:x@localhost/x -e LIVEKIT_URL=ws://localhost:7880 \
+	-e LIVEKIT_API_KEY=x -e LIVEKIT_API_SECRET=x
 test-image:
-	docker build --platform linux/amd64 -q -f services/api/Dockerfile -t meetlab-agent-runner:budget . >/dev/null
-	@mb=$$(docker run --rm --platform linux/amd64 meetlab-agent-runner:budget du -sxm / | cut -f1); \
-		echo "agent-runner image: $$mb MB of files (budget $(IMAGE_BUDGET_MB) MB)"; [ $$mb -le $(IMAGE_BUDGET_MB) ]
-	docker run --rm --platform linux/amd64 -e DATABASE_URL=postgresql+asyncpg://x:x@localhost/x \
-		-e LIVEKIT_URL=ws://localhost:7880 -e LIVEKIT_API_KEY=x -e LIVEKIT_API_SECRET=x \
-		meetlab-agent-runner:budget python -c \
-		"import meetlab_api.runner, meetlab_bot.bot, meetlab_bot.bot_task, meetlab_loadtest.load_run, soundfile; print('entry points import')"
+	docker build --platform linux/amd64 -q -f services/api/Dockerfile -t meetlab-api:budget . >/dev/null
+	docker build --platform linux/amd64 -q -f services/bot/Dockerfile -t meetlab-bot:budget . >/dev/null
+	@mb=$$(docker run --rm --platform linux/amd64 meetlab-api:budget du -sxm / | cut -f1); \
+		echo "api image: $$mb MB of files (budget $(API_IMAGE_BUDGET_MB) MB)"; [ $$mb -le $(API_IMAGE_BUDGET_MB) ]
+	@mb=$$(docker run --rm --platform linux/amd64 meetlab-bot:budget du -sxm / | cut -f1); \
+		echo "bot image: $$mb MB of files (budget $(BOT_IMAGE_BUDGET_MB) MB)"; [ $$mb -le $(BOT_IMAGE_BUDGET_MB) ]
+	docker run --rm --platform linux/amd64 $(IMAGE_TEST_ENV) meetlab-api:budget python -c \
+		"import meetlab_api.runner, alembic; print('api entry points import')"
+	docker run --rm --platform linux/amd64 meetlab-api:budget python -c \
+		"import importlib.util as u; assert u.find_spec('pipecat') is None, 'Pipecat in the API image'; print('api image has no Pipecat')"
+	docker run --rm --platform linux/amd64 $(IMAGE_TEST_ENV) meetlab-bot:budget python -c \
+		"import meetlab_bot.bot, meetlab_bot.bot_task, meetlab_loadtest.load_run, soundfile; print('bot entry points import')"
 
 # Speech-to-text on CPU (services/stt/): the server against recorded fixture clips. Downloads the
 # model once (~650 MB) into the Hugging Face cache; no AWS, no Docker.
@@ -146,4 +154,4 @@ scan-meet:
 # theirs (diagnosis F11)? Real speech recognition; SPEAKERS=a is the one-speaker control.
 sim-attribution:
 	$(COMPOSE) up -d --wait transport-server agent-runner
-	$(COMPOSE) exec -T -e SPEAKERS=$(or $(SPEAKERS),abc) agent-runner python -m meetlab_loadtest.sim_attribution
+	$(COMPOSE) run --rm --no-deps -T -e SPEAKERS=$(or $(SPEAKERS),abc) tests python -m meetlab_loadtest.sim_attribution

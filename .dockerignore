@@ -1,5 +1,5 @@
-# Context for the Python image (services/api/Dockerfile, built from the repo root): it copies
-# only packages/, services/api, services/bot and tools/loadtest; keep the rest out of the context.
+# Context for the Python images (services/api, services/bot Dockerfiles, built from the repo root): they copy
+# only packages/, their service and tools/loadtest; keep the rest out of the context.
 .git
 **/.venv
 **/__pycache__

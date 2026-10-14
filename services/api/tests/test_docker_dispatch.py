@@ -16,9 +16,10 @@ from meetlab_api.dispatch import DispatchError, bot_container_spec, run_bot_cont
 
 ME = {  # the runner's own container, as GET /containers/{id}/json reports it
     "Image": "sha256:runner-image",
-    "Config": {"Env": ["DATABASE_URL=postgresql+asyncpg://db", "LIVEKIT_URL=ws://lk:7880"]},
+    "Config": {"Env": ["DATABASE_URL=postgresql+asyncpg://db", "LIVEKIT_URL=ws://lk:7880",
+                       "PATH=/venv/bin:/usr/bin", "PYTHONPATH=/app/packages/core:/app/services/api"]},
     "Mounts": [
-        {"Type": "bind", "Source": "/Users/x/MeetLab/agent-runner", "Destination": "/app"},
+        {"Type": "bind", "Source": "/Users/x/MeetLab", "Destination": "/app"},
         {"Type": "volume", "Name": "devcontainer_agent-runner-venv", "Source": "/var/lib/docker/v", "Destination": "/app/.venv"},
     ],
     "NetworkSettings": {"Networks": {"devcontainer_default": {}}},
@@ -43,19 +44,23 @@ class FakeDocker:
 
 
 class SpecTest(unittest.TestCase):
-    def test_the_bot_container_is_the_runner_container_with_another_command(self):
-        spec = bot_container_spec(ME, "sess-1")
-        self.assertEqual(spec["Image"], "sha256:runner-image")
+    def test_the_bot_container_is_the_runner_container_with_the_bot_image_and_command(self):
+        # The bot has its own image (Pipecat; the API's has none), as in ECS; mounts, env and
+        # network are the runner's, so a local code edit reaches local bots.
+        spec = bot_container_spec(ME, "sess-1", "meetlab-bot:local")
+        self.assertEqual(spec["Image"], "meetlab-bot:local")
         self.assertEqual(spec["Cmd"][-2:], ["--session-id", "sess-1"])
-        self.assertEqual(spec["Env"], ME["Config"]["Env"])
+        # The runner's settings, not its image's: the bot image sets its own PATH and PYTHONPATH
+        # (the API's has no services/bot on it).
+        self.assertEqual(spec["Env"], ["DATABASE_URL=postgresql+asyncpg://db", "LIVEKIT_URL=ws://lk:7880"])
         self.assertEqual(spec["HostConfig"]["NetworkMode"], "devcontainer_default")
-        self.assertIn({"Type": "bind", "Source": "/Users/x/MeetLab/agent-runner", "Target": "/app"},
+        self.assertIn({"Type": "bind", "Source": "/Users/x/MeetLab", "Target": "/app"},
                       spec["HostConfig"]["Mounts"])
         self.assertIn({"Type": "volume", "Source": "devcontainer_agent-runner-venv", "Target": "/app/.venv"},
                       spec["HostConfig"]["Mounts"])
 
     def test_it_cleans_up_after_itself_and_gets_time_to_finish(self):
-        spec = bot_container_spec(ME, "sess-1")
+        spec = bot_container_spec(ME, "sess-1", "meetlab-bot:local")
         self.assertTrue(spec["HostConfig"]["AutoRemove"])
         self.assertEqual(spec["StopTimeout"], 120)  # same as the ECS stopTimeout
 
@@ -64,11 +69,11 @@ class RunTest(unittest.TestCase):
     def test_an_init_is_pid_1_so_the_bot_can_be_killed_and_reaped(self):
         # Since the image runs python directly (no uv wrapper), python would be PID 1, and
         # PID 1 ignores a SIGKILL sent inside its container (2026-10-07: kill9 hung).
-        self.assertIs(bot_container_spec(ME, "sess-1")["HostConfig"]["Init"], True)
+        self.assertIs(bot_container_spec(ME, "sess-1", "meetlab-bot:local")["HostConfig"]["Init"], True)
 
     def test_start_creates_and_starts_a_container_named_for_the_session(self):
         docker = FakeDocker()
-        self.assertEqual(run_bot_container(docker, "sess-1", "runner-host"), "meetlab-bot-sess-1")
+        self.assertEqual(run_bot_container(docker, "sess-1", "runner-host", "meetlab-bot:local"), "meetlab-bot-sess-1")
         paths = [p for _, p, _ in docker.calls]
         self.assertIn("/containers/create?name=meetlab-bot-sess-1", paths)
         self.assertIn("/containers/meetlab-bot-sess-1/start", paths)
@@ -76,11 +81,15 @@ class RunTest(unittest.TestCase):
     def test_a_retried_start_is_the_same_container(self):
         # 409: a container with that name exists; 304: it is already running.
         docker = FakeDocker(create_status=409, start_status=304)
-        self.assertEqual(run_bot_container(docker, "sess-1", "runner-host"), "meetlab-bot-sess-1")
+        self.assertEqual(run_bot_container(docker, "sess-1", "runner-host", "meetlab-bot:local"), "meetlab-bot-sess-1")
+
+    def test_no_bot_image_is_a_clear_dispatch_error(self):
+        with self.assertRaisesRegex(DispatchError, "BOT_IMAGE"):
+            run_bot_container(FakeDocker(), "sess-1", "runner-host", "")
 
     def test_a_refusal_is_an_error_not_a_silent_success(self):
         with self.assertRaises(DispatchError):
-            run_bot_container(FakeDocker(create_status=403), "sess-1", "runner-host")
+            run_bot_container(FakeDocker(create_status=403), "sess-1", "runner-host", "meetlab-bot:local")
 
 
 class StopTest(unittest.TestCase):

@@ -53,24 +53,29 @@ def stop_bot_task(ecs, session_id: str, target: EcsBotTarget) -> None:
 
 # --- Local: one Docker container per meeting, mirroring ECS (decision D5) -------------
 #
-# The bot container copies the runner's own container (same image, mounts, network,
-# environment) with the bot_task command, so a local code edit reaches local bots as
-# it reaches the runner. agent-runner reaches Docker only through a socket proxy that
+# The bot container copies the runner's own container (mounts, network, environment) with
+# the bot's image (BOT_IMAGE, built by compose from services/bot/Dockerfile, as ECS runs the
+# bot image) and the bot_task command, so a local code edit reaches local bots as it reaches
+# the runner. agent-runner reaches Docker only through a socket proxy that
 # allows container create, start, stop and inspect (.devcontainer/docker-compose.yml).
+
+_IMAGE_ENV = {"PATH", "PYTHONPATH"}
+
 
 def _container_name(session_id: str) -> str:
     return f"meetlab-bot-{session_id}"
 
 
-def bot_container_spec(me: dict, session_id: str) -> dict:
+def bot_container_spec(me: dict, session_id: str, image: str) -> dict:
     mounts = [
         {"Type": m["Type"], "Source": m["Name"] if m["Type"] == "volume" else m["Source"], "Target": m["Destination"]}
         for m in me.get("Mounts", []) if m["Type"] in ("bind", "volume")
     ]
     return {
-        "Image": me["Image"],
+        "Image": image,
         "Cmd": ["python", "-m", "meetlab_bot.bot_task", "--session-id", session_id],
-        "Env": me["Config"]["Env"],
+        # The runner's settings, not its image's: the bot image sets its own PATH and PYTHONPATH.
+        "Env": [e for e in me["Config"]["Env"] if e.split("=", 1)[0] not in _IMAGE_ENV],
         "Labels": {"meetlab.session": session_id},
         "StopTimeout": 120,  # same as the ECS stopTimeout: SIGTERM, then this long
         "HostConfig": {
@@ -82,13 +87,15 @@ def bot_container_spec(me: dict, session_id: str) -> dict:
     }
 
 
-def run_bot_container(docker, session_id: str, runner_container: str) -> str:
+def run_bot_container(docker, session_id: str, runner_container: str, image: str) -> str:
     """Start the bot container for session_id; a retried start is the same container."""
+    if not image:
+        raise DispatchError("BOT_IMAGE is not set: the image each meeting's bot container runs")
     status, me = docker.call("GET", f"/containers/{runner_container}/json")
     if status != 200:
         raise DispatchError(f"cannot inspect the runner container {runner_container}: {status} {me}")
     name = _container_name(session_id)
-    status, body = docker.call("POST", f"/containers/create?name={name}", bot_container_spec(me, session_id))
+    status, body = docker.call("POST", f"/containers/create?name={name}", bot_container_spec(me, session_id, image))
     if status not in (201, 409):  # 409: already created for this session
         raise DispatchError(f"creating {name} failed: {status} {body}")
     status, body = docker.call("POST", f"/containers/{name}/start")

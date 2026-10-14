@@ -72,9 +72,9 @@ Two other things it deliberately does not do:
 
 | Piece | File |
 |---|---|
-| Config column (`bot_config.session_limit_minutes`) | `agent-runner/db/models.py` |
-| Effective-config resolution | `agent-runner/db/config_loader.py` |
-| `GET`/`PUT /config` validation | `agent-runner/runner.py` |
+| Config column (`bot_config.session_limit_minutes`) | `packages/core/meetlab_core/db/models.py` |
+| Effective-config resolution | `packages/core/meetlab_core/db/config_loader.py` |
+| `GET`/`PUT /config` validation | `services/api/meetlab_api/runner.py` |
 | Console field | `meet/app/(shell)/config/page.tsx` |
 | Handed to the browser at join | `meet/app/api/connection-details/route.ts` |
 | All the logic (pure, unit-tested) | `meet/lib/session-limit.ts` |
@@ -87,7 +87,7 @@ why late joiners share one countdown with no extra machinery — and also why an
 room resets the clock.
 
 Adding real enforcement later would mean one scheduled `remove_participant` call in
-`agent-runner/bot.py` at the deadline; nothing in the current design would change.
+`services/bot/meetlab_bot/bot.py` at the deadline; nothing in the current design would change.
 
 Tests, all under `make test-unit`:
 
@@ -98,7 +98,7 @@ Tests, all under `make test-unit`:
 - `meet/app/api/connection-details/connection-details.test.ts` — the limit reaches
   the browser, and a bot runner that is down, erroring, or returning junk still
   yields a joinable room with no limit.
-- `agent-runner/tests/test_runner_start.py` — validation (including `True`, which is
+- `services/api/tests/test_runner_start.py` — validation (including `True`, which is
   an `int` in Python), the 0 and 1440 bounds, and that a room set to `0` overrides a
   global limit instead of inheriting it.
-- `agent-runner/tests/test_defaults.py` — the column defaults to `0`.
+- `packages/core/tests/test_defaults.py` — the column defaults to `0`.

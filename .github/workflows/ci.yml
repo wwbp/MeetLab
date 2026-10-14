@@ -24,13 +24,13 @@ jobs:
       - name: Prepare local test env files
         run: |
           set -euo pipefail
-          cp agent-runner/.env.runner.example agent-runner/.env.runner
+          cp .env.example .env
           cp meet/.env.local.example meet/.env.local
           {
             echo ""
             echo "OPENAI_API_KEY=ci-test-key"
             echo "DEEPGRAM_API_KEY=ci-test-key"
-          } >> agent-runner/.env.runner
+          } >> .env
 
       - name: Run tests
         run: make test

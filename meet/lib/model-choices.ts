@@ -1,5 +1,5 @@
 // The models Bot settings offers, named for researchers: a plain name, who runs it, and a few
-// words on when to pick it. `value` is what is stored (and what agent-runner/bot.py reads).
+// words on when to pick it. `value` is what is stored (and what services/bot/meetlab_bot/bot.py reads).
 
 export type Choice = { value: string; name: string; runs: string; note?: string; isDefault?: boolean };
 

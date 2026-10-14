@@ -90,11 +90,11 @@ services:
 
   agent-runner:
     build:
-      context: ../agent-runner
-      dockerfile: Dockerfile
+      context: ..
+      dockerfile: services/api/Dockerfile
     restart: unless-stopped
     env_file:
-      - ../agent-runner/.env.runner
+      - ../.env
     environment:
       - DATABASE_URL=postgresql+asyncpg://meetlab:meetlab@postgres:5432/meetlab
       - BOT_RUNNER_SECRET=${BOT_RUNNER_SECRET:-}
@@ -109,7 +109,9 @@ services:
       - BOT_DISPATCHER=${BOT_DISPATCHER:-docker}
       - DOCKER_HOST=tcp://docker-socket-proxy:2375
     volumes:
-      - ../agent-runner:/app:cached
+      # The repo over /app (the image's PYTHONPATH points into it), so code edits reach the
+      # runner on restart and every bot it starts.
+      - ..:/app:cached
       - ../recordings:/recordings
     ports:
       - "7860:7860"

@@ -1,0 +1,35 @@
+# The architecture, checked by `make test-static` (import-linter). The API (sessions, dispatch,
+# recordings, settings) and the bot (one meeting's pipeline) are separate services with separate
+# images; they share only packages/core (config, database, sessions, heartbeat, storage, events).
+[importlinter]
+root_packages =
+    meetlab_core
+    meetlab_api
+    meetlab_bot
+    meetlab_loadtest
+
+[importlinter:contract:services]
+name = The API and the bot never import each other
+type = independence
+modules =
+    meetlab_api
+    meetlab_bot
+
+[importlinter:contract:core]
+name = Core imports no service and no tool
+type = forbidden
+source_modules =
+    meetlab_core
+forbidden_modules =
+    meetlab_api
+    meetlab_bot
+    meetlab_loadtest
+
+[importlinter:contract:tools]
+name = Services never import the load-test tools
+type = forbidden
+source_modules =
+    meetlab_api
+    meetlab_bot
+forbidden_modules =
+    meetlab_loadtest

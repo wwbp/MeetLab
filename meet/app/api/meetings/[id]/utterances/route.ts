@@ -6,7 +6,7 @@ import { noteRouteError } from '@/lib/concierge/event-log';
 export const dynamic = 'force-dynamic';
 
 // A conversation's turns as data: exact time, who spoke, what was said. The load test's
-// quality scores read it (agent-runner/quality.py); the Markdown transcript is for people.
+// quality scores read it (tools/loadtest/meetlab_loadtest/quality.py); the Markdown transcript is for people.
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const { botRunnerUrl, botRunnerSecret } = getServerConfig();

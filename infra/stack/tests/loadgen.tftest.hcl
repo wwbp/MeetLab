@@ -18,7 +18,7 @@ run "a_fargate_task_running_the_load_driver_from_the_runner_image" {
       aws_ecs_task_definition.loadgen.requires_compatibilities == toset(["FARGATE"]) &&
       aws_ecs_task_definition.loadgen.network_mode == "awsvpc" &&
       jsondecode(aws_ecs_task_definition.loadgen.container_definitions)[0].image == "${data.aws_ecr_repository.this["agent-runner"].repository_url}:0123abc" &&
-      jsondecode(aws_ecs_task_definition.loadgen.container_definitions)[0].command == ["python", "tests/load_run.py"]
+      jsondecode(aws_ecs_task_definition.loadgen.container_definitions)[0].command == ["python", "-m", "meetlab_loadtest.load_run"]
     )
     error_message = "the deployed commit's own harness, on Fargate (no machines to keep; billed only while a run lasts)"
   }
@@ -36,7 +36,7 @@ run "a_fargate_task_running_the_load_driver_from_the_runner_image" {
   }
   assert {
     condition     = contains([for s in jsondecode(aws_ecs_task_definition.loadgen.container_definitions)[0].secrets : s.name], "OPENAI_API_KEY")
-    error_message = "the answer judge (agent-runner/judge.py) runs at the end of each load test, with the stored OpenAI key"
+    error_message = "the answer judge (tools/loadtest/meetlab_loadtest/judge.py) runs at the end of each load test, with the stored OpenAI key"
   }
   assert {
     condition     = length(aws_security_group.loadgen.ingress) == 0 && aws_security_group.loadgen.name == "meetlab-v2-staging-loadgen"
@@ -52,7 +52,7 @@ run "a_fargate_task_running_the_load_driver_from_the_runner_image" {
   assert {
     condition = anytrue([for st in jsondecode(aws_iam_role_policy.loadgen_results.policy).Statement :
     st.Action == "s3:GetObject" && st.Resource == "${aws_s3_bucket.media.arn}/loadtests/library/*"])
-    error_message = "it reads the conversation library (agent-runner/conversation_library.py), and nothing else in the bucket"
+    error_message = "it reads the conversation library (tools/loadtest/meetlab_loadtest/conversation_library.py), and nothing else in the bucket"
   }
   assert {
     condition     = anytrue([for st in jsondecode(aws_iam_role_policy.loadgen_results.policy).Statement : st.Action == "s3:ListBucket" && st.Condition.StringLike["s3:prefix"] == "loadtests/library/*"])

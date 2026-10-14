@@ -43,9 +43,9 @@ list — "no events" and "cannot read events" must not look the same.
 
 | Piece | File |
 |---|---|
-| Table + severity column | `agent-runner/db/models.py` |
-| `record_event()` and the log-mirroring sink | `agent-runner/event_log.py` |
-| `POST /events`, `GET /events` | `agent-runner/runner.py` |
+| Table + severity column | `packages/core/meetlab_core/db/models.py` |
+| `record_event()` and the log-mirroring sink | `packages/core/meetlab_core/event_log.py` |
+| `POST /events`, `GET /events` | `services/api/meetlab_api/runner.py` |
 | meet's writer, reader, and error reporter | `meet/lib/concierge/event-log.ts` |
 | `pushConciergeEvent` façade | `meet/lib/concierge/events-store.ts` |
 | Console API | `meet/app/api/concierge/events/route.ts` |

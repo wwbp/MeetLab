@@ -18,7 +18,7 @@ Each test room is a real meeting. The console creates it, a synthetic participan
 and talks, the console starts the bot, and the participant **listens**: a reply counts
 only when the bot's voice actually arrives in the room. The participant speaks one of
 five scripted conversations (24 recorded sentences, kept in
-`agent-runner/tests/fixtures/conversations/`), waits for the bot to finish, pauses like a
+`tools/loadtest/fixtures/conversations/`), waits for the bot to finish, pauses like a
 person, and speaks again. The recordings never change, so every run hears the same audio.
 
 The synthetic participants run inside AWS (a "load generator" task), not on a laptop, so
@@ -44,7 +44,7 @@ that split turns in the 2026 pilot. Every person is a separate microphone and so
 speech-to-text stream, which is what makes a busy room expensive.
 
 Its sources, licences, checksums and the steps to rebuild it: [data/](https://github.com/wwbp/MeetLab/blob/v2/data/README.md).
-The library is built once (`agent-runner/tests/build_conversation_library.py`) and kept in
+The library is built once (`tools/loadtest/meetlab_loadtest/build_conversation_library.py`) and kept in
 the media bucket (`loadtests/library/v1/`), not in the repository. The workflow's `library`
 input chooses it (`v1`, the default) or the original 5 scripts with one person (`none`).
 
@@ -99,7 +99,7 @@ So every load test also scores quality, from the same rooms, step by step:
 | **Fragmented** | Sentences the bot stored as two or more turns, because it took a pause for the end of the turn. The pilot's "chained answers" came from this | Count of sentences with 2+ stored turns |
 | **Missed** | Sentences the bot never stored at all | Count of sentences with no stored turn |
 | **Reply length** | How many words the bot says per answer (typical, worst 1 in 20, longest), and how many answers ran over 40 words. Spoken answers are heard, not skimmed: long ones feel slow and hard to follow | Word count of each stored reply (the greeting excluded) |
-| **Answers** (1–5) | *answers*: does the reply respond to what was said, correctly? *context*: on the scripts' follow-up turns, does it use what was said earlier? *suits speech*: short and natural enough to follow by ear? *overall* | Up to 20 replies per step, each with the conversation before it, scored by a fixed judge model (OpenAI `gpt-5.4`) against a fixed rubric (`agent-runner/judge.py`). Only the test's synthetic conversations are sent. Results compare only within the same rubric version (`RUBRIC_VERSION`) |
+| **Answers** (1–5) | *answers*: does the reply respond to what was said, correctly? *context*: on the scripts' follow-up turns, does it use what was said earlier? *suits speech*: short and natural enough to follow by ear? *overall* | Up to 20 replies per step, each with the conversation before it, scored by a fixed judge model (OpenAI `gpt-5.4`) against a fixed rubric (`tools/loadtest/meetlab_loadtest/judge.py`). Only the test's synthetic conversations are sent. Results compare only within the same rubric version (`RUBRIC_VERSION`) |
 
 **The rule for speed changes:** a change that makes the bot faster (like 8-bit weights) stays
 only if quality holds: judged *overall* no more than 0.2 lower, word error rate no more than
@@ -122,7 +122,7 @@ The scores come from the conversation's stored turns, which the console serves a
 
 ## Stack profiles
 
-A profile is the bot configuration every test room gets, in `agent-runner/load_profiles/`:
+A profile is the bot configuration every test room gets, in `tools/loadtest/meetlab_loadtest/load_profiles/`:
 
 | Profile | Language model | Voice |
 |---|---|---|
@@ -165,7 +165,7 @@ The same driver runs against the local Docker stack:
 docker compose -f .devcontainer/docker-compose.yml exec -T \
   -e MEET_URL=http://meet:3000 -e CONSOLE_PASSWORD=... -e LIVEKIT_URL=ws://transport-server:7880 \
   -e PROFILE=stored -e SHAPE=load -e TARGET=2 -e HOLD_S=45 -e PREPARE=0 \
-  agent-runner uv run python tests/load_run.py
+  agent-runner python -m meetlab_loadtest.load_run
 ```
 
 A split run locally: start two of these at once with the same `RUN_ID` and `T0` (a Unix
@@ -176,14 +176,14 @@ The report reads production's CloudWatch (`MEETLAB_ENV`, default `prod`), so loc
 
 | What | Where |
 |---|---|
-| Shapes, rules, measurements (pure, unit-tested) | `agent-runner/load_plan.py`, `tests/test_load_plan.py` |
-| Quality scores (pure, unit-tested) | `agent-runner/quality.py`, `tests/test_quality.py` |
-| The answer judge: rubric, sampling, parsing (unit-tested; the model call is one function) | `agent-runner/judge.py`, `tests/test_judge.py` |
-| Voice scores: which turns are recorded, matching clips to replies (unit-tested) | `agent-runner/quality.py` (`record_turn`, `reply_for`, `voice`) |
-| The conversation library: dialogue choice, people per room, voices, pauses (unit-tested) | `agent-runner/conversation_library.py`, `tests/test_conversation_library.py` |
-| Building the library's audio (once) | `agent-runner/tests/build_conversation_library.py` |
+| Shapes, rules, measurements (pure, unit-tested) | `tools/loadtest/meetlab_loadtest/load_plan.py`, `tools/loadtest/tests/test_load_plan.py` |
+| Quality scores (pure, unit-tested) | `tools/loadtest/meetlab_loadtest/quality.py`, `tools/loadtest/tests/test_quality.py` |
+| The answer judge: rubric, sampling, parsing (unit-tested; the model call is one function) | `tools/loadtest/meetlab_loadtest/judge.py`, `tools/loadtest/tests/test_judge.py` |
+| Voice scores: which turns are recorded, matching clips to replies (unit-tested) | `tools/loadtest/meetlab_loadtest/quality.py` (`record_turn`, `reply_for`, `voice`) |
+| The conversation library: dialogue choice, people per room, voices, pauses (unit-tested) | `tools/loadtest/meetlab_loadtest/conversation_library.py`, `tools/loadtest/tests/test_conversation_library.py` |
+| Building the library's audio (once) | `tools/loadtest/meetlab_loadtest/build_conversation_library.py` |
 | A conversation's turns as data | runner `GET /conversations/{id}/utterances`, console `/api/meetings/{id}/utterances` |
-| The report (both tables, quality, the environment's side) | `agent-runner/tests/load_report.py` |
-| The driver: rooms, participants, listening | `agent-runner/tests/load_run.py` |
+| The report (both tables, quality, the environment's side) | `tools/loadtest/meetlab_loadtest/load_report.py` |
+| The driver: rooms, participants, listening | `tools/loadtest/meetlab_loadtest/load_run.py` |
 | Load generator in AWS | `infra/stack/loadgen.tf` |
 | The workflow | `.github/workflows/loadtest.yml` |

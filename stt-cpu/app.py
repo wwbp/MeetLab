@@ -1,5 +1,5 @@
 """Speech-to-text on CPU: Parakeet TDT 0.6B v2 (int8, ONNX) behind the endpoint the bots already
-call for the GPU NIM (agent-runner/nemotron_stt.py: POST /v1/audio/transcriptions, a WAV segment
+call for the GPU NIM (services/bot/meetlab_bot/nemotron_stt.py: POST /v1/audio/transcriptions, a WAV segment
 plus `model` and `language`, answered with {"text": ...}). No GPU, no NVIDIA licence; the model is
 baked into the image, so it starts in seconds. Which server bots use is a profile setting
 (infra/stack/profiles.tf); the switch point to the GPU is measured (docs/load-testing.md).

@@ -65,7 +65,7 @@ of `utterances` → `speakers` reading `meta->>'prolific_id'`.
 The whole flow is checked live after every deploy: a participant joins with a Prolific ID
 before the bot, their completion code must equal HMAC(room:ID) and their ID must be stored
 (`study_prolific`); and a room limited to one minute must hear its closing message
-(`session_limit`). `agent-runner/tests/acceptance_staging.py`.
+(`session_limit`). `tests/system/acceptance.py`.
 
 ## 2. The closing message and the completion code
 

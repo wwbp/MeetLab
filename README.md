@@ -29,7 +29,7 @@ with timings, per-speaker audio, and the room's video.
 **Prerequisites:** Docker (with Compose), `make`, and an OpenAI API key.
 
 ```bash
-cp agent-runner/.env.runner.example agent-runner/.env.runner   # set OPENAI_API_KEY
+cp .env.example .env                                           # set OPENAI_API_KEY
 cp meet/.env.local.example meet/.env.local                     # set CONSOLE_PASSWORD and BOT_RUNNER_SECRET
 make start                                                     # build, start, run migrations
 ```
@@ -70,8 +70,8 @@ flowchart TB
   browser(["Browser<br/>participants and researchers"])
   subgraph system["MeetLab"]
     meet["<b>meet</b><br/>Next.js: rooms, console, API<br/>meet/"]
-    runner["<b>agent-runner</b><br/>FastAPI: sessions, bot starts,<br/>recordings, settings<br/>agent-runner/runner.py"]
-    bots["<b>bot</b>, one per meeting<br/>Pipecat pipeline: hear, think, speak<br/>agent-runner/bot.py"]
+    runner["<b>agent-runner</b><br/>FastAPI: sessions, bot starts,<br/>recordings, settings<br/>services/api/meetlab_api/runner.py"]
+    bots["<b>bot</b>, one per meeting<br/>Pipecat pipeline: hear, think, speak<br/>services/bot/meetlab_bot/bot.py"]
     stt["<b>stt-cpu</b><br/>Parakeet speech-to-text on CPU<br/>stt-cpu/"]
     db[("<b>PostgreSQL</b><br/>sessions, turns, speakers,<br/>settings, events")]
     store[("<b>Object storage</b><br/>per-speaker audio, video,<br/>transcripts")]
@@ -151,7 +151,11 @@ The full record, with the measurements and dates behind each one, is the decisio
 | Path | What it is |
 |---|---|
 | [`meet/`](meet) | Next.js app: meeting rooms, the console, its API |
-| [`agent-runner/`](agent-runner) | Python: the runner API, the bot pipeline, database models and migrations |
+| [`services/api/`](services/api) | Python (FastAPI): sessions, bot dispatch, recordings, settings |
+| [`services/bot/`](services/bot) | Python (Pipecat): one meeting's bot pipeline |
+| [`packages/core/`](packages/core) | Python shared by API and bot: config, database models and migrations, sessions, storage, events |
+| [`tools/loadtest/`](tools/loadtest) | The load-test harness |
+| [`tests/`](tests) | Cross-service integration tests and live system tests |
 | [`stt-cpu/`](stt-cpu) | The CPU speech-to-text server |
 | [`infra/stack/`](infra/stack) | Terraform for the AWS deployment |
 | [`infra/bootstrap/`](infra/bootstrap) | Terraform for CI's own permissions (applied by a maintainer) |

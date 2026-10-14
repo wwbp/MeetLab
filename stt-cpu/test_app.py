@@ -1,5 +1,5 @@
 """The CPU speech-to-text server: Parakeet (int8, ONNX) behind the endpoint the bots already
-call for the GPU NIM (agent-runner/nemotron_stt.py), so a profile can point bots at either.
+call for the GPU NIM (services/bot/meetlab_bot/nemotron_stt.py), so a profile can point bots at either.
     make test-stt-cpu
 """
 import io
@@ -12,7 +12,7 @@ from fastapi.testclient import TestClient
 
 import app
 
-FIXTURES = pathlib.Path(__file__).resolve().parent.parent / "agent-runner/tests/fixtures/conversations"
+FIXTURES = pathlib.Path(__file__).resolve().parent.parent / "tools/loadtest/fixtures/conversations"
 
 
 def clip(text: str) -> bytes:

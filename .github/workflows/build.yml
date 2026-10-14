@@ -17,10 +17,10 @@ name: Build
 on:
   pull_request:
     branches: [main]
-    paths: ["infra/**", ".github/workflows/**", "Makefile", "meet/**", "agent-runner/**", "!**/*.md"]
+    paths: ["infra/**", ".github/workflows/**", "Makefile", "meet/**", "services/**", "packages/**", "tools/**", "tests/**", "pyproject.toml", "uv.lock", "!**/*.md"]
   push:
     branches: [main]
-    paths: ["infra/**", ".github/workflows/build.yml", "meet/**", "agent-runner/**", "!**/*.md"]
+    paths: ["infra/**", ".github/workflows/build.yml", "meet/**", "services/**", "packages/**", "tools/**", "tests/**", "pyproject.toml", "uv.lock", "!**/*.md"]
 
 permissions:
   contents: read
@@ -101,15 +101,16 @@ jobs:
     strategy:
       matrix:
         include:
-          - { name: meet, context: meet, target: runner }
-          - { name: agent-runner, context: agent-runner, target: "" }
-          - { name: stt-cpu, context: stt-cpu, target: "" }
+          - { name: meet, context: meet, file: meet/Dockerfile, target: runner }
+          - { name: agent-runner, context: ., file: services/api/Dockerfile, target: "" } # API and bots
+          - { name: stt-cpu, context: stt-cpu, file: stt-cpu/Dockerfile, target: "" }
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
       - uses: docker/build-push-action@v6
         with:
           context: ${{ matrix.context }}
+          file: ${{ matrix.file }}
           target: ${{ matrix.target }}
           platforms: linux/amd64
           push: false
@@ -126,9 +127,9 @@ jobs:
     strategy:
       matrix:
         include:
-          - { name: meet, context: meet, target: runner }
-          - { name: agent-runner, context: agent-runner, target: "" }
-          - { name: stt-cpu, context: stt-cpu, target: "" }
+          - { name: meet, context: meet, file: meet/Dockerfile, target: runner }
+          - { name: agent-runner, context: ., file: services/api/Dockerfile, target: "" } # API and bots
+          - { name: stt-cpu, context: stt-cpu, file: stt-cpu/Dockerfile, target: "" }
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
@@ -149,6 +150,7 @@ jobs:
         if: steps.exists.outputs.skip != 'true'
         with:
           context: ${{ matrix.context }}
+          file: ${{ matrix.file }}
           target: ${{ matrix.target }}
           platforms: linux/amd64
           push: true

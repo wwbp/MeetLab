@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { completionCode } from './completion-code';
 
-// A fixed example, pinned here and in agent-runner/tests/test_completion_code.py: the code a
+// A fixed example, pinned here and in tests/system/test_completion_code.py: the code a
 // participant pastes into the survey must be recomputable from the Prolific export, by
 // meet and by anyone checking it (docs/study-support.md).
 describe('completionCode', () => {

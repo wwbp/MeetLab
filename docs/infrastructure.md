@@ -8,7 +8,7 @@ every decision, with its date, is in [`infra/LEDGER.md`](https://github.com/wwbp
 ## Decision matrix: rooms at once → machines
 
 One room = one meeting with its bot (about 1.7 people). The table is
-[`capacity_model.matrix()`](https://github.com/wwbp/MeetLab/blob/main/agent-runner/capacity_model.py);
+[`capacity_model.matrix()`](https://github.com/wwbp/MeetLab/blob/main/services/api/meetlab_api/capacity_model.py);
 `make test-static` fails if the two differ.
 
 | Rooms at once | Bot machines (c6i.large) | Speech-to-text (CPU) | Database | What grows first | Cost / hour | If held a whole month |

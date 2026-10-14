@@ -1,6 +1,6 @@
 // RTVI between the browser and the bot (Pipecat's protocol; design plan iteration 10, F13).
 // The page says client-ready when it joins, and chat reaches the bot as send-text (the bot
-// keeps it as the typing person's turn: agent-runner/rtvi.py). The bot sends the room only
+// keeps it as the typing person's turn: services/bot/meetlab_bot/rtvi.py). The bot sends the room only
 // bot-ready and who is speaking.
 
 const RTVI_LABEL = 'rtvi-ai';

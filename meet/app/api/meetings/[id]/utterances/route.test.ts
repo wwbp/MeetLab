@@ -3,7 +3,7 @@ import { NextRequest } from 'next/server';
 import { GET } from './route';
 
 // A conversation's turns as data (the runner's GET /conversations/{id}/utterances), for the
-// console and the load test's quality scores (agent-runner/quality.py).
+// console and the load test's quality scores (tools/loadtest/meetlab_loadtest/quality.py).
 const mockFetch = vi.hoisted(() => vi.fn());
 const mockGetServerConfig = vi.hoisted(() => vi.fn());
 vi.stubGlobal('fetch', mockFetch);

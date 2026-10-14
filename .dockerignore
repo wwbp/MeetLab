@@ -1,0 +1,19 @@
+# Context for the Python image (services/api/Dockerfile, built from the repo root): it copies
+# only packages/, services/api, services/bot and tools/loadtest; keep the rest out of the context.
+.git
+**/.venv
+**/__pycache__
+**/*.py[cod]
+**/.pytest_cache
+**/.mypy_cache
+**/.ruff_cache
+.env*
+meet
+stt-cpu
+docs
+site
+infra
+recordings
+data
+**/soak-results-*.json
+.DS_Store

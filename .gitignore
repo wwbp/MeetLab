@@ -15,10 +15,22 @@ recordings/
 *.zip
 
 # soak run artifacts
-agent-runner/soak-results-*.json
 soak-results-*.json
 
-# The conversation load harness's speech (tests/generate_conversation_audio.py) is
+# The conversation load harness's speech (tools/loadtest/meetlab_loadtest/generate_conversation_audio.py) is
 # committed: every load test, on every stack, must hear exactly the same audio.
 __pycache__/
 *.pyc
+
+# Python
+.venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+
+# Environment files (.env.example is committed)
+.env
+.env.*
+!.env.example
+!.env.*.example

@@ -11,6 +11,7 @@ import sys
 
 infra = open(".github/workflows/infra-v2.yml").read()
 release = open(".github/workflows/release-v2.yml").read()
+load = open(".github/workflows/loadtest-v2.yml").read()
 jobs = set(re.findall(r"^  ([a-z][a-z0-9_-]*):\n", infra.split("\njobs:\n", 1)[1], re.M))
 
 rules = {
@@ -23,6 +24,9 @@ rules = {
     "PRs plan production": "-backend-config=key=v2/prod/terraform.tfstate" in infra,
     "PR plans never lock (the plan role can't write production's state)": "-lock=false" in infra,
     "only a release applies, after approval": "environment: production" in release and "terraform apply" in release,
+    "a load test runs on production, only after the reviewer's approval (it uses the paid vendors)":
+        "environment: production" in load
+        and not any("staging" in l for l in load.splitlines() if not l.lstrip().startswith("#")),
     "a release needs the build that passed": "--workflow infra-v2.yml" in release and "--status success" in release,
 }
 for rule, ok in rules.items():

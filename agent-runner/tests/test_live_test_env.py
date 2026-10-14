@@ -23,7 +23,7 @@ def load(module, env):
 
 class TestLiveTestEnv(unittest.TestCase):
     def tearDown(self):
-        for m in ("acceptance_staging", "permission_contract"):
+        for m in ("acceptance_staging", "permission_contract", "load_report"):
             sys.modules.pop(m, None)
 
     def test_production_is_the_default(self):
@@ -53,6 +53,10 @@ class TestLiveTestEnv(unittest.TestCase):
         names = " ".join(f"{c.role} {c.resource}" for c in contract.ALLOW + contract.DENY)
         self.assertIn("meetlab-v2-prod-runner-task", names)
         self.assertNotIn("meetlab-v2-staging", names)
+
+    def test_the_load_report_reads_production(self):
+        report = load("load_report", "prod")
+        self.assertEqual((report.CLUSTER, report.DB, report.LOGS), ("meetlab-v2-prod", "meetlab-v2-prod", "/meetlab-v2/prod"))
 
     def test_an_unknown_environment_is_refused(self):
         with self.assertRaises(KeyError):

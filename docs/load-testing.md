@@ -1,6 +1,13 @@
 # Load testing v2 — how much can it carry, and how well
 
-A load test answers two questions: **how many meetings can staging hold at once**, and
+!!! warning "Load tests run on production (since 2026-10-14) and cost money"
+    There is no staging any more. A load test runs against meet.wwbp.org after your approval in
+    the `production` environment. With the paid vendors (profiles `v1`, `stored`) it spends
+    OpenAI and ElevenLabs quota; with our own models (`ours`) it needs the GPU model services
+    switched on first. State the cost before asking for a run, and never run one during a study.
+
+
+A load test answers two questions: **how many meetings can production hold at once**, and
 **what does a participant experience while it does**. We answer them the same way for
 every stack we might run (our own models, v1's paid vendors, anything later), so the
 answers can be compared side by side.
@@ -15,7 +22,7 @@ five scripted conversations (24 recorded sentences, kept in
 person, and speaks again. The recordings never change, so every run hears the same audio.
 
 The synthetic participants run inside AWS (a "load generator" task), not on a laptop, so
-the numbers measure staging and not someone's home network.
+the numbers measure production and not someone's home network.
 
 ## Realistic conversations: the library
 
@@ -124,7 +131,7 @@ A profile is the bot configuration every test room gets, in `agent-runner/load_p
 | `ours-short` | as `ours`, with one sentence added to today's system prompt: *"Keep each reply to one or two short sentences, the way people speak in conversation."* (the reply-length experiment) | Kokoro |
 | `stored` | whatever the console's global config says | |
 
-Speech-to-text is set for all of staging: Parakeet on our GPU when the NIM is on,
+Speech-to-text is set for the whole environment: Parakeet on our GPU when the NIM is on,
 Deepgram otherwise. A new stack to compare is a new profile file, nothing more.
 
 `v1` costs money per turn: run it small (smoke, load at a few rooms) as the reference
@@ -163,7 +170,7 @@ docker compose -f .devcontainer/docker-compose.yml exec -T \
 
 A split run locally: start two of these at once with the same `RUN_ID` and `T0` (a Unix
 time ~20 s ahead) and `SHARD=0/2` and `SHARD=1/2`. Then merge them with `load_report.py`.
-The report reads staging's CloudWatch, so locally you need AWS credentials.
+The report reads production's CloudWatch (`MEETLAB_ENV`, default `prod`), so locally you need AWS credentials.
 
 ## Where the code is
 
@@ -176,7 +183,7 @@ The report reads staging's CloudWatch, so locally you need AWS credentials.
 | The conversation library: dialogue choice, people per room, voices, pauses (unit-tested) | `agent-runner/conversation_library.py`, `tests/test_conversation_library.py` |
 | Building the library's audio (once) | `agent-runner/tests/build_conversation_library.py` |
 | A conversation's turns as data | runner `GET /conversations/{id}/utterances`, console `/api/meetings/{id}/utterances` |
-| The report (both tables, quality, staging's side) | `agent-runner/tests/load_report.py` |
+| The report (both tables, quality, the environment's side) | `agent-runner/tests/load_report.py` |
 | The driver: rooms, participants, listening | `agent-runner/tests/load_run.py` |
 | Load generator in AWS | `infra/v2/stack/loadgen.tf` |
 | The workflow | `.github/workflows/loadtest-v2.yml` |

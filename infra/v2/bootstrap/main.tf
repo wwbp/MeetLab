@@ -57,8 +57,8 @@ locals {
     prod = {
       p               = "meetlab-v2-prod", github = "production", apply_role = "meetlab-v2-tf-apply-prod",
       acceptance_role = "meetlab-v2-acceptance-prod", boundary = "meetlab-v2-prod-boundary",
-      # -v2 until cutover; meet.wwbp.org is v1's until then (docs/v1-to-v2-migration.md)
-      hostnames = ["meet-v2.wwbp.org", "livekit-v2.wwbp.org", "turn-v2.wwbp.org"],
+      # meet.wwbp.org since the cutover (2026-10-13); meet-v2 so the rename can remove it
+      hostnames = ["meet.wwbp.org", "meet-v2.wwbp.org", "livekit-v2.wwbp.org", "turn-v2.wwbp.org"],
     }
   }
 

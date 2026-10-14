@@ -75,6 +75,9 @@ resource "aws_route53_record" "meet" {
   zone_id = data.aws_route53_zone.wwbp.zone_id
   name    = "meet${var.hostname_suffix}.wwbp.org"
   type    = "A"
+  # Production's meet.wwbp.org was v1's hand-made record (CloudFront) until the cutover
+  # (2026-10-13): Terraform takes it over instead of failing on it.
+  allow_overwrite = true
   alias {
     name                   = aws_lb.this.dns_name
     zone_id                = aws_lb.this.zone_id

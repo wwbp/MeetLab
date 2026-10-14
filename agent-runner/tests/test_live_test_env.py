@@ -34,7 +34,7 @@ class TestLiveTestEnv(unittest.TestCase):
     def test_prod_names_production_everywhere(self):
         live = load("acceptance_staging", "prod")
         self.assertEqual(live.CLUSTER, "meetlab-v2-prod")
-        self.assertEqual(live.MEET, "https://meet-v2.wwbp.org")  # meet.wwbp.org stays v1's until cutover
+        self.assertEqual(live.MEET, "https://meet.wwbp.org")  # since the cutover, 2026-10-13
         self.assertEqual(live.LOGS, "/meetlab-v2/prod")
         self.assertEqual(live.MEDIA_BUCKET, "meetlab-v2-prod-media-848180123498")
         self.assertEqual(live.POOL_BASELINE, 1)  # production keeps one bot machine warm (profiles.tf)

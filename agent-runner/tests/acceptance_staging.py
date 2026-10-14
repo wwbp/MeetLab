@@ -57,13 +57,13 @@ from datetime import timedelta
 import boto3
 from livekit import api, rtc
 
-# One environment per run: MEETLAB_ENV=staging (default) or prod. Production keeps the
-# -v2 hostname until cutover (meet.wwbp.org is v1's); an unknown name fails at once.
+# One environment per run: MEETLAB_ENV=staging (default) or prod. Production answers at
+# meet.wwbp.org since the cutover (2026-10-13); an unknown name fails at once.
 ENV = os.getenv("MEETLAB_ENV", "staging")
 NAME = f"meetlab-v2-{ENV}"  # every resource's prefix (infra/v2/stack main.tf)
 LOGS = f"/meetlab-v2/{ENV}"
 CLUSTER = os.getenv("ECS_CLUSTER", NAME)
-MEET = os.getenv("MEET_URL", {"staging": "https://meet-staging.wwbp.org", "prod": "https://meet-v2.wwbp.org"}[ENV])
+MEET = os.getenv("MEET_URL", {"staging": "https://meet-staging.wwbp.org", "prod": "https://meet.wwbp.org"}[ENV])
 # Bot machines kept warm between studies: bot_pool_min in infra/v2/stack/profiles.tf.
 POOL_BASELINE = {"staging": 0, "prod": 1}[ENV]
 REGION = "us-east-1"

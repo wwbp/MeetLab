@@ -16,7 +16,7 @@ theme:
 
 nav:
   - Start here: index.md
-  - "Architecture: parts, sizes, capacity": v2-infrastructure.md
+  - "Capacity: decision matrix, CPU and LiveKit decisions": v2-infrastructure.md
   - Writing diagrams: writing-diagrams.md
   - Using MeetLab:
       - Study support: study-support.md

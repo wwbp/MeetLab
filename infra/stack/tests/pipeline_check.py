@@ -4,14 +4,14 @@ Merges into main (v2's code) run the tests and build the images (with the images
 production read-only; only a release tag, after the reviewer's approval, applies anything,
 and its live tests run against production. Run from the repo root (make test-infra):
 
-    python3 infra/v2/stack/tests/pipeline_check.py
+    python3 infra/stack/tests/pipeline_check.py
 """
 import re
 import sys
 
-infra = open(".github/workflows/infra-v2.yml").read()
-release = open(".github/workflows/release-v2.yml").read()
-load = open(".github/workflows/loadtest-v2.yml").read()
+infra = open(".github/workflows/build.yml").read()
+release = open(".github/workflows/release.yml").read()
+load = open(".github/workflows/loadtest.yml").read()
 jobs = set(re.findall(r"^  ([a-z][a-z0-9_-]*):\n", infra.split("\njobs:\n", 1)[1], re.M))
 
 rules = {
@@ -27,7 +27,7 @@ rules = {
     "a load test runs on production, only after the reviewer's approval (it uses the paid vendors)":
         "environment: production" in load
         and not any("staging" in l for l in load.splitlines() if not l.lstrip().startswith("#")),
-    "a release needs the build that passed": "--workflow infra-v2.yml" in release and "--status success" in release,
+    "a release needs the build that passed": "--workflow build.yml" in release and "--status success" in release,
 }
 for rule, ok in rules.items():
     print(f"{'ok  ' if ok else 'FAIL'} {rule}")

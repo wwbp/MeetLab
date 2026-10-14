@@ -12,11 +12,11 @@ speaker, per-speaker audio, video) for the study team.
 | **Code** | `main` is MeetLab v2, live since 2026-10-14. v1 is the tag [`v1.0.0`](https://github.com/wwbp/MeetLab/tree/v1.0.0) (archive branch `v1`) |
 | **Ship a change** | PR into `main` → merge (tests, images; production untouched) → release tag `v2.x.y` → your approval → production + live tests. [How](#ship-a-change) |
 | **Run it locally** | `make start`, then <http://localhost:3000>. [Quick start](#quick-start-local) |
-| **Decisions, costs, measurements** | [infra/v2/LEDGER.md](infra/v2/LEDGER.md) (every decision and manual action, with dates) |
+| **Decisions, costs, measurements** | [infra/LEDGER.md](infra/LEDGER.md) (every decision and manual action, with dates) |
 | **Never** | release during a study; change AWS by hand (Terraform and GitHub Actions only, except the steps the ledger lists); put a secret in the repo or Terraform |
 
 New here? Read this page top to bottom, then [CLAUDE.md](CLAUDE.md) (the code's map) and
-[docs/v2-infrastructure.md](docs/v2-infrastructure.md) (the capacity decision matrix: what to run for N rooms).
+[docs/infrastructure.md](docs/infrastructure.md) (the capacity decision matrix: what to run for N rooms).
 
 ## The lay of the land
 
@@ -38,12 +38,12 @@ flowchart LR
 ```
 
 **What runs where** (C4, level 2: containers; all in AWS `us-east-1`, defined in
-[infra/v2/stack](infra/v2/stack)):
+[infra/stack](infra/stack)):
 
 ```mermaid
 flowchart TB
   browser(["Browser<br/>participants and researchers"])
-  subgraph aws["AWS, Terraform: infra/v2/stack"]
+  subgraph aws["AWS, Terraform: infra/stack"]
     meet["<b>meet</b><br/>Next.js: rooms, console, login<br/>meet/"]
     runner["<b>agent-runner</b><br/>FastAPI: sessions, bot starts,<br/>recordings, Bot settings<br/>agent-runner/runner.py"]
     bots["<b>bot</b>, one ECS task per meeting<br/>Pipecat: hear, think, speak<br/>agent-runner/bot.py"]
@@ -102,7 +102,7 @@ sequenceDiagram
 
 ## Major design decisions
 
-Each has its reasons, numbers and date in the [ledger](infra/v2/LEDGER.md).
+Each has its reasons, numbers and date in the [ledger](infra/LEDGER.md).
 
 | Decision | Why |
 |---|---|
@@ -112,7 +112,7 @@ Each has its reasons, numbers and date in the [ledger](infra/v2/LEDGER.md).
 | **Speech-to-text is ours** (Parakeet on CPU) | Same accuracy as the GPU version (only 15 ms slower at p95), no per-minute fee, audio stays in our AWS |
 | **Media and video recording on LiveKit Cloud** (Ship plan) | Cheaper than running our own until ~55–60 recorded room-hours a month; 100 recordings at once |
 | **Small by default, scaled on request**: one warm bot machine (5 rooms); *Prepare for study* adds machines | Real use is a few hours a month. Sizes come from measured load tests ([capacity_model.py](agent-runner/capacity_model.py)): 84 rooms within every pass criterion, 100 started at once |
-| **Everything in Terraform, deployed only by GitHub Actions**: a release tag plus a reviewer's approval for production | No drift, every change reviewed; CI's own permissions are in [infra/v2/bootstrap](infra/v2/bootstrap), applied by a person, so CI can't widen them |
+| **Everything in Terraform, deployed only by GitHub Actions**: a release tag plus a reviewer's approval for production | No drift, every change reviewed; CI's own permissions are in [infra/bootstrap](infra/bootstrap), applied by a person, so CI can't widen them |
 | **One production, no staging** | The local stack mirrors production (same images, same speech-to-text); live tests run on production after every release |
 | **Secrets only in AWS SSM; least-privilege roles**, checked by a permission contract before each live test run | A role can do exactly what the code calls, nothing more ([permission_contract.py](agent-runner/tests/permission_contract.py)) |
 | **Tests first**, at every level ([docs/testing.md](docs/testing.md)) | Static, unit, integration, contract, live meetings on production; each bug fix lands with the test that failed first |
@@ -157,7 +157,7 @@ Production already exists; you change it through GitHub, never by hand.
    ```bash
    git fetch origin && git tag v2.1.2 origin/main && git push origin v2.1.2
    ```
-   In GitHub, *Actions → Release v2 → Review deployments → Approve*. Production is updated,
+   In GitHub, *Actions → Release → Review deployments → Approve*. Production is updated,
    then live tests hold real meetings on meet.wwbp.org. **Never release during a study.**
 
 ### Look at production
@@ -169,7 +169,7 @@ Production already exists; you change it through GitHub, never by hand.
 - **Before a study:** check the ElevenLabs quota (a used-up quota makes a silent bot) and press
   *Prepare for study* about 10 minutes before.
 - **First-time AWS set-up and the steps only a person does** (bootstrap roles, secrets, the
-  recording key): [docs/v2-deployment.md](docs/v2-deployment.md).
+  recording key): [docs/deployment.md](docs/deployment.md).
 
 ## The console
 

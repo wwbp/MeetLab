@@ -1,4 +1,4 @@
-# infra/v2/bootstrap — the roles CI uses
+# infra/bootstrap — the roles CI uses
 
 Two IAM roles for GitHub Actions, scoped to this repo only (the account is shared with
 other lab projects, and the old `github-actions-service-acc` trusts every `wwbp/*` repo).
@@ -26,7 +26,7 @@ also adds the actions it needs here, so the roles never hold more than the stack
 
 ```bash
 make test-infra                                # offline tests, no AWS
-cd infra/v2/bootstrap && terraform init && terraform plan -out=bootstrap.tfplan
+cd infra/bootstrap && terraform init && terraform plan -out=bootstrap.tfplan
 terraform apply bootstrap.tfplan               # admin credentials, after review
 ```
 

@@ -69,7 +69,7 @@ run "production_takes_over_meet_wwbp_org_at_cutover" {
 
   variables {
     env             = "prod"
-    hostname_suffix = "" # release-v2.yml, from the cutover (2026-10-13)
+    hostname_suffix = "" # release.yml, from the cutover (2026-10-13)
   }
 
   assert {

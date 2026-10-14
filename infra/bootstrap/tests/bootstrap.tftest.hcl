@@ -281,7 +281,7 @@ run "ci_cannot_touch_its_own_roles_or_the_boundary" {
 }
 
 # The LiveKit egress user (staging egress.tf). CI manages the user and its policy;
-# its access key is minted by a person (docs/v2-deployment.md), so CI never holds one.
+# its access key is minted by a person (docs/deployment.md), so CI never holds one.
 run "ci_manages_only_staging_users_and_never_their_keys" {
   command = plan
 
@@ -370,7 +370,7 @@ run "the_boundary_allows_ecs_exec_channels" {
   }
 }
 
-# The CI acceptance job (infra-v2.yml) runs live tests against staging after each
+# The CI acceptance job (build.yml) runs live tests against staging after each
 # deploy. Its role reads only what the test needs and acts only on staging tasks.
 run "acceptance_role_is_staging_only_and_least_privilege" {
   command = plan
@@ -413,8 +413,8 @@ run "acceptance_role_is_staging_only_and_least_privilege" {
   }
 }
 
-# The "Load test v2" workflow uses the same role to start the load generator
-# (infra/v2/stack/loadgen.tf) and read its results; a soak outlasts an hour.
+# The "Load test" workflow uses the same role to start the load generator
+# (infra/stack/loadgen.tf) and read its results; a soak outlasts an hour.
 run "acceptance_can_start_the_load_generator_and_nothing_else" {
   command = plan
 

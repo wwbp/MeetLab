@@ -4,23 +4,23 @@
 #                  images built but not pushed
 #   merge to main -> the tests, then images pushed, tagged with the commit SHA (the images-only
 #                  role). Nothing is deployed: a release tag deploys a green build's images
-#                  to production after the reviewer's approval (release-v2.yml).
+#                  to production after the reviewer's approval (release.yml).
 #
-# infra/v2/bootstrap is deliberately absent: it defines these roles and is applied by a person,
+# infra/bootstrap is deliberately absent: it defines these roles and is applied by a person,
 # so CI can never widen its own permissions.
 #
 # No nightly drift check: scheduled workflows run only from the default branch (main, frozen).
 # Every PR plan doubles as a drift check of production.
 
-name: Infra v2
+name: Build
 
 on:
   pull_request:
     branches: [main]
-    paths: ["infra/v2/**", ".github/workflows/**", "Makefile", "meet/**", "agent-runner/**", "!**/*.md"]
+    paths: ["infra/**", ".github/workflows/**", "Makefile", "meet/**", "agent-runner/**", "!**/*.md"]
   push:
     branches: [main]
-    paths: ["infra/v2/**", ".github/workflows/infra-v2.yml", "meet/**", "agent-runner/**", "!**/*.md"]
+    paths: ["infra/**", ".github/workflows/build.yml", "meet/**", "agent-runner/**", "!**/*.md"]
 
 permissions:
   contents: read
@@ -30,7 +30,7 @@ permissions:
 # A PR's newer push supersedes its own plan. A PR's plan only reads the state, so it takes no
 # lock (-lock=false): its lock once failed a deploy's drift check (2026-10-04).
 concurrency:
-  group: ${{ github.event_name == 'push' && 'infra-v2-images' || format('infra-v2-plan-{0}', github.ref) }}
+  group: ${{ github.event_name == 'push' && 'meetlab-images' || format('meetlab-plan-{0}', github.ref) }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
@@ -67,7 +67,7 @@ jobs:
           role-to-assume: ${{ vars.TF_PLAN_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
       - name: Plan
-        working-directory: infra/v2/stack
+        working-directory: infra/stack
         run: |
           set -euo pipefail
           terraform init -input=false -backend-config=key=v2/prod/terraform.tfstate
@@ -80,14 +80,14 @@ jobs:
         run: |
           set -euo pipefail
           {
-            echo "### Terraform plan — infra/v2/stack, production"
+            echo "### Terraform plan — infra/stack, production"
             echo
-            grep -E '^(Plan:|No changes)' infra/v2/stack/plan.txt || true
+            grep -E '^(Plan:|No changes)' infra/stack/plan.txt || true
             echo
             echo '<details><summary>Full plan</summary>'
             echo
             echo '```'
-            head -c 60000 infra/v2/stack/plan.txt
+            head -c 60000 infra/stack/plan.txt
             echo '```'
             echo '</details>'
           } > comment.md
@@ -115,7 +115,7 @@ jobs:
           push: false
           cache-from: type=gha,scope=${{ matrix.name }}
 
-  # Merges: push images tagged with the commit SHA; a release deploys them (release-v2.yml).
+  # Merges: push images tagged with the commit SHA; a release deploys them (release.yml).
   images:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: test

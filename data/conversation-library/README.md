@@ -34,7 +34,7 @@ data/conversation-library/fetch.sh ~/meetlab-library
 uv run --no-project --with kokoro-onnx --with soundfile --with numpy --with boto3 \
   python agent-runner/tests/build_conversation_library.py ~/meetlab-library "" v2
 
-# 3. Upload (needs write access to the media bucket; log it in infra/v2/LEDGER.md, Manual actions)
+# 3. Upload (needs write access to the media bucket; log it in infra/LEDGER.md, Manual actions)
 uv run --no-project --with kokoro-onnx --with soundfile --with numpy --with boto3 \
   python agent-runner/tests/build_conversation_library.py ~/meetlab-library \
   s3://meetlab-v2-staging-media-<account>/loadtests/library v2
@@ -53,5 +53,5 @@ shasum -a 256 ~/meetlab-library/v1/library.json   # must match the table above
 
 ## Use
 
-In the **Load test v2** workflow: `library = v1` or `v2`, and `mix = study` or `equal`.
+In the **Load test** workflow: `library = v1` or `v2`, and `mix = study` or `equal`.
 How load tests work and what the report means: [docs/load-testing.md](../../docs/load-testing.md).

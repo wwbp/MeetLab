@@ -3,7 +3,7 @@
 What production (meet.wwbp.org) runs, what to change for a study of N rooms, and why the
 speech-to-text is on CPU and the media on LiveKit Cloud. Every number was measured (October
 2026; [load-testing.md](load-testing.md), [the load test report](load-test-report-2026-10.md));
-every decision, with its date, is in [`infra/v2/LEDGER.md`](https://github.com/wwbp/MeetLab/blob/main/infra/v2/LEDGER.md).
+every decision, with its date, is in [`infra/LEDGER.md`](https://github.com/wwbp/MeetLab/blob/main/infra/LEDGER.md).
 
 ## Decision matrix: rooms at once → machines
 
@@ -38,7 +38,7 @@ within 2 s at p95):
 |---|---|---|
 | up to 5 rooms | nothing: production's one warm bot machine holds 5 | — |
 | up to 26 rooms | press *Prepare for study* about 10 minutes before; it adds bot machines | the console |
-| 27–53 rooms | also `stt_cpu_instance_type = "c6i.xlarge"` | `infra/v2/stack/profiles.tf`, `prod`: PR, merge, release |
+| 27–53 rooms | also `stt_cpu_instance_type = "c6i.xlarge"` | `infra/stack/profiles.tf`, `prod`: PR, merge, release |
 | 54–89 rooms | `stt_cpu_instance_type = "c6i.2xlarge"` | same |
 | 90–100 rooms | also `db_instance_class = "db.t4g.medium"` | same |
 | more than 100 | measure first (a load test), then extend the model | — |
@@ -132,7 +132,7 @@ over 2 s for the slowest 1 in 20.
 
 With the models off, rooms use vendors instead: Deepgram for speech to text, OpenAI and
 ElevenLabs for the LLM and voice. Switching the models on or off is a pull request (see
-[Deploying v2](v2-deployment.md)).
+[Deploying v2](deployment.md)).
 
 ### What each part measured
 
@@ -162,12 +162,12 @@ In order of what gives first:
 3. **Database connections**: a connection pooler, or a larger database.
 4. **LiveKit**: a larger machine; beyond one machine, a second server needs Redis.
 
-Every size above is a single setting in `infra/v2/stack/profiles.tf`; production's are in the
+Every size above is a single setting in `infra/stack/profiles.tf`; production's are in the
 decision matrix at the top of this page.
 
 ### Video recording
 
-Measured 2026-10-06 (`infra/v2/LEDGER.md`, Measurements): on our own recorders a recorded room
+Measured 2026-10-06 (`infra/LEDGER.md`, Measurements): on our own recorders a recorded room
 uses about 1.6 CPU (a `c6i.2xlarge`: 36% at 2 rooms, 64% at 3, saturated at 5); booking 2 CPU per
 recording makes a full recorder refuse rather than degrade. Production records on LiveKit Cloud
 (Ship: 100 at once, $0.02 a minute after 600) instead: at our use that costs far less than

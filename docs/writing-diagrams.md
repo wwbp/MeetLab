@@ -26,7 +26,7 @@ flowchart LR
 ```
 
 Flowcharts, sequence diagrams, and entity relationship diagrams are used in
-the [architecture page](v2-infrastructure.md). Label relationships with what crosses
+the [architecture page](infrastructure.md). Label relationships with what crosses
 the boundary and link the surrounding text to the implementation.
 
 ## SVG and PNG

@@ -1,5 +1,5 @@
 # The two image repositories are shared by staging and production and outlive both, so
-# infra/v2/bootstrap owns them (release images never expire there); the stack only reads them.
+# infra/bootstrap owns them (release images never expire there); the stack only reads them.
 # The bot task reuses agent-runner with another command.
 
 data "aws_ecr_repository" "this" {

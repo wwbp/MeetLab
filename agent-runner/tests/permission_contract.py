@@ -18,7 +18,7 @@ from dataclasses import dataclass, field
 
 ACCOUNT = os.getenv("AWS_ACCOUNT_ID", "848180123498")
 ENV = os.getenv("MEETLAB_ENV", "prod")
-NAME = f"meetlab-v2-{ENV}"  # every resource's prefix (infra/v2/stack main.tf)
+NAME = f"meetlab-v2-{ENV}"  # every resource's prefix (infra/stack main.tf)
 APPLY_ROLE = {"staging": "meetlab-v2-tf-apply", "prod": "meetlab-v2-tf-apply-prod"}[ENV]  # CI, never the app
 ARN = f"arn:aws:ecs:us-east-1:{ACCOUNT}"
 CLUSTER = f"{ARN}:cluster/{NAME}"

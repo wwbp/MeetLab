@@ -5,9 +5,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## What runs where
 
 MeetLab v2: browser meetings with a voice bot, recorded for research. Production is
-the Terraform stack `infra/v2/stack` (`env = prod`; `staging` remains a profile, unused), sizes in `profiles.tf`,
-one production at meet.wwbp.org, no staging (since 2026-10-14). A merge builds images (`infra-v2.yml`); only a `v2.*` release tag deploys, after an approval (`release-v2.yml`); CI's own permissions are
-`infra/v2/bootstrap`, applied by a person. Decisions, costs and measurements: `infra/v2/LEDGER.md`.
+the Terraform stack `infra/stack` (`env = prod`; `staging` remains a profile, unused), sizes in `profiles.tf`,
+one production at meet.wwbp.org, no staging (since 2026-10-14). A merge builds images (`build.yml`); only a `v2.*` release tag deploys, after an approval (`release.yml`); CI's own permissions are
+`infra/bootstrap`, applied by a person. Decisions, costs and measurements: `infra/LEDGER.md`.
 `main` is v2 (since 2026-10-14). v1 (Elastic Beanstalk, removed) is the tag `v1.0.0` and the archive branch `v1`.
 
 The local Docker stack (`.devcontainer/docker-compose.yml`) mirrors production so errors show up
@@ -43,8 +43,8 @@ docker compose -f .devcontainer/docker-compose.yml exec -T agent-runner \
   python -m unittest tests.test_runner_start -v
 ```
 
-Test levels, types and pass criteria: `docs/testing.md`. Load tests run in AWS: the "Load test v2" workflow (`docs/load-testing.md`). Live tests run after
-every release, on production (`infra/v2/live-tests.sh`). The runner has no hot reload:
+Test levels, types and pass criteria: `docs/testing.md`. Load tests run in AWS: the "Load test" workflow (`docs/load-testing.md`). Live tests run after
+every release, on production (`infra/live-tests.sh`). The runner has no hot reload:
 `docker compose restart agent-runner` after editing it.
 
 ## Environment

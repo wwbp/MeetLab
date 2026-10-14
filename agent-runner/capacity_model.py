@@ -1,7 +1,7 @@
 """How much to run for N rooms at once: for each part, its measured use per room and the
 utilization at which replies still meet 2 s p95; the cheapest machine that keeps it under that.
 A best-known path, not an optimum (user, 2026-10-06): only measured parts, nothing guessed.
-Sources: infra/v2/LEDGER.md (L6, B3, the 100-room spike, the right-sizing sweep).
+Sources: infra/LEDGER.md (L6, B3, the 100-room spike, the right-sizing sweep).
 """
 import math
 from dataclasses import dataclass

@@ -1,4 +1,4 @@
-# The v2 stack (staging or prod, by `env`): applied only by .github/workflows/infra-v2.yml when a PR into
+# The v2 stack (staging or prod, by `env`): applied only by .github/workflows/build.yml when a PR into
 # v2 merges. Every resource carries Project=meetlab-v2 so it is findable in the shared
 # lab account and so bootstrap's IAM scoping can key on it.
 
@@ -24,6 +24,6 @@ locals {
 provider "aws" {
   region = "us-east-1"
   default_tags {
-    tags = { Project = "meetlab-v2", Environment = var.env, ManagedBy = "terraform/infra/v2/${var.env}" }
+    tags = { Project = "meetlab-v2", Environment = var.env, ManagedBy = "terraform/infra/${var.env}" }
   }
 }

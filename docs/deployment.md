@@ -1,6 +1,6 @@
 # Deploying v2 — a first-timer's guide
 
-v2 is MeetLab rebuilt as code: every AWS resource is in Terraform under `infra/v2/`,
+v2 is MeetLab rebuilt as code: every AWS resource is in Terraform under `infra/`,
 and GitHub Actions deploys it. Nobody clicks around the AWS console or runs
 `terraform apply` against staging by hand. This page is what you need the first
 time you deploy, and the few steps a **person** has to do because the pipeline is
@@ -9,7 +9,7 @@ deliberately not allowed to.
 - Staging: <https://meet-staging.wwbp.org> (console at `/console`)
 - Production: <https://meet.wwbp.org> (since the cutover, 2026-10-13; `meet-v2.wwbp.org` before)
 - Branch: `main` (v2's code since 2026-10-14). v1 is the tag `v1.0.0` and the archive branch `v1`; never merge into `v1`.
-- Decisions, costs and known issues: [`infra/v2/LEDGER.md`](https://github.com/wwbp/MeetLab/blob/v2/infra/v2/LEDGER.md)
+- Decisions, costs and known issues: [`infra/LEDGER.md`](https://github.com/wwbp/MeetLab/blob/v2/infra/LEDGER.md)
 
 ## How a deploy happens
 
@@ -39,25 +39,25 @@ flowchart LR
    production. A release restarts production's services, so **never release during a
    study.**
 
-Watch merges under **Actions → Infra v2**, releases under **Actions → Release v2**.
+Watch merges under **Actions → Build**, releases under **Actions → Release**.
 
 ## Releasing to production
 
 Production runs the **same images staging already passed**, never a new build. A release
-is a git tag on a `main` commit whose Infra v2 build (tests and images) is green:
+is a git tag on a `main` commit whose Build build (tests and images) is green:
 
 ```bash
 git fetch origin && git tag v2.1.2 origin/main && git push origin v2.1.2
 ```
 
-Then, under **Actions → Release v2**:
+Then, under **Actions → Release**:
 
-1. **staged** checks the commit is on `main` and that its "Infra v2" build succeeded. If not,
+1. **staged** checks the commit is on `main` and that its "Build" build succeeded. If not,
    it stops: release a commit whose build passed.
 2. **deploy** waits for **your approval** (the `production` environment; only `v2.*` tags
    may use it). Once approved, it tags the images with the release (release images never
-   expire), applies `infra/v2/stack` as production, and runs the live tests against
-   production (`infra/v2/live-tests.sh prod`).
+   expire), applies `infra/stack` as production, and runs the live tests against
+   production (`infra/live-tests.sh prod`).
 
 A release restarts production's services: **never release during a study.** Number
 releases `v2.MAJOR.MINOR.PATCH`; v1 stays as `v1.0.0`. To go back, release the earlier tag's
@@ -70,7 +70,7 @@ database; the console lists them like any other room.
 ## Things only a person does
 
 **Log every one of these** in the "Manual actions" table in
-[`infra/v2/LEDGER.md`](https://github.com/wwbp/MeetLab/blob/v2/infra/v2/LEDGER.md):
+[`infra/LEDGER.md`](https://github.com/wwbp/MeetLab/blob/v2/infra/LEDGER.md):
 when, who, what, why. Never the secret itself.
 
 The pipeline's roles can't change their own permissions, can't read v1, and
@@ -78,11 +78,11 @@ can't create access keys. That's on purpose; these steps are the price.
 
 ### 1. Bootstrap (once, and whenever CI needs new permissions)
 
-`infra/v2/bootstrap/` holds the CI roles and the permissions boundary. It is
+`infra/bootstrap/` holds the CI roles and the permissions boundary. It is
 applied from a laptop by someone with admin rights in the AWS account:
 
 ```bash
-cd infra/v2/bootstrap
+cd infra/bootstrap
 terraform init
 terraform plan     # read it: only meetlab-v2-* roles and policies should change
 terraform apply
@@ -98,7 +98,7 @@ Vendor keys live in SSM Parameter Store under `/meetlab-v2/<env>/` (`staging` or
 generates the rest, puts placeholders for the recording key, prints no values):
 
 ```bash
-infra/v2/seed-secrets.sh staging    # or: prod
+infra/seed-secrets.sh staging    # or: prod
 ```
 
 Staging uses v1's vendor keys for sanity checks only — **no load tests** on them
@@ -159,7 +159,7 @@ NVIDIA's free developer program; production needs a licence (ledger).
 
 Off by default: bots use Deepgram and the GPU costs nothing. To turn it on, open a PR
 that sets `stt_nim_enabled = true` in the **staging** profile in
-`infra/v2/stack/profiles.tf`, and merge it (merge = deploy). Never change the defaults in
+`infra/stack/profiles.tf`, and merge it (merge = deploy). Never change the defaults in
 `variables.tf` for this: those apply to production too. What happens:
 
 - An on-demand `g6.xlarge` starts, downloads the server and **builds the model: about
@@ -176,7 +176,7 @@ memory, and the fractional-GPU machines top out at 11.4 GB (ledger).
 ## Switching our own LLM and voice on and off
 
 Same idea, for the language model (Qwen, on vLLM) and the voice (Kokoro): set
-`model_services = ["llm", "tts"]` in the staging profile in `infra/v2/stack/profiles.tf`
+`model_services = ["llm", "tts"]` in the staging profile in `infra/stack/profiles.tf`
 (or just one of them) and merge. Each starts its own `g6.xlarge` ($0.805/hour) and
 downloads its model first (minutes). Then, in the console's Bot Config, a room uses
 them by choosing `Qwen/Qwen2.5-7B-Instruct` as its model and `kokoro` as its voice
@@ -186,9 +186,9 @@ then checks a bot answers and speaks on them. Turn them off with `[]`.
 ## Switching video recording on and off
 
 Our own LiveKit records rooms as video with LiveKit's egress server
-(`infra/v2/stack/egress_server.tf`). It's off between studies. Switch it on **before** a
+(`infra/stack/egress_server.tf`). It's off between studies. Switch it on **before** a
 study or a video test: set `egress_count = 1` in the staging profile in
-`infra/v2/stack/profiles.tf` and merge (production always has one on). That starts one `c6i.2xlarge` ($0.34/hour),
+`infra/stack/profiles.tf` and merge (production always has one on). That starts one `c6i.2xlarge` ($0.34/hour),
 which records one room at a time; raise the number for more rooms at once.
 
 A recording asked for while no egress machine is up fails straight away (LiveKit doesn't

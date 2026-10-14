@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # The live acceptance tests against one deployed environment, as CI runs them after a
-# deploy (infra-v2.yml for staging, release-v2.yml for production):
+# deploy (build.yml for staging, release.yml for production):
 #
-#   infra/v2/live-tests.sh <staging|prod> '<terraform output -json livekit>' [scenario ...]
+#   infra/live-tests.sh <staging|prod> '<terraform output -json livekit>' [scenario ...]
 #
 # Reads the environment's secrets from SSM (masked in CI logs, never printed), checks the
 # deployed roles' permissions, then runs agent-runner/tests/acceptance_staging.py.

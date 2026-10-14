@@ -178,7 +178,7 @@ class RealDataOnlyTest(MigrationTest):
 
 
 class CopyTaskTest(unittest.TestCase):
-    """The migration task's last step, end to end (infra/v2/stack/migrate.tf): a copy of v1 at
+    """The migration task's last step, end to end (infra/stack/migrate.tf): a copy of v1 at
     v1's head, upgraded, then `migration_check.py SOURCE - --real --prune` prunes our runs from
     the target (this task's own database, from DB_* like the runner) and reports MATCH. It
     refuses to prune when source and target are the same database: never prune v1."""

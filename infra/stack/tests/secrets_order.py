@@ -7,7 +7,7 @@ tasks refused their secrets and ECS gives up on it (v2.0.0, production's first r
 dependency graph (`terraform graph`, on a copy with a local backend: no state, no AWS).
 Run from the repo root (make test-infra):
 
-    python3 infra/v2/stack/tests/secrets_order.py
+    python3 infra/stack/tests/secrets_order.py
 """
 import re
 import shutil
@@ -47,7 +47,7 @@ def early_services(dot: str) -> list[str]:
 if __name__ == "__main__":
     with tempfile.TemporaryDirectory() as tmp:
         stack = Path(tmp) / "stack"
-        shutil.copytree("infra/v2/stack", stack, ignore=shutil.ignore_patterns(".terraform*", "*.tfstate*"))
+        shutil.copytree("infra/stack", stack, ignore=shutil.ignore_patterns(".terraform*", "*.tfstate*"))
         (stack / "backend_override.tf").write_text('terraform {\n  backend "local" {}\n}\n')
         tf = lambda *a: subprocess.run(["terraform", f"-chdir={stack}", *a], check=True, capture_output=True, text=True).stdout  # noqa: E731
         tf("init", "-input=false")

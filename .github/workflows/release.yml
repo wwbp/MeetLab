@@ -1,16 +1,16 @@
 # Production: a release tag deploys the exact images a green build made (one production, no staging).
 #
-#   git tag v2.1.2 <a main commit whose Infra v2 build is green> && git push origin v2.1.2
+#   git tag v2.1.2 <a main commit whose Build build is green> && git push origin v2.1.2
 #
-#   staged  -> no credentials: the commit is on main and its "Infra v2" build (tests, images) succeeded
+#   staged  -> no credentials: the commit is on main and its "Build" build (tests, images) succeeded
 #   deploy  -> waits for your approval (the `production` environment: required reviewer,
 #              v2.* tags only), then tags the images with the release (release images
-#              never expire: bootstrap images.tf), applies infra/v2/stack as prod, and runs
-#              the live tests against production (infra/v2/live-tests.sh)
+#              never expire: bootstrap images.tf), applies infra/stack as prod, and runs
+#              the live tests against production (infra/live-tests.sh)
 #
 # One job after the approval, so one approval: each job naming a gated environment would
 # ask again. The production roles trust only that environment (bootstrap main.tf).
-name: Release v2
+name: Release
 
 on:
   push:
@@ -20,7 +20,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: infra-v2-prod-deploy
+  group: meetlab-prod-deploy
   cancel-in-progress: false
 
 env:
@@ -45,10 +45,10 @@ jobs:
           set -euo pipefail
           git merge-base --is-ancestor "$GITHUB_SHA" origin/main \
             || { echo "::error::$GITHUB_REF_NAME ($GITHUB_SHA) is not on main"; exit 1; }
-          green=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow infra-v2.yml --event push \
+          green=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow build.yml --event push \
             --commit "$GITHUB_SHA" --status success --json databaseId -q length)
           [ "$green" -gt 0 ] \
-            || { echo "::error::$GITHUB_SHA has no green Infra v2 build: release a commit whose tests and images passed"; exit 1; }
+            || { echo "::error::$GITHUB_SHA has no green Build build: release a commit whose tests and images passed"; exit 1; }
 
   deploy:
     needs: staged
@@ -85,18 +85,18 @@ jobs:
             echo "$repo:$GITHUB_REF_NAME -> $GITHUB_SHA"
           done
       - name: Apply as production
-        working-directory: infra/v2/stack
+        working-directory: infra/stack
         run: |
           set -euo pipefail
           terraform init -input=false -backend-config=key=v2/prod/terraform.tfstate
           terraform plan -input=false -no-color -lock-timeout=5m -out=tfplan -var="image_tag=$GITHUB_REF_NAME"
           terraform apply -input=false -no-color tfplan
       - name: Verify no drift after apply
-        working-directory: infra/v2/stack
+        working-directory: infra/stack
         run: terraform plan -input=false -no-color -lock-timeout=5m -detailed-exitcode -var="image_tag=$GITHUB_REF_NAME"
       - name: LiveKit for the live tests
         id: livekit
-        working-directory: infra/v2/stack
+        working-directory: infra/stack
         run: echo "livekit=$(terraform output -json livekit | jq -c .)" >> "$GITHUB_OUTPUT"
       - uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -109,4 +109,4 @@ jobs:
           sudo dpkg -i smp.deb
       - uses: astral-sh/setup-uv@v6
       - name: Production acceptance
-        run: infra/v2/live-tests.sh prod '${{ steps.livekit.outputs.livekit }}'
+        run: infra/live-tests.sh prod '${{ steps.livekit.outputs.livekit }}'

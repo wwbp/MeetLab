@@ -14,7 +14,7 @@ locals {
       bot_cpu             = 384, bot_memory = 512, bots_per_instance = 5, bot_instance_type = "c6i.large",
       container_insights  = false,
     }
-    # Production (user's decisions, 2026-10-06, after the cost audit: docs/v2-infrastructure.md):
+    # Production (user's decisions, 2026-10-06, after the cost audit: docs/infrastructure.md):
     # sized to use, scaled on request. One warm bot machine (5 rooms at once unprepared); Prepare
     # for study grows the pool to 40 machines (200 bot slots; tested to 100 rooms). Media and video recording on LiveKit
     # Cloud (Ship: 100 recordings at once), so no LiveKit machine or recorder of our own. Speech-

@@ -8,7 +8,7 @@ changed; changes to `allowed` columns are reported apart (they're expected, but 
 
 TARGET `-` is this process's own database, read as the runner reads it (db/url.py: DATABASE_URL,
 or DB_* from ECS); `--prune` first removes our programmatic runs from the target (the migration
-task, infra/v2/stack/migrate.tf). It refuses to prune its source.
+task, infra/stack/migrate.tf). It refuses to prune its source.
 """
 import asyncio
 import hashlib

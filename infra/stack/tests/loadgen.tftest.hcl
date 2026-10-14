@@ -1,5 +1,5 @@
 # Offline: mock provider, no AWS. The load generator (load-test readiness L5): our
-# synthetic participants run inside AWS, as a one-off Fargate task the "Load test v2"
+# synthetic participants run inside AWS, as a one-off Fargate task the "Load test"
 # workflow starts, so a run measures staging and not a laptop's network.
 
 mock_provider "aws" {

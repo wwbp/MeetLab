@@ -4,7 +4,7 @@ import { noteRouteError } from '@/lib/concierge/event-log';
 
 export const dynamic = 'force-dynamic';
 
-// The live tests clear their own data after each run (infra/v2/live-tests.sh). The runner
+// The live tests clear their own data after each run (infra/live-tests.sh). The runner
 // deletes only rooms named like the tests' (runner.TEST_ROOMS); console login required
 // (middleware.ts).
 export async function DELETE() {

@@ -140,12 +140,12 @@ point, and run the big shapes on `ours`.
 ## Running one
 
 1. **Switch on what the profile needs.** For `ours`: `model_services = ["llm", "tts"]` and
-   `stt_nim_enabled = true` (see `v2-deployment.md`). Beyond about 6 rooms, also raise
+   `stt_nim_enabled = true` (see `deployment.md`). Beyond about 6 rooms, also raise
    `bot_pool_max` (each bot machine holds about 3 sessions; default 2 machines).
-2. **Start it** from GitHub → Actions → *Load test v2* → *Run workflow* on branch `main`,
+2. **Start it** from GitHub → Actions → *Load test* → *Run workflow* on branch `main`,
    or from a terminal:
    ```bash
-   gh workflow run loadtest-v2.yml --ref main -f profile=ours -f shape=smoke -f target=10
+   gh workflow run loadtest.yml --ref main -f profile=ours -f shape=smoke -f target=10
    ```
    `hold_s=60` shortens every step for a quick rehearsal.
 3. **Read it.** The run's summary page shows one row per step and the verdict; the full
@@ -185,5 +185,5 @@ The report reads production's CloudWatch (`MEETLAB_ENV`, default `prod`), so loc
 | A conversation's turns as data | runner `GET /conversations/{id}/utterances`, console `/api/meetings/{id}/utterances` |
 | The report (both tables, quality, the environment's side) | `agent-runner/tests/load_report.py` |
 | The driver: rooms, participants, listening | `agent-runner/tests/load_run.py` |
-| Load generator in AWS | `infra/v2/stack/loadgen.tf` |
-| The workflow | `.github/workflows/loadtest-v2.yml` |
+| Load generator in AWS | `infra/stack/loadgen.tf` |
+| The workflow | `.github/workflows/loadtest.yml` |

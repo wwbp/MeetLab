@@ -53,6 +53,8 @@ logs:
 test: test-unit test-integration
 
 test-unit:
+	@# Bots run their own image (BOT_IMAGE); build it even on a fresh machine (CI runs make test).
+	$(COMPOSE) build bot
 	$(COMPOSE) up -d transport-server agent-runner meet
 	$(COMPOSE) exec -T agent-runner $(ALEMBIC) upgrade head
 	$(COMPOSE) run --rm --no-deps -T tests sh -ec 'for d in $(UNIT_SUITES); do echo "== $$d"; (cd $$d && python -m unittest discover -s tests -t . -p "test_*.py"); done; \

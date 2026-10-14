@@ -53,7 +53,7 @@ fails if anything else differs. It also proves the check catches a lost row and 
 | 1. The check, test-first | `migration_check.py` and its test | ✅ green in CI |
 | 2. Build v2 production | the staging Terraform as `prod`: production sizes, database across zones, its own versioned bucket; `meet-v2.wwbp.org` until cutover | ✅ 2026-10-08, release `v2.0.0`; live tests pass |
 | 3. Rehearse | restore a fresh v1 snapshot beside production's database, `migrate.sh run prod meetlab_rehearsal`, copy the kept files, then clean up | ✅ 2026-10-13: `MATCH` in 53 s; 508 files copied, every size equal |
-| 4. Cutover (~2 h, no study booked) | v1 stops taking sessions; final snapshot; restore, upgrade, remove our runs (`prune_harness`), copy the kept sessions' files; the check (`--real`); move the address; live tests and one real call | `MATCH`, then live tests, then the call; any failure, the address goes back to v1 |
+| 4. Cutover (~2 h, no study booked) | v1's runner to 0; final snapshot; production's app stopped; `migrate.sh run prod meetlab confirm`; files; app restarted; release `v2.1.0` moves meet.wwbp.org; v1's AAAA removed; live tests and one real call | ✅ 2026-10-14 00:05–01:35: `MATCH`, 508 files, meet.wwbp.org on v2 |
 | 5. Hold | v1 stopped but whole | 2–4 weeks of real studies on v2 |
 | 6. Retire | staging, then v1: final snapshot, test-restore it, then remove; v1's bucket kept read-only | each final snapshot restores and matches |
 

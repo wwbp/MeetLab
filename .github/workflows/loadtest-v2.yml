@@ -1,13 +1,13 @@
-# Load test v2: run one standard load-test shape against staging, on one stack profile,
+# Load test v2: run one standard load-test shape against production, on one stack profile,
 # from inside AWS (infra/v2/stack/loadgen.tf). How to run and read it: docs/load-testing.md
 name: Load test v2
 
 on:
   # Only a run started by hand tests anything. The push trigger exists because a
   # workflow that isn't on main (frozen) can be dispatched only once GitHub has seen
-  # it run: start it with  gh workflow run loadtest-v2.yml --ref v2 -f shape=...
+  # it run: start it with  gh workflow run loadtest-v2.yml --ref main -f shape=...
   push:
-    branches: [v2]
+    branches: [main]
     paths: [.github/workflows/loadtest-v2.yml]
   workflow_dispatch:
     inputs:
@@ -61,13 +61,16 @@ concurrency:
 
 env:
   AWS_REGION: us-east-1
-  CLUSTER: meetlab-v2-staging
+  CLUSTER: meetlab-v2-prod
+  MEETLAB_ENV: prod
 
 jobs:
   run:
     if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
-    environment: staging
+    # Production, so your approval first: a load test uses the paid vendors' quotas (OpenAI,
+    # ElevenLabs) unless its profile uses our own models, and its rooms are production's.
+    environment: production
     timeout-minutes: 240
     permissions:
       contents: read
@@ -96,10 +99,10 @@ jobs:
         run: |
           set -euo pipefail
           account="$(aws sts get-caller-identity --query Account --output text)"
-          bucket="meetlab-v2-staging-media-$account"
+          bucket="meetlab-v2-prod-media-$account"
           base="loadtests/$(date -u +%Y%m%dT%H%M%SZ)-$SHAPE-$PROFILE-$TARGET"
-          subnets="$(aws ec2 describe-subnets --filters 'Name=tag:Name,Values=meetlab-v2-staging-private-*' --query 'Subnets[].SubnetId' --output json)"
-          sg="$(aws ec2 describe-security-groups --filters Name=group-name,Values=meetlab-v2-staging-loadgen --query 'SecurityGroups[].GroupId' --output json)"
+          subnets="$(aws ec2 describe-subnets --filters 'Name=tag:Name,Values=meetlab-v2-prod-private-*' --query 'Subnets[].SubnetId' --output json)"
+          sg="$(aws ec2 describe-security-groups --filters Name=group-name,Values=meetlab-v2-prod-loadgen --query 'SecurityGroups[].GroupId' --output json)"
           network="$(jq -n --argjson s "$subnets" --argjson g "$sg" '{awsvpcConfiguration: {subnets: $s, securityGroups: $g, assignPublicIp: "DISABLED"}}')"
           library="$([ "$LIBRARY_VERSION" = none ] || echo "s3://$bucket/loadtests/library/$LIBRARY_VERSION/library.json")"
           # A split run: one run id and one start time (10 min ahead: Fargate start + Prepare
@@ -119,7 +122,7 @@ jobs:
                 {name: "WORKERS", value: $w}, {name: "LIBRARY", value: $l},
                 {name: "SHARD", value: $sh}, {name: "T0", value: $t0}, {name: "RUN_ID", value: $id},
                 {name: "OVERRIDES", value: $o}, {name: "PEOPLE_MIX", value: $mx}, {name: "VIDEO", value: $v}]}]}')"
-            task="$(aws ecs run-task --cluster "$CLUSTER" --task-definition meetlab-v2-staging-loadgen \
+            task="$(aws ecs run-task --cluster "$CLUSTER" --task-definition meetlab-v2-prod-loadgen \
               --launch-type FARGATE --started-by loadtest --network-configuration "$network" \
               --overrides "$overrides" --query 'tasks[0].taskArn' --output text)"
             echo "load generator $i/$GENERATORS: $task"
@@ -137,7 +140,7 @@ jobs:
           since=0
           while :; do
             states="$(aws ecs describe-tasks --cluster "$CLUSTER" --tasks $TASKS --query 'tasks[].lastStatus' --output text)"
-            aws logs filter-log-events --log-group-name /meetlab-v2/staging/loadgen --log-stream-names "$stream" \
+            aws logs filter-log-events --log-group-name /meetlab-v2/prod/loadgen --log-stream-names "$stream" \
               --start-time "$since" --query 'events[].[timestamp,message]' --output text 2>/dev/null \
               | while IFS=$'\t' read -r ts msg; do echo "$msg"; echo "$ts" > .since; done || true
             [ -f .since ] && since=$(( $(cat .since) + 1 ))

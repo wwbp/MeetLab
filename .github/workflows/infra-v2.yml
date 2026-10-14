@@ -1,33 +1,25 @@
-# The v2 staging pipeline: Terraform for infra/v2/stack, then the images.
+# The pipeline before production (main is v2's code; v1 is the tag v1.0.0) (one production, no staging, since 2026-10-14):
 #
-#   PR into v2  -> offline tests + plan, posted on the PR (read-only role);
+#   PR into main -> offline tests + a read-only plan of production, posted on the PR;
 #                  images built but not pushed
-#   merge to v2 -> build and push images tagged with the commit SHA, then apply,
-#                  which points the services at that SHA and waits for them to be healthy,
-#                  then live acceptance tests against staging (acceptance_staging.py)
-#                  (the `staging` environment, which only v2 may deploy to, is the
-#                  only thing that can assume the apply role)
+#   merge to main -> the tests, then images pushed, tagged with the commit SHA (the images-only
+#                  role). Nothing is deployed: a release tag deploys a green build's images
+#                  to production after the reviewer's approval (release-v2.yml).
 #
-# One workflow, not two: chaining workflows (workflow_run) also only works from the
-# default branch.
+# infra/v2/bootstrap is deliberately absent: it defines these roles and is applied by a person,
+# so CI can never widen its own permissions.
 #
-# The gate is the merge: GitHub's free plan has no required reviewers, so a PR into v2
-# is merged only after its plan has been read and approved.
-#
-# infra/v2/bootstrap is deliberately absent: it defines these roles and is applied by
-# a person, so CI can never widen its own permissions.
-#
-# No nightly drift check yet: scheduled workflows run only from the default branch
-# (main, frozen). Every PR plan doubles as a drift check until v2 becomes the default.
+# No nightly drift check: scheduled workflows run only from the default branch (main, frozen).
+# Every PR plan doubles as a drift check of production.
 
 name: Infra v2
 
 on:
   pull_request:
-    branches: [v2]
+    branches: [main]
     paths: ["infra/v2/**", ".github/workflows/**", "Makefile", "meet/**", "agent-runner/**", "!**/*.md"]
   push:
-    branches: [v2]
+    branches: [main]
     paths: ["infra/v2/**", ".github/workflows/infra-v2.yml", "meet/**", "agent-runner/**", "!**/*.md"]
 
 permissions:
@@ -38,7 +30,7 @@ permissions:
 # A PR's newer push supersedes its own plan. A PR's plan only reads the state, so it takes no
 # lock (-lock=false): its lock once failed a deploy's drift check (2026-10-04).
 concurrency:
-  group: ${{ github.event_name == 'push' && 'infra-v2-staging-deploy' || format('infra-v2-plan-{0}', github.ref) }}
+  group: ${{ github.event_name == 'push' && 'infra-v2-images' || format('infra-v2-plan-{0}', github.ref) }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
@@ -78,9 +70,9 @@ jobs:
         working-directory: infra/v2/stack
         run: |
           set -euo pipefail
-          terraform init -input=false -backend-config=key=v2/staging/terraform.tfstate
+          terraform init -input=false -backend-config=key=v2/prod/terraform.tfstate
           terraform plan -input=false -no-color -lock=false -out=tfplan \
-            -var="image_tag=${{ github.event.pull_request.head.sha }}"
+            -var=env=prod -var=hostname_suffix= -var="image_tag=${{ github.event.pull_request.head.sha }}"
           terraform show -no-color tfplan > plan.txt
       - name: Post plan on the PR
         env:
@@ -88,7 +80,7 @@ jobs:
         run: |
           set -euo pipefail
           {
-            echo "### Terraform plan — infra/v2/stack"
+            echo "### Terraform plan — infra/v2/stack, production"
             echo
             grep -E '^(Plan:|No changes)' infra/v2/stack/plan.txt || true
             echo
@@ -100,40 +92,6 @@ jobs:
             echo '</details>'
           } > comment.md
           gh pr comment "${{ github.event.pull_request.number }}" --body-file comment.md
-
-  apply:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/v2'
-    needs: images
-    runs-on: ubuntu-latest
-    environment: staging
-    permissions:
-      contents: read
-      id-token: write
-    outputs:
-      livekit: ${{ steps.livekit.outputs.livekit }}
-    steps:
-      - uses: actions/checkout@v4
-      - uses: hashicorp/setup-terraform@v3
-        with: { terraform_version: "1.15.1", terraform_wrapper: false }
-      - uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: ${{ vars.TF_APPLY_ROLE_ARN }}
-          aws-region: ${{ env.AWS_REGION }}
-      - name: Apply
-        working-directory: infra/v2/stack
-        run: |
-          set -euo pipefail
-          terraform init -input=false -backend-config=key=v2/staging/terraform.tfstate
-          terraform plan -input=false -no-color -lock-timeout=5m -out=tfplan -var="image_tag=${{ github.sha }}"
-          terraform apply -input=false -no-color tfplan
-      - name: Verify no drift after apply
-        working-directory: infra/v2/stack
-        run: terraform plan -input=false -no-color -lock-timeout=5m -detailed-exitcode -var="image_tag=${{ github.sha }}"
-      # Which LiveKit the live tests join (parameter names, never values), and whether it records video.
-      - name: LiveKit for the live tests
-        id: livekit
-        working-directory: infra/v2/stack
-        run: echo "livekit=$(terraform output -json livekit | jq -c .)" >> "$GITHUB_OUTPUT"
 
   # PRs: prove both images still build. No credentials.
   build:
@@ -157,12 +115,11 @@ jobs:
           push: false
           cache-from: type=gha,scope=${{ matrix.name }}
 
-  # Merges: push images tagged with the commit SHA; apply then deploys that SHA.
+  # Merges: push images tagged with the commit SHA; a release deploys them (release-v2.yml).
   images:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/v2'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: test
     runs-on: ubuntu-latest
-    environment: staging
     permissions:
       contents: read
       id-token: write
@@ -177,7 +134,7 @@ jobs:
       - uses: docker/setup-buildx-action@v3
       - uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ vars.TF_APPLY_ROLE_ARN }}
+          role-to-assume: ${{ vars.IMAGES_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
       - id: ecr
         uses: aws-actions/amazon-ecr-login@v2
@@ -198,30 +155,3 @@ jobs:
           tags: ${{ steps.ecr.outputs.registry }}/meetlab-v2/${{ matrix.name }}:${{ github.sha }}
           cache-from: type=gha,scope=${{ matrix.name }}
           cache-to: type=gha,mode=max,scope=${{ matrix.name }}
-
-  # Live acceptance against staging after every deploy: a bot through meet, graceful
-  # stops, and a kill -9 the heartbeat must catch. Same script runs from a laptop.
-  acceptance:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/v2'
-    needs: apply
-    runs-on: ubuntu-latest
-    environment: staging
-    timeout-minutes: 90 # a cold STT NIM (transcript scenario) takes up to ~45 min
-    permissions:
-      contents: read
-      id-token: write
-    steps:
-      - uses: actions/checkout@v4
-      - uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: ${{ vars.TF_ACCEPTANCE_ROLE_ARN }}
-          aws-region: ${{ env.AWS_REGION }}
-      - name: Session Manager plugin (ECS Exec, for the kill -9 scenario)
-        run: |
-          set -euo pipefail
-          curl -fsSL -o smp.deb https://s3.amazonaws.com/session-manager-downloads/plugin/latest/ubuntu_64bit/session-manager-plugin.deb
-          sudo dpkg -i smp.deb
-      - uses: astral-sh/setup-uv@v6
-      # Permission contract, then the live tests (shared with release-v2.yml).
-      - name: Staging acceptance
-        run: infra/v2/live-tests.sh staging '${{ needs.apply.outputs.livekit }}'

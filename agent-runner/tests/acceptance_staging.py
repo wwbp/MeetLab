@@ -57,9 +57,9 @@ from datetime import timedelta
 import boto3
 from livekit import api, rtc
 
-# One environment per run: MEETLAB_ENV=staging (default) or prod. Production answers at
+# One environment per run: MEETLAB_ENV=prod (default; staging was removed 2026-10-14) or staging. Production answers at
 # meet.wwbp.org since the cutover (2026-10-13); an unknown name fails at once.
-ENV = os.getenv("MEETLAB_ENV", "staging")
+ENV = os.getenv("MEETLAB_ENV", "prod")
 NAME = f"meetlab-v2-{ENV}"  # every resource's prefix (infra/v2/stack main.tf)
 LOGS = f"/meetlab-v2/{ENV}"
 CLUSTER = os.getenv("ECS_CLUSTER", NAME)

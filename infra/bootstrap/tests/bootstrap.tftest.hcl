@@ -1,8 +1,7 @@
 # The shared lab account is the reason these tests exist: every other wwbp repo can
 # already assume github-actions-service-acc. These roles must be reachable from this
-# repo only, each apply role only from its own reviewer-gated environment (`staging`,
-# `production`), and each environment's roles only reach that environment's resources.
-# Most runs check staging's roles; the last ones check production's and the separation.
+# repo only, the apply role only from the reviewer-gated `production` environment, and
+# production's roles only reach production's resources (staging removed 2026-10-14).
 
 mock_provider "aws" {
   mock_data "aws_caller_identity" {
@@ -38,7 +37,7 @@ run "apply_role_trusts_only_the_staging_environment" {
   command = plan
 
   assert {
-    condition     = jsondecode(aws_iam_role.apply["staging"].assume_role_policy).Statement[0].Condition.StringEquals["token.actions.githubusercontent.com:sub"] == ["repo:wwbp/MeetLab:environment:staging"]
+    condition     = jsondecode(aws_iam_role.apply["prod"].assume_role_policy).Statement[0].Condition.StringEquals["token.actions.githubusercontent.com:sub"] == ["repo:wwbp/MeetLab:environment:production"]
     error_message = "apply role must be reachable only through the reviewer-gated staging environment"
   }
 }
@@ -60,7 +59,7 @@ run "state_access_is_confined_to_the_v2_prefix" {
 
   assert {
     condition = alltrue([
-      for s in jsondecode(local.state["staging"]).Statement :
+      for s in jsondecode(local.state["prod"]).Statement :
       alltrue([for r in flatten([s.Resource]) : endswith(r, "meetlab-tfstate-123456789012") || strcontains(r, "meetlab-tfstate-123456789012/v2/")])
     ])
     error_message = "roles must not touch stt-nim or any other state in the bucket"
@@ -96,7 +95,7 @@ run "apply_role_ec2_writes_are_confined_to_meetlab_v2" {
 
   assert {
     condition = alltrue([
-      for s in flatten([for p in [for k, p in aws_iam_role_policy.apply : p if startswith(k, "staging/")] : jsondecode(p.policy).Statement]) :
+      for s in flatten([for p in [for k, p in aws_iam_role_policy.apply : p if startswith(k, "prod/")] : jsondecode(p.policy).Statement]) :
       anytrue([
         alltrue([for a in flatten([s.Action]) : !startswith(a, "ec2:") || startswith(a, "ec2:Describe")]),
         try(s.Condition.StringEquals["aws:ResourceTag/Project"], "") == "meetlab-v2",
@@ -128,7 +127,7 @@ run "apply_role_writes_are_scoped_to_meetlab_v2" {
 
   assert {
     condition = alltrue([
-      for s in flatten([for p in [for k, p in aws_iam_role_policy.apply : p if startswith(k, "staging/")] : jsondecode(p.policy).Statement]) :
+      for s in flatten([for p in [for k, p in aws_iam_role_policy.apply : p if startswith(k, "prod/")] : jsondecode(p.policy).Statement]) :
       anytrue([
         s.Effect == "Deny",
         alltrue([for a in flatten([s.Action]) : can(regex(":(Describe|List|Get)", a))]),
@@ -177,7 +176,7 @@ run "ci_can_read_and_push_images" {
     error_message = "plan needs to refresh the repositories"
   }
   assert {
-    condition = anytrue([for s in jsondecode(aws_iam_role_policy.apply["staging/images"].policy).Statement :
+    condition = anytrue([for s in jsondecode(aws_iam_role_policy.apply["prod/images"].policy).Statement :
     contains(flatten([s.Action]), "ecr:*") && flatten([s.Resource]) == ["arn:aws:ecr:us-east-1:123456789012:repository/meetlab-v2/*"]])
     error_message = "apply manages and pushes to meetlab-v2/* repositories only"
   }
@@ -199,17 +198,17 @@ run "boundary_caps_what_ci_created_roles_can_do" {
   command = plan
 
   assert {
-    condition     = aws_iam_policy.boundary["staging"].name == "meetlab-v2-boundary"
+    condition     = aws_iam_policy.boundary["prod"].name == "meetlab-v2-prod-boundary"
     error_message = "staging references the boundary by this name"
   }
   assert {
-    condition = alltrue([for s in jsondecode(aws_iam_policy.boundary["staging"].policy).Statement :
-      alltrue([for a in flatten([s.Action]) : !startswith(a, "iam:") || (a == "iam:PassRole" && flatten([s.Resource]) == ["arn:aws:iam::123456789012:role/meetlab-v2-staging-*"])])
+    condition = alltrue([for s in jsondecode(aws_iam_policy.boundary["prod"].policy).Statement :
+      alltrue([for a in flatten([s.Action]) : !startswith(a, "iam:") || (a == "iam:PassRole" && flatten([s.Resource]) == ["arn:aws:iam::123456789012:role/meetlab-v2-prod-*"])])
     ])
-    error_message = "the boundary grants no IAM beyond passing meetlab-v2-staging roles"
+    error_message = "the boundary grants no IAM beyond passing meetlab-v2-prod roles"
   }
   assert {
-    condition = alltrue([for s in jsondecode(aws_iam_policy.boundary["staging"].policy).Statement :
+    condition = alltrue([for s in jsondecode(aws_iam_policy.boundary["prod"].policy).Statement :
       alltrue([for r in flatten([s.Resource]) : r == "*" || anytrue([
         strcontains(r, "meetlab-v2"), strcontains(r, ":secret:rds!"), strcontains(r, "parameter/aws/service/"),
       ])])
@@ -218,8 +217,8 @@ run "boundary_caps_what_ci_created_roles_can_do" {
     error_message = "the boundary reaches parameters, secrets or buckets outside meetlab-v2"
   }
   assert {
-    condition = anytrue([for s in jsondecode(aws_iam_policy.boundary["staging"].policy).Statement :
-    contains(flatten([s.Action]), "s3:AbortMultipartUpload") && contains(flatten([s.Resource]), "arn:aws:s3:::meetlab-v2-staging-*/*")])
+    condition = anytrue([for s in jsondecode(aws_iam_policy.boundary["prod"].policy).Statement :
+    contains(flatten([s.Action]), "s3:AbortMultipartUpload") && contains(flatten([s.Resource]), "arn:aws:s3:::meetlab-v2-prod-*/*")])
     error_message = "LiveKit egress uploads mp4s in parts; the egress user must be able to abort a failed one (permission contract)"
   }
 }
@@ -229,14 +228,14 @@ run "the_boundary_lets_the_runner_prewarm_bot_pools_only" {
   command = plan
 
   assert {
-    condition = anytrue([for s in jsondecode(aws_iam_policy.boundary["staging"].policy).Statement :
+    condition = anytrue([for s in jsondecode(aws_iam_policy.boundary["prod"].policy).Statement :
       contains(flatten([s.Action]), "autoscaling:UpdateAutoScalingGroup") &&
-      flatten([s.Resource]) == ["arn:aws:autoscaling:us-east-1:123456789012:autoScalingGroup:*:autoScalingGroupName/meetlab-v2-staging-bots"]
+      flatten([s.Resource]) == ["arn:aws:autoscaling:us-east-1:123456789012:autoScalingGroup:*:autoScalingGroupName/meetlab-v2-prod-bots"]
     ])
     error_message = "bot pools only"
   }
   assert {
-    condition = alltrue([for s in jsondecode(aws_iam_policy.boundary["staging"].policy).Statement :
+    condition = alltrue([for s in jsondecode(aws_iam_policy.boundary["prod"].policy).Statement :
       alltrue([for a in flatten([s.Action]) : startswith(a, "autoscaling:Describe")]) if contains(flatten([s.Resource]), "*") && anytrue([for a in flatten([s.Action]) : startswith(a, "autoscaling:")])
     ])
     error_message = "autoscaling on * is read-only"
@@ -247,11 +246,11 @@ run "ci_can_only_create_roles_that_carry_the_boundary" {
   command = plan
 
   assert {
-    condition = alltrue([for s in flatten([for p in [for k, p in aws_iam_role_policy.apply : p if startswith(k, "staging/")] : jsondecode(p.policy).Statement]) :
-      try(s.Condition.StringEquals["iam:PermissionsBoundary"], "") == "arn:aws:iam::123456789012:policy/meetlab-v2-boundary"
+    condition = alltrue([for s in flatten([for p in [for k, p in aws_iam_role_policy.apply : p if startswith(k, "prod/")] : jsondecode(p.policy).Statement]) :
+      try(s.Condition.StringEquals["iam:PermissionsBoundary"], "") == "arn:aws:iam::123456789012:policy/meetlab-v2-prod-boundary"
       if s.Effect == "Allow" && anytrue([for a in flatten([s.Action]) : contains(["iam:CreateRole", "iam:PutRolePermissionsBoundary", "iam:CreateUser", "iam:PutUserPermissionsBoundary"], a)])
     ])
-    error_message = "CreateRole and CreateUser must require meetlab-v2-boundary"
+    error_message = "CreateRole and CreateUser must require meetlab-v2-prod-boundary"
   }
 }
 
@@ -259,22 +258,22 @@ run "ci_cannot_touch_its_own_roles_or_the_boundary" {
   command = plan
 
   assert {
-    condition = alltrue([for s in flatten([for p in [for k, p in aws_iam_role_policy.apply : p if startswith(k, "staging/")] : jsondecode(p.policy).Statement]) :
-      alltrue([for r in flatten([s.Resource]) : !strcontains(r, "meetlab-v2-tf-") && !strcontains(r, "policy/meetlab-v2-boundary")])
+    condition = alltrue([for s in flatten([for p in [for k, p in aws_iam_role_policy.apply : p if startswith(k, "prod/")] : jsondecode(p.policy).Statement]) :
+      alltrue([for r in flatten([s.Resource]) : !strcontains(r, "meetlab-v2-tf-") && !strcontains(r, "policy/meetlab-v2-prod-boundary")])
       if s.Effect == "Allow"
     ])
     error_message = "an allow reaches the CI roles or the boundary"
   }
   assert {
-    condition = anytrue([for s in flatten([for p in [for k, p in aws_iam_role_policy.apply : p if startswith(k, "staging/")] : jsondecode(p.policy).Statement]) :
+    condition = anytrue([for s in flatten([for p in [for k, p in aws_iam_role_policy.apply : p if startswith(k, "prod/")] : jsondecode(p.policy).Statement]) :
       s.Effect == "Deny" && contains(flatten([s.Action]), "iam:*") &&
       contains(flatten([s.Resource]), "arn:aws:iam::123456789012:role/meetlab-v2-tf-*") &&
-      contains(flatten([s.Resource]), "arn:aws:iam::123456789012:policy/meetlab-v2-boundary")
+      contains(flatten([s.Resource]), "arn:aws:iam::123456789012:policy/meetlab-v2-prod-boundary")
     ])
     error_message = "an explicit deny must protect the CI roles and the boundary"
   }
   assert {
-    condition = anytrue([for s in flatten([for p in [for k, p in aws_iam_role_policy.apply : p if startswith(k, "staging/")] : jsondecode(p.policy).Statement]) :
+    condition = anytrue([for s in flatten([for p in [for k, p in aws_iam_role_policy.apply : p if startswith(k, "prod/")] : jsondecode(p.policy).Statement]) :
     s.Effect == "Deny" && contains(flatten([s.Action]), "iam:DeleteRolePermissionsBoundary")])
     error_message = "no role may lose its boundary"
   }
@@ -286,19 +285,19 @@ run "ci_manages_only_staging_users_and_never_their_keys" {
   command = plan
 
   assert {
-    condition = alltrue([for s in flatten([for p in [for k, p in aws_iam_role_policy.apply : p if startswith(k, "staging/")] : jsondecode(p.policy).Statement]) :
-      flatten([s.Resource]) == ["arn:aws:iam::123456789012:user/meetlab-v2-staging-*"]
+    condition = alltrue([for s in flatten([for p in [for k, p in aws_iam_role_policy.apply : p if startswith(k, "prod/")] : jsondecode(p.policy).Statement]) :
+      flatten([s.Resource]) == ["arn:aws:iam::123456789012:user/meetlab-v2-prod-*"]
       if s.Effect == "Allow" && anytrue([for a in flatten([s.Action]) : strcontains(a, "User")])
     ])
-    error_message = "user actions reach only meetlab-v2-staging-* users"
+    error_message = "user actions reach only meetlab-v2-prod-* users"
   }
   assert {
-    condition = length([for s in flatten([for p in [for k, p in aws_iam_role_policy.apply : p if startswith(k, "staging/")] : jsondecode(p.policy).Statement]) : s
+    condition = length([for s in flatten([for p in [for k, p in aws_iam_role_policy.apply : p if startswith(k, "prod/")] : jsondecode(p.policy).Statement]) : s
     if s.Effect == "Allow" && contains(flatten([s.Action]), "iam:CreateUser")]) == 1
     error_message = "the apply role can create the egress user"
   }
   assert {
-    condition = anytrue([for s in flatten([for p in [for k, p in aws_iam_role_policy.apply : p if startswith(k, "staging/")] : jsondecode(p.policy).Statement]) :
+    condition = anytrue([for s in flatten([for p in [for k, p in aws_iam_role_policy.apply : p if startswith(k, "prod/")] : jsondecode(p.policy).Statement]) :
       s.Effect == "Deny" && flatten([s.Resource]) == ["*"] &&
       alltrue([for a in ["iam:CreateAccessKey", "iam:UpdateAccessKey", "iam:DeleteUserPermissionsBoundary"] : contains(flatten([s.Action]), a)])
     ])
@@ -317,15 +316,15 @@ run "ci_can_run_the_stt_nim_on_spot_behind_its_own_nlb" {
   command = plan
 
   assert {
-    condition = anytrue([for s in flatten([for p in [for k, p in aws_iam_role_policy.apply : p if startswith(k, "staging/")] : jsondecode(p.policy).Statement]) :
+    condition = anytrue([for s in flatten([for p in [for k, p in aws_iam_role_policy.apply : p if startswith(k, "prod/")] : jsondecode(p.policy).Statement]) :
       s.Effect == "Allow" && contains(flatten([s.Action]), "elasticloadbalancing:*") &&
-      contains(flatten([s.Resource]), "arn:aws:elasticloadbalancing:us-east-1:123456789012:loadbalancer/net/meetlab-v2-staging*/*") &&
-      contains(flatten([s.Resource]), "arn:aws:elasticloadbalancing:us-east-1:123456789012:listener/net/meetlab-v2-staging*/*")
+      contains(flatten([s.Resource]), "arn:aws:elasticloadbalancing:us-east-1:123456789012:loadbalancer/net/meetlab-v2-prod*/*") &&
+      contains(flatten([s.Resource]), "arn:aws:elasticloadbalancing:us-east-1:123456789012:listener/net/meetlab-v2-prod*/*")
     ])
     error_message = "the apply role manages meetlab-v2 network load balancers and their listeners, and no one else's"
   }
   assert {
-    condition = anytrue([for s in flatten([for p in [for k, p in aws_iam_role_policy.apply : p if startswith(k, "staging/")] : jsondecode(p.policy).Statement]) :
+    condition = anytrue([for s in flatten([for p in [for k, p in aws_iam_role_policy.apply : p if startswith(k, "prod/")] : jsondecode(p.policy).Statement]) :
       s.Effect == "Allow" && contains(flatten([s.Action]), "ec2:RunInstances") &&
       contains(flatten([s.Resource]), "arn:aws:ec2:us-east-1:123456789012:spot-instances-request/*") &&
       can(s.Condition.ArnLike["ec2:LaunchTemplate"])
@@ -338,9 +337,9 @@ run "ci_may_change_exactly_our_three_dns_names" {
   command = plan
 
   assert {
-    condition = toset(flatten([for s in flatten([for p in [for k, p in aws_iam_role_policy.apply : p if startswith(k, "staging/")] : jsondecode(p.policy).Statement]) :
+    condition = toset(flatten([for s in flatten([for p in [for k, p in aws_iam_role_policy.apply : p if startswith(k, "prod/")] : jsondecode(p.policy).Statement]) :
       try(s.Condition["ForAllValues:StringEquals"]["route53:ChangeResourceRecordSetsNormalizedRecordNames"], [])
-    ])) == toset(["meet-staging.wwbp.org", "livekit-staging.wwbp.org", "turn-staging.wwbp.org"])
+    ])) == toset(["meet.wwbp.org", "meet-v2.wwbp.org", "livekit-v2.wwbp.org", "turn-v2.wwbp.org"])
     error_message = "the shared wwbp.org zone: meet-staging, our self-hosted LiveKit's signalling name and its TURN name, nothing else"
   }
 }
@@ -354,7 +353,7 @@ run "ci_can_manage_our_service_connect_namespace" {
     error_message = "plan needs to refresh the namespace"
   }
   assert {
-    condition = anytrue([for s in flatten([for p in [for k, p in aws_iam_role_policy.apply : p if startswith(k, "staging/")] : jsondecode(p.policy).Statement]) :
+    condition = anytrue([for s in flatten([for p in [for k, p in aws_iam_role_policy.apply : p if startswith(k, "prod/")] : jsondecode(p.policy).Statement]) :
     contains(flatten([s.Action]), "servicediscovery:CreateHttpNamespace") && try(s.Condition.StringEquals["aws:RequestTag/Project"], "") == "meetlab-v2"])
     error_message = "namespaces are created only with our tag (their ARNs are random ids)"
   }
@@ -365,7 +364,7 @@ run "the_boundary_allows_ecs_exec_channels" {
 
   assert {
     condition = alltrue([for a in ["ssmmessages:CreateControlChannel", "ssmmessages:CreateDataChannel", "ssmmessages:OpenControlChannel", "ssmmessages:OpenDataChannel"] :
-    contains(flatten([for s in jsondecode(aws_iam_policy.boundary["staging"].policy).Statement : s.Action]), a)])
+    contains(flatten([for s in jsondecode(aws_iam_policy.boundary["prod"].policy).Statement : s.Action]), a)])
     error_message = "ECS Exec needs these four in the boundary"
   }
 }
@@ -376,24 +375,24 @@ run "acceptance_role_is_staging_only_and_least_privilege" {
   command = plan
 
   assert {
-    condition     = jsondecode(aws_iam_role.acceptance["staging"].assume_role_policy).Statement[0].Condition.StringEquals["token.actions.githubusercontent.com:sub"] == ["repo:wwbp/MeetLab:environment:staging"]
+    condition     = jsondecode(aws_iam_role.acceptance["prod"].assume_role_policy).Statement[0].Condition.StringEquals["token.actions.githubusercontent.com:sub"] == ["repo:wwbp/MeetLab:environment:production"]
     error_message = "assumable only from the staging environment"
   }
   assert {
-    condition = toset(flatten([for s in jsondecode(aws_iam_role_policy.acceptance["staging"].policy).Statement : s.Resource if contains(flatten([s.Action]), "ssm:GetParameter")])) == toset([
+    condition = toset(flatten([for s in jsondecode(aws_iam_role_policy.acceptance["prod"].policy).Statement : s.Resource if contains(flatten([s.Action]), "ssm:GetParameter")])) == toset([
       for n in ["CONSOLE_PASSWORD", "LIVEKIT_URL", "LIVEKIT_API_KEY", "LIVEKIT_API_SECRET", "SELFHOSTED_LIVEKIT_API_KEY", "SELFHOSTED_LIVEKIT_API_SECRET"] :
-      "arn:aws:ssm:us-east-1:123456789012:parameter/meetlab-v2/staging/${n}"
+      "arn:aws:ssm:us-east-1:123456789012:parameter/meetlab-v2/prod/${n}"
     ])
     error_message = "reads exactly the secrets the acceptance test uses (LiveKit Cloud's, or our self-hosted LiveKit's)"
   }
   assert {
-    condition = alltrue([for s in jsondecode(aws_iam_role_policy.acceptance["staging"].policy).Statement :
-      alltrue([for r in flatten([s.Resource]) : strcontains(r, "meetlab-v2-staging") || strcontains(r, "/meetlab-v2/staging") || r == "*"])
+    condition = alltrue([for s in jsondecode(aws_iam_role_policy.acceptance["prod"].policy).Statement :
+      alltrue([for r in flatten([s.Resource]) : strcontains(r, "meetlab-v2-prod") || strcontains(r, "/meetlab-v2/prod") || r == "*"])
     ])
     error_message = "every resource is staging"
   }
   assert {
-    condition = alltrue([for s in jsondecode(aws_iam_role_policy.acceptance["staging"].policy).Statement :
+    condition = alltrue([for s in jsondecode(aws_iam_role_policy.acceptance["prod"].policy).Statement :
       alltrue([for a in flatten([s.Action]) : contains([
         "ssm:GetParameter", "kms:Decrypt", "ecs:ListTasks", "ecs:DescribeTasks", "ecs:StopTask", "ecs:ExecuteCommand", "logs:FilterLogEvents",
         "iam:SimulatePrincipalPolicy", "s3:ListBucket", "ecs:DescribeServices",
@@ -402,12 +401,12 @@ run "acceptance_role_is_staging_only_and_least_privilege" {
     error_message = "only the actions the acceptance test performs"
   }
   assert {
-    condition = anytrue([for s in jsondecode(aws_iam_role_policy.acceptance["staging"].policy).Statement :
-    flatten([s.Action]) == ["ecs:DescribeServices"] && flatten([s.Resource]) == ["arn:aws:ecs:us-east-1:123456789012:service/meetlab-v2-staging/*"]])
+    condition = anytrue([for s in jsondecode(aws_iam_role_policy.acceptance["prod"].policy).Statement :
+    flatten([s.Action]) == ["ecs:DescribeServices"] && flatten([s.Resource]) == ["arn:aws:ecs:us-east-1:123456789012:service/meetlab-v2-prod/*"]])
     error_message = "acceptance transcript: is the STT NIM on, and healthy? Staging services only"
   }
   assert {
-    condition = alltrue([for s in jsondecode(aws_iam_role_policy.acceptance["staging"].policy).Statement :
+    condition = alltrue([for s in jsondecode(aws_iam_role_policy.acceptance["prod"].policy).Statement :
     length(try(s.Condition, {})) > 0 if contains(flatten([s.Resource]), "*")])
     error_message = "any statement on * must be narrowed by a condition"
   }
@@ -419,32 +418,32 @@ run "acceptance_can_start_the_load_generator_and_nothing_else" {
   command = plan
 
   assert {
-    condition = anytrue([for s in jsondecode(aws_iam_role_policy.acceptance["staging"].policy).Statement :
-      flatten([s.Action]) == ["ecs:RunTask"] && flatten([s.Resource]) == ["arn:aws:ecs:us-east-1:123456789012:task-definition/meetlab-v2-staging-loadgen:*"] &&
-      s.Condition.ArnEquals["ecs:cluster"] == "arn:aws:ecs:us-east-1:123456789012:cluster/meetlab-v2-staging"
+    condition = anytrue([for s in jsondecode(aws_iam_role_policy.acceptance["prod"].policy).Statement :
+      flatten([s.Action]) == ["ecs:RunTask"] && flatten([s.Resource]) == ["arn:aws:ecs:us-east-1:123456789012:task-definition/meetlab-v2-prod-loadgen:*"] &&
+      s.Condition.ArnEquals["ecs:cluster"] == "arn:aws:ecs:us-east-1:123456789012:cluster/meetlab-v2-prod"
     ])
     error_message = "runs the load generator's task in the staging cluster, and no other task"
   }
   assert {
-    condition = anytrue([for s in jsondecode(aws_iam_role_policy.acceptance["staging"].policy).Statement :
+    condition = anytrue([for s in jsondecode(aws_iam_role_policy.acceptance["prod"].policy).Statement :
       flatten([s.Action]) == ["iam:PassRole"] &&
-      toset(flatten([s.Resource])) == toset(["arn:aws:iam::123456789012:role/meetlab-v2-staging-task-execution", "arn:aws:iam::123456789012:role/meetlab-v2-staging-loadgen"]) &&
+      toset(flatten([s.Resource])) == toset(["arn:aws:iam::123456789012:role/meetlab-v2-prod-task-execution", "arn:aws:iam::123456789012:role/meetlab-v2-prod-loadgen"]) &&
       s.Condition.StringEquals["iam:PassedToService"] == "ecs-tasks.amazonaws.com"
     ])
     error_message = "passes only the load generator's two roles, only to ECS tasks"
   }
   assert {
-    condition = anytrue([for s in jsondecode(aws_iam_role_policy.acceptance["staging"].policy).Statement :
-    flatten([s.Action]) == ["s3:GetObject"] && flatten([s.Resource]) == ["arn:aws:s3:::meetlab-v2-staging-media-123456789012/loadtests/*"]])
+    condition = anytrue([for s in jsondecode(aws_iam_role_policy.acceptance["prod"].policy).Statement :
+    flatten([s.Action]) == ["s3:GetObject"] && flatten([s.Resource]) == ["arn:aws:s3:::meetlab-v2-prod-media-123456789012/loadtests/*"]])
     error_message = "reads load test results, never recordings"
   }
   assert {
-    condition = anytrue([for s in jsondecode(aws_iam_role_policy.acceptance["staging"].policy).Statement :
+    condition = anytrue([for s in jsondecode(aws_iam_role_policy.acceptance["prod"].policy).Statement :
     flatten([s.Action]) == ["cloudwatch:GetMetricData"] && s.Condition.StringEquals["aws:RequestedRegion"] == "us-east-1"])
     error_message = "reads metrics (CPU, memory, database) for the run's report; GetMetricData has no resource-level permissions"
   }
   assert {
-    condition     = aws_iam_role.acceptance["staging"].max_session_duration == 14400
+    condition     = aws_iam_role.acceptance["prod"].max_session_duration == 14400
     error_message = "4 hours: the workflow waits on a soak (an hour at the target) with one credential"
   }
 }
@@ -453,10 +452,10 @@ run "acceptance_can_check_the_permission_contract_of_staging_roles_only" {
   command = plan
 
   assert {
-    condition = anytrue([for s in jsondecode(aws_iam_role_policy.acceptance["staging"].policy).Statement :
-      contains(flatten([s.Action]), "iam:SimulatePrincipalPolicy") && toset(flatten([s.Resource])) == toset(["arn:aws:iam::123456789012:role/meetlab-v2-staging-*", "arn:aws:iam::123456789012:user/meetlab-v2-staging-*"])
+    condition = anytrue([for s in jsondecode(aws_iam_role_policy.acceptance["prod"].policy).Statement :
+      contains(flatten([s.Action]), "iam:SimulatePrincipalPolicy") && toset(flatten([s.Resource])) == toset(["arn:aws:iam::123456789012:role/meetlab-v2-prod-*", "arn:aws:iam::123456789012:user/meetlab-v2-prod-*"])
     ])
-    error_message = "permission_contract.py simulates meetlab-v2-staging-* roles and users (the LiveKit egress user), and only those"
+    error_message = "permission_contract.py simulates meetlab-v2-prod-* roles and users (the LiveKit egress user), and only those"
   }
 }
 
@@ -466,8 +465,8 @@ run "acceptance_can_list_recordings_but_not_read_them" {
   command = plan
 
   assert {
-    condition = anytrue([for s in jsondecode(aws_iam_role_policy.acceptance["staging"].policy).Statement :
-      contains(flatten([s.Action]), "s3:ListBucket") && flatten([s.Resource]) == ["arn:aws:s3:::meetlab-v2-staging-media-123456789012"] &&
+    condition = anytrue([for s in jsondecode(aws_iam_role_policy.acceptance["prod"].policy).Statement :
+      contains(flatten([s.Action]), "s3:ListBucket") && flatten([s.Resource]) == ["arn:aws:s3:::meetlab-v2-prod-media-123456789012"] &&
       try(s.Condition.StringLike["s3:prefix"], "") == "recordings/*"
     ])
     error_message = "list recordings/ in the staging media bucket, nothing else"
@@ -484,9 +483,9 @@ run "ci_can_manage_only_our_redis" {
     error_message = "plan needs to refresh the Redis cluster"
   }
   assert {
-    condition = anytrue([for s in flatten([for p in [for k, p in aws_iam_role_policy.apply : p if startswith(k, "staging/")] : jsondecode(p.policy).Statement]) :
+    condition = anytrue([for s in flatten([for p in [for k, p in aws_iam_role_policy.apply : p if startswith(k, "prod/")] : jsondecode(p.policy).Statement]) :
       contains(flatten([s.Action]), "elasticache:*") &&
-    alltrue([for r in flatten([s.Resource]) : strcontains(r, ":meetlab-v2-staging-") || strcontains(r, ":parametergroup:default.redis7")])])
+    alltrue([for r in flatten([s.Resource]) : strcontains(r, ":meetlab-v2-prod-") || strcontains(r, ":parametergroup:default.redis7")])])
     error_message = "ElastiCache only on resources named meetlab-v2-* (and AWS's default Redis 7 parameter group)"
   }
 }
@@ -502,8 +501,8 @@ run "production_roles_trust_only_the_production_environment" {
     error_message = "production's roles answer only to the production environment (your approval)"
   }
   assert {
-    condition     = aws_iam_role.apply["prod"].name == "meetlab-v2-tf-apply-prod" && aws_iam_role.apply["staging"].name == "meetlab-v2-tf-apply"
-    error_message = "staging's role keeps its name; production's is its own"
+    condition     = aws_iam_role.apply["prod"].name == "meetlab-v2-tf-apply-prod"
+    error_message = "production's apply role keeps its name"
   }
   assert {
     condition = toset(flatten([for s in flatten([for k, p in aws_iam_role_policy.apply : jsondecode(p.policy).Statement if startswith(k, "prod/")]) :
@@ -519,7 +518,7 @@ run "each_environment_reaches_only_its_own_resources" {
   command = plan
 
   assert {
-    condition = alltrue(flatten([for env, other in { staging = "prod", prod = "staging" } : [
+    condition = alltrue(flatten([for env, other in { prod = "staging" } : [
       for s in flatten(concat(
         [for k, p in aws_iam_role_policy.apply : jsondecode(p.policy).Statement if startswith(k, "${env}/")],
         jsondecode(aws_iam_role_policy.acceptance[env].policy).Statement,
@@ -532,8 +531,8 @@ run "each_environment_reaches_only_its_own_resources" {
     error_message = "a role reaches the other environment, or uses a meetlab-v2-* wildcard that covers both"
   }
   assert {
-    condition     = local.state["prod"] != local.state["staging"] && strcontains(local.state["prod"], "meetlab-tfstate-123456789012/v2/prod/")
-    error_message = "each apply role reads and writes only its own environment's state"
+    condition     = strcontains(local.state["prod"], "meetlab-tfstate-123456789012/v2/prod/")
+    error_message = "the apply role reads and writes only production's state"
   }
 }
 
@@ -564,10 +563,6 @@ run "production_may_move_meet_wwbp_org_from_v1" {
   assert {
     condition     = contains(local.envs.prod.hostnames, "meet.wwbp.org") && contains(local.envs.prod.hostnames, "meet-v2.wwbp.org")
     error_message = "the cutover renames production's record meet-v2 -> meet: its role must change both names"
-  }
-  assert {
-    condition     = !contains(local.envs.staging.hostnames, "meet.wwbp.org")
-    error_message = "staging must never be able to touch meet.wwbp.org"
   }
 }
 

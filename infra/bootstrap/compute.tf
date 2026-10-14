@@ -291,8 +291,3 @@ resource "aws_iam_policy" "boundary" {
     ]
   })
 }
-
-moved {
-  from = aws_iam_policy.boundary
-  to   = aws_iam_policy.boundary["staging"]
-}

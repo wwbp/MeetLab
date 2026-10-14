@@ -344,9 +344,14 @@ async def scenario_audio_recording():
 async def scenario_video_recording():
     """Record pressed, someone speaks, Stop recording pressed: LiveKit's composite
     egress must upload the room's mp4 to the media bucket with the write-only egress
-    key (8b). Failing to start is a FAIL: every session needs its video."""
+    key (8b). Failing to start is a FAIL: every session needs its video. Its own room with
+    auto-record off, so the button is what's tested: production carries v1's settings, where
+    auto-record is on, and Record then answers 409 (already recording) (2026-10-14)."""
     s3 = boto3.client("s3", region_name=REGION)
-    async with Meeting() as m:
+    room = f"accept-{uuid.uuid4().hex[:6]}"
+    _post("/api/console/login", {"password": os.environ["CONSOLE_PASSWORD"]})
+    _post("/api/console/config", {"scope": room, "auto_record": False}, method="PUT")
+    async with Meeting(room=room) as m:
         _web.open(urllib.request.Request(f"{MEET}/api/record/start?roomName={m.room}"), timeout=30)
         await _speak(m.human, 15)
         _web.open(urllib.request.Request(f"{MEET}/api/record/stop?roomName={m.room}"), timeout=30)

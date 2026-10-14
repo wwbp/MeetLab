@@ -600,3 +600,20 @@ run "pr_plans_read_production_and_never_write_its_state" {
     error_message = "a PR can never write production's state"
   }
 }
+
+run "the_boundary_lets_live_test_files_be_deleted_and_nothing_else" {
+  command = plan
+
+  assert {
+    condition = alltrue([for env, p in aws_iam_policy.boundary : alltrue([
+      for s in jsondecode(p.policy).Statement : !contains(flatten([s.Action]), "s3:DeleteObject")
+      || flatten([s.Resource]) == ["arn:aws:s3:::meetlab-v2-${env}-media-*/recordings/*-accept-*"]
+    ])])
+    error_message = "the only deletes a CI-created role may ever make are the live tests' own files"
+  }
+  assert {
+    condition = alltrue([for p in values(aws_iam_policy.boundary) : anytrue([
+    for s in jsondecode(p.policy).Statement : contains(flatten([s.Action]), "s3:DeleteObject")])])
+    error_message = "the runner purges the live tests' files after each run (runner.purge_test_data)"
+  }
+}

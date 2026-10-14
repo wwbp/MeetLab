@@ -255,6 +255,14 @@ resource "aws_iam_policy" "boundary" {
         Resource = ["arn:aws:s3:::${each.value.p}-*", "arn:aws:s3:::${each.value.p}-*/*"]
       },
       {
+        # The live tests' own files, after each run (agent-runner purge_test_data); never any
+        # other object: rooms accept-xxxxxx only.
+        Sid      = "LiveTestFilesOnly"
+        Effect   = "Allow"
+        Action   = "s3:DeleteObject"
+        Resource = "arn:aws:s3:::${each.value.p}-media-*/recordings/*-accept-*"
+      },
+      {
         # Prepare for study (agent-runner capacity.py): warm a bot pool, no other group.
         Sid      = "PrewarmBotPools"
         Effect   = "Allow"

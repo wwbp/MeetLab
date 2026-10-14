@@ -29,7 +29,17 @@ locals {
   migrate_source = { name = "SOURCE_URL", valueFrom = "${local.parameters}/MIGRATION_SOURCE_URL" }
 }
 
-resource "aws_ecs_task_definition" "migrate" {
+# Renamed from `migrate` (2026-10-14): its first revision was created without skip_destroy, and
+# a replacement deletes the old revision with the old settings, which CI may not do. Terraform
+# forgets that one (it stays registered, like every old revision) and manages this one.
+removed {
+  from = aws_ecs_task_definition.migrate
+  lifecycle {
+    destroy = false
+  }
+}
+
+resource "aws_ecs_task_definition" "migration" {
   family                   = "${local.name}-migrate"
   requires_compatibilities = ["EC2"]
   network_mode             = "bridge"

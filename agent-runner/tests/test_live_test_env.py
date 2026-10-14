@@ -26,7 +26,13 @@ class TestLiveTestEnv(unittest.TestCase):
         for m in ("acceptance_staging", "permission_contract"):
             sys.modules.pop(m, None)
 
-    def test_staging_is_the_default(self):
+    def test_production_is_the_default(self):
+        with mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("MEETLAB_ENV", None)
+            sys.modules.pop("acceptance_staging", None)
+            self.assertEqual(importlib.import_module("acceptance_staging").CLUSTER, "meetlab-v2-prod")
+
+    def test_staging_names_staging(self):
         live = load("acceptance_staging", "staging")
         self.assertEqual(live.CLUSTER, "meetlab-v2-staging")
         self.assertEqual(live.MEET, "https://meet-staging.wwbp.org")

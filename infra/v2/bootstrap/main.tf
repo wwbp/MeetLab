@@ -64,6 +64,7 @@ locals {
 
   trust_for = { for name, subjects in merge(
     { plan = ["${local.repo}:pull_request", "${local.repo}:ref:refs/heads/v2"] },
+    { images = ["${local.repo}:ref:refs/heads/v2"] }, # merges build release images (infra-v2.yml)
     { for env, e in local.envs : env => ["${local.repo}:environment:${e.github}"] },
     ) :
     name => jsonencode({
@@ -98,6 +99,20 @@ locals {
       },
     ]
   }) }
+
+  # PR plans read production's state, never write it: plans run with -lock=false.
+  state_read = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect    = "Allow"
+        Action    = "s3:ListBucket"
+        Resource  = "arn:aws:s3:::${var.state_bucket}"
+        Condition = { StringLike = { "s3:prefix" = "v2/prod/*" } }
+      },
+      { Effect = "Allow", Action = "s3:GetObject", Resource = "arn:aws:s3:::${var.state_bucket}/v2/prod/*" },
+    ]
+  })
 
   ec2_read = jsonencode({
     Version   = "2012-10-17"
@@ -207,11 +222,11 @@ locals {
     ]
   })
 
-  # The plan role refreshes staging for PR plans; production is planned inside its own
-  # gated deploy, with its apply role.
+  # PR plans show production (one production, no staging, 2026-10-14): read-only, its
+  # state included; production is applied inside its own gated release, with its apply role.
   plan_policies = {
-    state       = local.state["staging"], ec2 = local.ec2_read, data = local.data_read["staging"],
-    images_read = local.images_read, compute_read = local.compute_read["staging"],
+    state       = local.state_read, ec2 = local.ec2_read, data = local.data_read["prod"],
+    images_read = local.images_read, compute_read = local.compute_read["prod"],
   }
   apply_policies = merge([for env, e in local.envs : {
     for name, policy in {
@@ -236,6 +251,19 @@ resource "aws_iam_role_policy" "plan" {
   policy   = each.value
 }
 
+# Merges into v2 build and push the images a release later deploys (infra-v2.yml): ECR only.
+resource "aws_iam_role" "images" {
+  name                 = "meetlab-v2-images"
+  assume_role_policy   = local.trust_for["images"]
+  max_session_duration = 3600
+}
+
+resource "aws_iam_role_policy" "images" {
+  name   = "push-images"
+  role   = aws_iam_role.images.id
+  policy = local.images_write
+}
+
 resource "aws_iam_role" "apply" {
   for_each             = local.envs
   name                 = each.value.apply_role
@@ -251,6 +279,7 @@ resource "aws_iam_role_policy" "apply" {
 }
 
 output "plan_role_arn" { value = aws_iam_role.plan.arn }
+output "images_role_arn" { value = aws_iam_role.images.arn }
 output "apply_role_arns" { value = { for env, r in aws_iam_role.apply : env => r.arn } }
 
 # Staging's role and policies, from before there were two environments: same names, moved.

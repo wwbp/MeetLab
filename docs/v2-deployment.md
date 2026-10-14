@@ -13,30 +13,33 @@ deliberately not allowed to.
 
 ## How a deploy happens
 
+There is one production and no staging (since 2026-10-14). Merging builds; only a release
+deploys, after your approval.
+
 ```mermaid
 flowchart LR
-  PR[PR into v2] --> T[tests + terraform plan<br/>posted on the PR]
-  T --> M[merge = deploy]
-  M --> I[build images<br/>tagged with the commit]
-  I --> A[terraform apply<br/>waits for healthy services]
-  A --> C[permission contract<br/>+ live acceptance tests]
+  PR[PR into v2] --> T[tests + a read-only plan<br/>of production, on the PR]
+  T --> M[merge]
+  M --> I[tests again, then images<br/>tagged with the commit]
+  I --> R[release tag v2.x.y]
+  R --> A[your approval]
+  A --> D[apply to production<br/>+ live tests on meet.wwbp.org]
 ```
 
-1. Open a PR into `v2`. CI runs the unit and Terraform tests and posts the
-   Terraform plan as a comment. **Read the plan**: anything "destroy" or "replace"
-   on the database, bucket or load balancer deserves a second look.
-2. **Merging is the deploy.** There is no separate approval button (GitHub's free
-   plan has none for private repos).
-3. Every merge restarts the services, so a call in progress can drop. **Time
-   merges around studies.** Instances also pick up the latest Amazon ECS image on
-   replacement; we chose not to pin it.
-4. After the apply, the `acceptance` job checks every AWS permission the code uses
-   (and ones it must never have), then runs real meetings against staging: a bot
-   joins, is stopped several ways, is killed, and recordings land in S3. A red
-   acceptance job means the deploy is live but broken — look at it before the
-   next merge.
+1. Open a PR into `v2`. CI runs the unit and Terraform tests and posts a plan of
+   **production** as a comment. **Read the plan**: anything "destroy" or "replace" on the
+   database, bucket or load balancer deserves a second look.
+2. **Merging deploys nothing.** It runs the tests again and builds the images, tagged with
+   the commit. Production is untouched until a release.
+3. A release (next section) deploys a green build's images to production after your
+   approval, then the live tests run real meetings on meet.wwbp.org: a bot joins, is
+   stopped several ways, is killed, and recordings land in S3. A red live test means
+   production is live but broken: look at it at once.
+4. Test locally before a release (`make start`, `make test`): the local stack mirrors
+   production. A release restarts production's services, so **never release during a
+   study.**
 
-Watch it under **Actions → Infra v2** on GitHub.
+Watch merges under **Actions → Infra v2**, releases under **Actions → Release v2**.
 
 ## Releasing to production
 

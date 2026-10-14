@@ -4,9 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What runs where
 
-MeetLab v2: browser meetings with a voice bot, recorded for research. Production and staging are
-the same Terraform stack (`infra/v2/stack`, `env = staging | prod`, sizes in `profiles.tf`),
-deployed only by GitHub Actions: staging on merge (`infra-v2.yml`), production from a `v2.*` release tag after an approval (`release-v2.yml`); CI's own permissions are
+MeetLab v2: browser meetings with a voice bot, recorded for research. Production is
+the Terraform stack `infra/v2/stack` (`env = prod`; `staging` remains a profile, unused), sizes in `profiles.tf`,
+one production at meet.wwbp.org, no staging (since 2026-10-14). A merge builds images (`infra-v2.yml`); only a `v2.*` release tag deploys, after an approval (`release-v2.yml`); CI's own permissions are
 `infra/v2/bootstrap`, applied by a person. Decisions, costs and measurements: `infra/v2/LEDGER.md`.
 v1 (Elastic Beanstalk) is frozen on `main` and tagged `v1.0.0`; nothing of it lives on `v2`.
 
@@ -44,7 +44,7 @@ docker compose -f .devcontainer/docker-compose.yml exec -T agent-runner \
 ```
 
 Test levels, types and pass criteria: `docs/testing.md`. Load tests run in AWS: the "Load test v2" workflow (`docs/load-testing.md`). Live tests run after
-every staging deploy (`agent-runner/tests/acceptance_staging.py`). The runner has no hot reload:
+every release, on production (`infra/v2/live-tests.sh`). The runner has no hot reload:
 `docker compose restart agent-runner` after editing it.
 
 ## Environment

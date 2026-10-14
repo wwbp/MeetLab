@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # The v1 -> v2 data copy, step by step (docs/v1-to-v2-migration.md). Run by a person with admin
-# credentials, each step on the user's yes, and logged in infra/v2/LEDGER.md. v1 is only read:
+# credentials, each step on the user's yes, and logged in infra/LEDGER.md. v1 is only read:
 # its snapshot is restored next to the environment's database, and the copy reads that.
 #
-#   infra/v2/migrate.sh source <env> <snapshot-name>   snapshot v1, restore it as the source, store its URL in SSM
-#   infra/v2/migrate.sh run    <env> <target-db> [confirm]   the migrate task (copy, upgrade, prune, check)
-#   infra/v2/migrate.sh clean  <env>                    delete the restored source and its SSM URL
+#   infra/migrate.sh source <env> <snapshot-name>   snapshot v1, restore it as the source, store its URL in SSM
+#   infra/migrate.sh run    <env> <target-db> [confirm]   the migrate task (copy, upgrade, prune, check)
+#   infra/migrate.sh clean  <env>                    delete the restored source and its SSM URL
 #
 # A rehearsal fills a throwaway database (e.g. meetlab_rehearsal); the cutover fills the
 # environment's own (meetlab) and needs `confirm`, with meet and the runner stopped first.

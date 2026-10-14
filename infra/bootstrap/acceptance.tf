@@ -58,8 +58,8 @@ resource "aws_iam_role_policy" "acceptance" {
         Condition = { StringLike = { "s3:prefix" = "recordings/*" } }
       },
       {
-        # "Load test v2" (.github/workflows/loadtest-v2.yml): start the load generator
-        # (infra/v2/stack/loadgen.tf) in its own subnets and group, and read its results.
+        # "Load test" (.github/workflows/loadtest.yml): start the load generator
+        # (infra/stack/loadgen.tf) in its own subnets and group, and read its results.
         Effect    = "Allow"
         Action    = "ecs:RunTask"
         Resource  = "arn:aws:ecs:us-east-1:${local.account}:task-definition/${each.value.p}-loadgen:*"

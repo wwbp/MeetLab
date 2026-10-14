@@ -1,5 +1,5 @@
 // What each Bot Config setting does, and what our tests measured (the config page's info panel).
-// Numbers come from infra/v2/LEDGER.md and docs/load-test-report-2026-10.md; each names its source.
+// Numbers come from infra/LEDGER.md and docs/load-test-report-2026-10.md; each names its source.
 
 type Result = { text: string; source: string };
 // key: the one result worth seeing at a glance; results: the detail behind "More".

@@ -5,7 +5,7 @@ criteria each one holds the system to. Test levels and types follow the ISTQB Fo
 (v4); performance test types follow the ISTQB Performance Testing syllabus (CT-PT), whose seven
 types each map to one load-test shape here; pass criteria are written as service level objectives
 (SLOs), as Google's SRE practice defines them. Every size production runs was chosen by these
-tests (`infra/v2/LEDGER.md`, Measurements; `agent-runner/capacity_model.py`).
+tests (`infra/LEDGER.md`, Measurements; `agent-runner/capacity_model.py`).
 
 ## Service level objectives
 
@@ -32,7 +32,7 @@ of the reply time.
 | **Component** (unit) | one unit in isolation | runner `unittest`, meet `vitest`, the CPU speech server | `make test-unit`, `make test-stt-cpu` | every PR |
 | **Component integration** | units through their interfaces | the runner against Postgres; meet's API routes; database migrations (`test_migration_v1_to_v2`) | `make test-integration` | every PR (`ci.yml`) |
 | **Contract** (interface agreements) | what one part promises another | a Bot settings field exists in DB, API and form; CI and task roles have exactly the permissions used; Terraform's tests | `make test-config-parity`, `make test-infra`, `permission_contract.py` | every PR / deploy |
-| **System and acceptance** (end to end) | real meetings on staging after every deploy, and on production after every release (`infra/v2/live-tests.sh`), as a user and an operator | 16+ live scenarios: start/stop, a killed bot replaced, recording, two people, chat, TURN on 443, the study flow, session limits | `acceptance_staging.py` | after every deploy |
+| **System and acceptance** (end to end) | real meetings on staging after every deploy, and on production after every release (`infra/live-tests.sh`), as a user and an operator | 16+ live scenarios: start/stop, a killed bot replaced, recording, two people, chat, TURN on 443, the study flow, session limits | `acceptance_staging.py` | after every deploy |
 | **Regression** (test type) | nothing that worked broke | all of the above, on every PR and deploy | — | — |
 
 ## Performance test types (ISTQB CT-PT)
@@ -57,11 +57,11 @@ performance test also says *why* a reply was slow and whether it was still good.
 
 ```bash
 make test-static test-unit test-integration test-infra test-config-parity   # local, ~15 min
-# then on staging (a session PR switches the staging profile on): the Load test v2 workflow,
+# then on staging (a session PR switches the staging profile on): the Load test workflow,
 # shapes load, stress, spike, soak, breakpoint (docs/load-testing.md)
 ```
 
-Results, with the run IDs, go in `infra/v2/LEDGER.md` (Measurements).
+Results, with the run IDs, go in `infra/LEDGER.md` (Measurements).
 
 Sources: [ISTQB CT-PT syllabus](https://istqb.org/?sdm_process_download=1&download_id=3591);
 ISTQB Foundation Level syllabus v4.0 (test levels and types); Google, *Site Reliability

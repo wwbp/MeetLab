@@ -1,5 +1,5 @@
 """Right-sizing bots (2026-10-06): the report shows what the heaviest bot task used, so a bot's
-CPU and memory reservation (infra/v2/stack/bots.tf) can be set from measurement.
+CPU and memory reservation (infra/stack/bots.tf) can be set from measurement.
     uv run python -m unittest tests.test_load_report_bots -v
 """
 import unittest

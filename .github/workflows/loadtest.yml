@@ -1,14 +1,14 @@
-# Load test v2: run one standard load-test shape against production, on one stack profile,
-# from inside AWS (infra/v2/stack/loadgen.tf). How to run and read it: docs/load-testing.md
-name: Load test v2
+# Load test: run one standard load-test shape against production, on one stack profile,
+# from inside AWS (infra/stack/loadgen.tf). How to run and read it: docs/load-testing.md
+name: Load test
 
 on:
   # Only a run started by hand tests anything. The push trigger exists because a
   # workflow that isn't on main (frozen) can be dispatched only once GitHub has seen
-  # it run: start it with  gh workflow run loadtest-v2.yml --ref main -f shape=...
+  # it run: start it with  gh workflow run loadtest.yml --ref main -f shape=...
   push:
     branches: [main]
-    paths: [.github/workflows/loadtest-v2.yml]
+    paths: [.github/workflows/loadtest.yml]
   workflow_dispatch:
     inputs:
       profile:

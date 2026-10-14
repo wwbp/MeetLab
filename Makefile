@@ -76,7 +76,7 @@ test-static: test-dead-code test-image docs-build
 	@# Workflows (actionlint: syntax, expressions, untrusted input in scripts) and scripts
 	@# (shellcheck); warnings and errors, not style notes.
 	docker run --rm -e SHELLCHECK_OPTS=--severity=warning -v $(CURDIR):/repo -w /repo rhysd/actionlint:1.7.7 -no-color -oneline
-	docker run --rm -v $(CURDIR):/mnt -w /mnt koalaman/shellcheck:v0.10.0 -S warning infra/v2/*.sh
+	docker run --rm -v $(CURDIR):/mnt -w /mnt koalaman/shellcheck:v0.10.0 -S warning infra/*.sh
 
 test-dead-code:
 	cd agent-runner && uvx vulture . vulture_whitelist.py --exclude ".venv,alembic" --min-confidence 80
@@ -102,10 +102,10 @@ test-stt-cpu:
 	cd stt-cpu && uv run --no-project --with "onnx-asr[cpu,hub]==0.12.*" --with soundfile --with fastapi \
 		--with httpx --with python-multipart python -m unittest test_app -v
 
-# Offline: fmt, validate and `terraform test` (mock provider) for every infra/v2 stack.
+# Offline: fmt, validate and `terraform test` (mock provider) for every infra stack.
 # No AWS credentials needed, so it runs in CI and before any plan.
 test-infra:
-	@for d in infra/v2/*/; do \
+	@for d in infra/*/; do \
 		echo "== $$d"; \
 		terraform -chdir=$$d fmt -check -recursive && \
 		terraform -chdir=$$d init -backend=false -input=false >/dev/null && \
@@ -113,9 +113,9 @@ test-infra:
 		terraform -chdir=$$d test -no-color || exit 1; \
 	done
 	@# Every ECS service waits for its tasks' secrets policy (a fresh stack: v2.0.0's meet).
-	python3 infra/v2/stack/tests/secrets_order.py
+	python3 infra/stack/tests/secrets_order.py
 	@# One production, no staging: merges build, releases deploy (the workflows).
-	python3 infra/v2/stack/tests/pipeline_check.py
+	python3 infra/stack/tests/pipeline_check.py
 
 test-integration:
 	$(COMPOSE) up -d transport-server agent-runner meet

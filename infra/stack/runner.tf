@@ -77,7 +77,7 @@ resource "aws_ecs_task_definition" "runner_app" {
     # The runner requests video egress. LiveKit Cloud gets the write-only egress key with
     # each request (egress.tf); our own egress uploads with its task role, so then no key at
     # all (egress_server.tf). Bots never hold it. Minted by a person into SSM:
-    # docs/v2-deployment.md.
+    # docs/deployment.md.
     secrets = concat(local.bot_secrets, local.livekit_self_hosted ? [] : [for n in ["EGRESS_S3_KEY_ID", "EGRESS_S3_KEY_SECRET"] :
     { name = n, valueFrom = "${local.parameters}/${n}" }])
     healthCheck = {

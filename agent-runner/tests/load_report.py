@@ -8,7 +8,7 @@ Inside the environment, per step: the bot's own stage timings (its "bot reply" l
 turn-end wait, LLM first token, first sentence, TTS first audio) and CloudWatch maxima (CPU and memory
 of each service, CPU of each machine group, database CPU and connections).
 
-Run by the Load test v2 workflow after the load generator stops, with the acceptance
+Run by the Load test workflow after the load generator stops, with the acceptance
 role; prints Markdown for the run's summary and writes the enriched result back.
 
     uv run --no-project --with boto3 python agent-runner/tests/load_report.py result.json [half-2.json …]

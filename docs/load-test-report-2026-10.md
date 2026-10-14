@@ -6,7 +6,7 @@ person up to 102 rooms (about 170 people) with no loss of quality.** Past 84 roo
 faster, and one prompt line raised judged quality from 3.4–3.9 to 4.5 out of 5.
 
 Runs of 2026-10-03 and 04 on staging. How the tests work and what each number means:
-[load-testing.md](load-testing.md). Raw numbers: `infra/v2/LEDGER.md` → Measurements.
+[load-testing.md](load-testing.md). Raw numbers: `infra/LEDGER.md` → Measurements.
 
 ## Capacity: 60 rooms passed
 

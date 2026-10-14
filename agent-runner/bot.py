@@ -334,7 +334,7 @@ def _build_parakeet_chain(bot_config, vad_handlers=None):
     """Parakeet chain: (VADProcessor, NemotronHTTPSTTService). A segmented STT transcribes only
     the audio between VAD start/stop, so the chain carries its own VADProcessor (per-participant
     audio never passes the transport's VAD). The tail POSTs each segment to NEMOTRON_STT_URL:
-    our CPU server (stt-cpu) or the GPU NIM (infra/v2/stack/runner.tf)."""
+    our CPU server (stt-cpu) or the GPU NIM (infra/stack/runner.tf)."""
     from nemotron_stt import NemotronHTTPSTTService, nemotron_stt_url
 
     vad = _build_vad_processor(bot_config, vad_handlers)
@@ -360,7 +360,7 @@ def _link_chain(bot_config, vad, stt):
 def _apply_stt_model_override(bot_config):
     """Force the bot's STT model regardless of the DB config, when STT_MODEL_OVERRIDE is set.
 
-    The stack sets it from which speech server runs (infra/v2/stack/runner.tf: Parakeet on our
+    The stack sets it from which speech server runs (infra/stack/runner.tf: Parakeet on our
     CPU server or GPU, else Deepgram); the local stack mirrors that with its own stt-cpu. Applied
     only to the running bot, not to the /config store/API, which reflects what's persisted.
     """

@@ -74,17 +74,17 @@ each file, so run it in-region), and `compare_files(v1, v2)` must return nothing
 
 ## Running the copy
 
-`infra/v2/migrate.sh` runs each step; a person runs it with admin credentials, on the user's yes,
+`infra/migrate.sh` runs each step; a person runs it with admin credentials, on the user's yes,
 and logs it in the ledger. v1 is only read: the copy comes from v1's snapshot, restored next to
 production's database behind the same firewall (v1's own network can't reach production's).
 
 ```bash
-infra/v2/migrate.sh source prod meetlab-rehearsal-20261013   # snapshot v1, restore it next to prod (~20 min)
-infra/v2/migrate.sh run prod meetlab_rehearsal                # copy, upgrade, remove our runs, check: MATCH
-infra/v2/migrate.sh clean prod                                # delete the restored source (the snapshot stays)
+infra/migrate.sh source prod meetlab-rehearsal-20261013   # snapshot v1, restore it next to prod (~20 min)
+infra/migrate.sh run prod meetlab_rehearsal                # copy, upgrade, remove our runs, check: MATCH
+infra/migrate.sh clean prod                                # delete the restored source (the snapshot stays)
 ```
 
-`run` starts the migration task (`infra/v2/stack/migrate.tf`) on production's app machines:
+`run` starts the migration task (`infra/stack/migrate.tf`) on production's app machines:
 
 1. **copy** recreates the target database and fills it with `pg_dump | pg_restore`;
 2. **migrate**, only if the copy succeeded, upgrades it (`alembic upgrade head`) and runs

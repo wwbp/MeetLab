@@ -12,7 +12,7 @@
 
 locals {
   stt_nim_image = "nvcr.io/nim/nvidia/parakeet-0.6b-tdt:latest" # same as v1
-  # Stored by a person (docs/v2-deployment.md): {"username":"$oauthtoken","password":"<NGC key>"}.
+  # Stored by a person (docs/deployment.md): {"username":"$oauthtoken","password":"<NGC key>"}.
   ngc_secret = "arn:aws:secretsmanager:us-east-1:${data.aws_caller_identity.current.account_id}:secret:meetlab-v2/${var.env}/ngc"
 }
 

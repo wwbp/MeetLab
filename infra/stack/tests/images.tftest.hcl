@@ -1,4 +1,4 @@
-# Offline: mock provider, no AWS. The image repositories belong to infra/v2/bootstrap
+# Offline: mock provider, no AWS. The image repositories belong to infra/bootstrap
 # (shared by both environments, release images kept there); the stack only reads them.
 
 mock_provider "aws" {

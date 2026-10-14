@@ -1,20 +1,20 @@
 # Learn MeetLab
 
 MeetLab runs browser meetings with a voice assistant and records conversations for research.
-v2 runs on AWS through Terraform (`infra/v2`), deployed by GitHub Actions; a local Docker stack
+v2 runs on AWS through Terraform (`infra`), deployed by GitHub Actions; a local Docker stack
 mirrors it. Start with the architecture page, then follow a study through the guides.
 
 ## A reading path
 
 | Step | What to learn | Where to start |
 | --- | --- | --- |
-| 1 | The parts, their sizes, and how much they carry | [Architecture: parts, sizes, capacity](v2-infrastructure.md) |
+| 1 | The parts, their sizes, and how much they carry | [Architecture: parts, sizes, capacity](infrastructure.md) |
 | 2 | Running a study: Prolific IDs, completion codes, typed chat | [Study support](study-support.md) and [session limits](session-limits.md) |
 | 3 | Investigating behaviour | [Events and errors](event-log.md) |
 | 4 | How much v2 carries, and how well | [Load test report, October 2026](load-test-report-2026-10.md) and [how load tests work](load-testing.md) |
-| 5 | Deploying, and moving v1's data | [Deploying v2](v2-deployment.md) and [moving v1's data](v1-to-v2-migration.md) |
+| 5 | Deploying, and moving v1's data | [Deploying v2](deployment.md) and [moving v1's data](v1-to-v2-migration.md) |
 
-Decisions, costs and measurements live in `infra/v2/LEDGER.md`. v1's investigations (latency
+Decisions, costs and measurements live in `infra/LEDGER.md`. v1's investigations (latency
 experiments, the pilot postmortem, audits) are preserved at the
 [`v1.0.0` tag](https://github.com/wwbp/MeetLab/tree/v1.0.0/docs).
 

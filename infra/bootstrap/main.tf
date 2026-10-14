@@ -1,8 +1,8 @@
-# The two roles GitHub Actions uses for infra/v2. Applied by a human, once per change,
+# The two roles GitHub Actions uses for infra. Applied by a human, once per change,
 # because the apply role must not be able to widen its own permissions. Its state lives
 # outside the v2/ prefix for the same reason. See README.md.
 #
-# Permissions start at state access only; each infra/v2 PR that adds a resource type
+# Permissions start at state access only; each infra PR that adds a resource type
 # adds the actions it needs here, so the roles never hold more than the stack uses.
 
 terraform {
@@ -22,7 +22,7 @@ terraform {
 provider "aws" {
   region = "us-east-1"
   default_tags {
-    tags = { Project = "meetlab-v2", ManagedBy = "terraform/infra/v2/bootstrap" }
+    tags = { Project = "meetlab-v2", ManagedBy = "terraform/infra/bootstrap" }
   }
 }
 
@@ -44,7 +44,7 @@ data "aws_iam_openid_connect_provider" "github" {
   url = "https://${local.oidc}"
 }
 
-# The two environments infra/v2/stack is applied as. Every per-environment policy below
+# The two environments infra/stack is applied as. Every per-environment policy below
 # is built once for each and names only that environment's resources (p = name prefix),
 # so neither environment's CI can reach the other's database, recordings or tasks.
 locals {
@@ -65,7 +65,7 @@ locals {
   trust_for = { for name, subjects in merge(
     # main is v2's code since 2026-10-14 (v1 is the tag v1.0.0)
     { plan = ["${local.repo}:pull_request", "${local.repo}:ref:refs/heads/main"] },
-    { images = ["${local.repo}:ref:refs/heads/main"] }, # merges build release images (infra-v2.yml)
+    { images = ["${local.repo}:ref:refs/heads/main"] }, # merges build release images (build.yml)
     { for env, e in local.envs : env => ["${local.repo}:environment:${e.github}"] },
     ) :
     name => jsonencode({
@@ -252,7 +252,7 @@ resource "aws_iam_role_policy" "plan" {
   policy   = each.value
 }
 
-# Merges into main build and push the images a release later deploys (infra-v2.yml): ECR only.
+# Merges into main build and push the images a release later deploys (build.yml): ECR only.
 resource "aws_iam_role" "images" {
   name                 = "meetlab-v2-images"
   assume_role_policy   = local.trust_for["images"]

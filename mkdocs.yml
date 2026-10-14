@@ -16,7 +16,7 @@ theme:
 
 nav:
   - Start here: index.md
-  - "Capacity: decision matrix, CPU and LiveKit decisions": v2-infrastructure.md
+  - "Capacity: decision matrix, CPU and LiveKit decisions": infrastructure.md
   - Writing diagrams: writing-diagrams.md
   - Using MeetLab:
       - Study support: study-support.md
@@ -27,7 +27,7 @@ nav:
       - Load and quality testing: load-testing.md
       - "Load test report, October 2026": load-test-report-2026-10.md
       - "Fastest options per stage": latency-options.md
-      - Deploying v2 (first time): v2-deployment.md
+      - Deploying v2 (first time): deployment.md
       - "Moving v1's data to v2": v1-to-v2-migration.md
 
 exclude_docs: |

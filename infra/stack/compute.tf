@@ -7,8 +7,8 @@
 data "aws_caller_identity" "current" {}
 
 locals {
-  # Created by infra/v2/bootstrap. CI can only create roles that carry it.
-  # Each environment's ceiling (infra/v2/bootstrap); staging's predates the second environment.
+  # Created by infra/bootstrap. CI can only create roles that carry it.
+  # Each environment's ceiling (infra/bootstrap); staging's predates the second environment.
   boundary = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:policy/${var.env == "staging" ? "meetlab-v2-boundary" : "${local.name}-boundary"}"
 }
 
@@ -139,7 +139,7 @@ locals {
   db_secret  = aws_db_instance.this.master_user_secret[0].secret_arn
 }
 
-# Values are written by infra/v2/seed-secrets.sh; Terraform only names them.
+# Values are written by infra/seed-secrets.sh; Terraform only names them.
 resource "aws_iam_role_policy" "execution_secrets" {
   name = "${var.env}-secrets"
   role = aws_iam_role.execution.id

@@ -99,7 +99,7 @@ services:
       - DATABASE_URL=postgresql+asyncpg://meetlab:meetlab@postgres:5432/meetlab
       - BOT_RUNNER_SECRET=${BOT_RUNNER_SECRET:-}
       # Speech-to-text as production runs it: Parakeet on our CPU server (stt-cpu below,
-      # infra/v2/stack/stt_cpu.tf), so dev catches what prod would hit.
+      # infra/stack/stt_cpu.tf), so dev catches what prod would hit.
       - STT_MODEL_OVERRIDE=${STT_MODEL_OVERRIDE-parakeet-tdt-0.6b-v2}
       - NEMOTRON_STT_URL=${NEMOTRON_STT_URL:-http://stt-cpu:8000}
       # Bot JWT lifetime (min). Default 15.

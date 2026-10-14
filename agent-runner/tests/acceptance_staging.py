@@ -1,6 +1,6 @@
 """Live acceptance tests for v2 staging: what a bot session must do, end to end.
 
-Runs from a laptop and from CI (the `acceptance` job in .github/workflows/infra-v2.yml)
+Runs from a laptop and from CI (the `acceptance` job in .github/workflows/build.yml)
 the same way. Every scenario keeps a stand-in participant in the room, so the
 room-gone cleanup can never be what closes a session and hide a failure.
 
@@ -60,11 +60,11 @@ from livekit import api, rtc
 # One environment per run: MEETLAB_ENV=prod (default; staging was removed 2026-10-14) or staging. Production answers at
 # meet.wwbp.org since the cutover (2026-10-13); an unknown name fails at once.
 ENV = os.getenv("MEETLAB_ENV", "prod")
-NAME = f"meetlab-v2-{ENV}"  # every resource's prefix (infra/v2/stack main.tf)
+NAME = f"meetlab-v2-{ENV}"  # every resource's prefix (infra/stack main.tf)
 LOGS = f"/meetlab-v2/{ENV}"
 CLUSTER = os.getenv("ECS_CLUSTER", NAME)
 MEET = os.getenv("MEET_URL", {"staging": "https://meet-staging.wwbp.org", "prod": "https://meet.wwbp.org"}[ENV])
-# Bot machines kept warm between studies: bot_pool_min in infra/v2/stack/profiles.tf.
+# Bot machines kept warm between studies: bot_pool_min in infra/stack/profiles.tf.
 POOL_BASELINE = {"staging": 0, "prod": 1}[ENV]
 REGION = "us-east-1"
 ecs = boto3.client("ecs", region_name=REGION)
@@ -367,7 +367,7 @@ SPEECH = os.path.join(os.path.dirname(__file__), "fixtures", "benchmark_prompt.w
 
 
 def _service_on(name):
-    """A GPU service runs only while switched on (infra/v2/stack: stt_nim.tf, models.tf)."""
+    """A GPU service runs only while switched on (infra/stack: stt_nim.tf, models.tf)."""
     svc = ecs.describe_services(cluster=CLUSTER, services=[f"{NAME}-{name}"])["services"]
     return bool(svc) and svc[0]["status"] == "ACTIVE" and svc[0]["desiredCount"] > 0
 
@@ -434,7 +434,7 @@ async def _play_wav(room: rtc.Room, path: str, seconds: float):
 
 async def scenario_transcript():
     """Someone speaks; the bot stores their turn, transcribed by whichever speech server is on
-    (infra/v2/stack/runner.tf): the GPU NIM if on, else Parakeet on CPU (stt_cpu.tf), else
+    (infra/stack/runner.tf): the GPU NIM if on, else Parakeet on CPU (stt_cpu.tf), else
     Deepgram. Ours must be the one used, with no errors."""
     server = "stt-nim" if _service_on("stt-nim") else "stt-cpu" if _service_on("stt-cpu") else None
     if server:  # a cold NIM builds its model first (~20 min); the CPU server is up in ~1 min
@@ -654,7 +654,7 @@ async def scenario_session_limit():
         await person.disconnect()
 
 
-OUR_LLM = "Qwen/Qwen2.5-7B-Instruct"  # infra/v2/stack/models.tf
+OUR_LLM = "Qwen/Qwen2.5-7B-Instruct"  # infra/stack/models.tf
 
 
 async def scenario_our_models():

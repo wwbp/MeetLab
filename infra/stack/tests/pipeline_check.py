@@ -12,6 +12,7 @@ import sys
 infra = open(".github/workflows/build.yml").read()
 release = open(".github/workflows/release.yml").read()
 load = open(".github/workflows/loadtest.yml").read()
+stack = open("infra/stack/main.tf").read()
 jobs = set(re.findall(r"^  ([a-z][a-z0-9_-]*):\n", infra.split("\njobs:\n", 1)[1], re.M))
 
 rules = {
@@ -27,6 +28,10 @@ rules = {
     "a load test runs on production, only after the reviewer's approval (it uses the paid vendors)":
         "environment: production" in load
         and not any("staging" in l for l in load.splitlines() if not l.lstrip().startswith("#")),
+    # v2.1.3's apply (2026-10-14) failed retagging the Cloud Map namespace: Cloud Map can't scope
+    # TagResource to our namespace, so CI may not do it, and a label isn't worth that grant.
+    "production's ManagedBy tag keeps its deployed value (CI can't retag Cloud Map)":
+        'ManagedBy = "terraform/infra/v2/${var.env}"' in stack,
     "a release needs the build that passed": "--workflow build.yml" in release and "--status success" in release,
 }
 for rule, ok in rules.items():

@@ -53,6 +53,7 @@ export async function GET(_request: Request, context: { params: Promise<{ roomNa
           bot: {
             status: botStatus,
             assignedIdentity: session?.bot_identity,
+            startedAt: session?.started_at,
             trackCount: 0,
             subscriptionSignal: {
               status: 'unknown',
@@ -103,6 +104,7 @@ export async function GET(_request: Request, context: { params: Promise<{ roomNa
         bot: {
           status: botStatus,
           assignedIdentity: session?.bot_identity,
+          startedAt: session?.started_at,
           identity: botParticipant?.identity,
           state: botParticipant?.state,
           trackCount,

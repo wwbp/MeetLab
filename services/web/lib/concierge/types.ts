@@ -128,6 +128,8 @@ export type RoomHealthResponse = {
   bot: {
     status: ConciergeBotHealthStatus;
     assignedIdentity?: string;
+    /** When the room's session began (the runner's started_at): how long a bot has been joining. */
+    startedAt?: string;
     identity?: string;
     state?: string;
     trackCount: number;

@@ -1665,15 +1665,17 @@ async def conversation_speakers(conv_id: str, _=Depends(verify_api_key)):
     """Who took part, in the order they first spoke, with the Prolific ID a paid study is
     matched and paid on (docs/study-support.md). People only, not the bot."""
     async with AsyncSessionLocal() as db:
-        if not await db.get(Conversation, conv_id):
+        if not (conv := await db.get(Conversation, conv_id)):
             return JSONResponse({"error": "conversation not found"}, status_code=404)
         rows = (await db.execute(
             select(Speaker, func.min(Utterance.ts)).join(Utterance, Utterance.speaker_id == Speaker.id)
             .where(Utterance.conv_id == conv_id).group_by(Speaker.id).order_by(func.min(Utterance.ts))
         )).all()
-    return {"speakers": [{"speaker": sp.id, "display_name": sp.meta.get("display_name"),
-                          "prolific_id": sp.meta.get("prolific_id"), "prolific_id_invalid": sp.meta.get("prolific_id_invalid")}
-                         for sp, _ in rows if sp.meta.get("role") != "bot"]}
+    return {"room_name": conv.room_name, "started_at": conv.started_at.isoformat(),
+            "speakers": [{"speaker": sp.id, "display_name": sp.meta.get("display_name"),
+                          "prolific_id": sp.meta.get("prolific_id"), "prolific_id_invalid": sp.meta.get("prolific_id_invalid"),
+                          "first_spoke_at": datetime.fromtimestamp(ts, timezone.utc).isoformat() if ts is not None else None}
+                         for sp, ts in rows if sp.meta.get("role") != "bot"]}
 
 
 @app.get("/rooms/{room_name}/speakers")

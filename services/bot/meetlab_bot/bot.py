@@ -484,8 +484,8 @@ async def _bot(runner_args: LiveKitRunnerArguments):
     # sid → clean display name (LiveKit token name field, strips __randomPostfix)
     _sid_to_name: dict[str, str] = {}
     # SID of the participant who triggered the current user turn.
-    # Written by _SpeakerTracker (TranscriptionFrame.user_id, reliable for data-channel path)
-    # and on_active_speaker_changed (best-effort for mixed-audio STT path).
+    # Written by _SpeakerTracker from TranscriptionFrame.user_id. Never from LiveKit's
+    # loudest speaker: with people overlapping, that hands a turn to the wrong person.
     _current_speaker_sid: list[str | None] = [None]
     # Raw SID of the last participant who sent a data-channel message.
     # Set in on_data_received before queueing frames so on_user_turn_stopped
@@ -725,9 +725,8 @@ async def _bot(runner_args: LiveKitRunnerArguments):
         Data-channel path: TranscriptionFrame.user_id is the sender's SID (set
         explicitly in on_data_received) — perfectly accurate.
 
-        Audio (mixed-STT) path: STT services don't populate user_id on frames
-        they emit, so this tracker has no effect there. Attribution for the audio
-        path is handled by on_active_speaker_changed instead.
+        Audio path: each participant has their own STT, which tags its frames with
+        that participant's identity (multi_speaker_stt.py).
         """
 
         async def process_frame(self, frame, direction):
@@ -1077,23 +1076,6 @@ async def _bot(runner_args: LiveKitRunnerArguments):
         p = _find_participant(transport._client.room.remote_participants, participant_id)
         if p:
             await _register(p)
-
-    @transport.event_handler("on_active_speaker_changed")
-    async def on_active_speaker_changed(transport, participant_id: str):
-        """Update current speaker from LiveKit's active-speaker signal.
-
-        This is the best-effort attribution path for the mixed-audio STT case,
-        where TranscriptionFrame.user_id is not set by the STT service.
-        Only updates the cell when the SID is already known (i.e. the participant
-        has already been seen via on_participant_connected).
-        """
-        if participant_id and participant_id in _sid_to_identity:
-            _current_speaker_sid[0] = participant_id
-            logger.debug(
-                "ActiveSpeaker: {} (sid={})",
-                _sid_to_identity[participant_id],
-                participant_id,
-            )
 
     @transport.event_handler("on_participant_disconnected")
     async def on_participant_disconnected(transport, participant_id: str):

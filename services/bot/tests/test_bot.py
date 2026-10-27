@@ -489,3 +489,17 @@ class TestAvatar(unittest.IsolatedAsyncioTestCase):
             await bot._publish_avatar(room)
         w, h, _, pixels = frame.call_args.args
         self.assertEqual(len(pixels), w * h * 4)
+
+
+class TestTurnOwnerIsTheTranscriptsSpeaker(unittest.TestCase):
+    """Whose turn it is comes from the transcript's user_id, never LiveKit's loudest speaker.
+
+    Pipecat 1.12 never fired on_active_speaker_changed; 1.13+ does (as {"id": ...}), so our
+    old handler started running: it crashed on the dict, and unwrapped it would have handed
+    a turn to whoever was loudest at that moment, with three people overlapping.
+    """
+
+    def test_the_bot_does_not_follow_the_loudest_speaker(self):
+        import inspect
+        from meetlab_bot import bot
+        self.assertNotIn('"on_active_speaker_changed"', inspect.getsource(bot))

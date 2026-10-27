@@ -39,7 +39,10 @@ class RunnerStartApiTests(unittest.TestCase):
         cls.run_bot = cls._run.start()
         cls._stop = mock.patch.object(cls.runner_module, "stop_bot_container")
         cls._stop.start()
-        cls._client_ctx = TestClient(cls.runner_module.app)
+        cls._client_ctx = TestClient(
+            cls.runner_module.app,
+            headers={"Authorization": f"Bearer {cls.runner_module.BOT_RUNNER_SECRET}"},
+        )
         cls.client = cls._client_ctx.__enter__()
 
     @classmethod

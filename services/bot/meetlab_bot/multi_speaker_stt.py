@@ -363,7 +363,9 @@ class SpeakerLabelInjector(FrameProcessor):
     async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
         await super().process_frame(frame, direction)
         if direction == FrameDirection.DOWNSTREAM and isinstance(frame, TranscriptionFrame):
-            identity = self.sid_to_identity.get(frame.user_id)
+            # user_id is the identity (Pipecat 1.8+): label even before the connect callback
+            # registers them, or their words merge unlabeled into another person's turn.
+            identity = self.sid_to_identity.get(frame.user_id) or frame.user_id
             if identity and frame.text:
                 if self.sid_to_name is not None:
                     display = self.sid_to_name.get(frame.user_id) or identity.split("__")[0]

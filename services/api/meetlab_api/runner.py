@@ -1,4 +1,5 @@
 import asyncio
+import hmac
 import io
 import os
 import socket
@@ -11,7 +12,6 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Dict
 
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Request
-from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from livekit import api
 from loguru import logger
@@ -56,21 +56,44 @@ LIVEKIT_URL = require(config.livekit_url, "LIVEKIT_URL")
 
 
 def verify_api_key(request: Request):
-    if BOT_RUNNER_SECRET:
-        auth = request.headers.get("Authorization", "")
-        if auth != f"Bearer {BOT_RUNNER_SECRET}":
-            raise HTTPException(status_code=401, detail="Unauthorized")
+    # Fails closed: with no secret configured, nothing gets in.
+    auth = request.headers.get("Authorization", "")
+    if not BOT_RUNNER_SECRET or not hmac.compare_digest(auth.encode(), f"Bearer {BOT_RUNNER_SECRET}".encode()):
+        raise HTTPException(status_code=401, detail="Unauthorized")
 
 
 CONSOLE_PASSWORD = os.environ.get("CONSOLE_PASSWORD")
 
 
+# Failed SQLAdmin logins per client IP, as monotonic timestamps.
+# ponytail: per process (each uvicorn worker and ECS task counts on its own); move to
+# Postgres or Redis if the limit must hold across them.
+_login_failures: dict[str, list[float]] = {}
+_LOGIN_MAX_FAILURES = 5
+_LOGIN_WINDOW_S = 60.0
+
+
 class AdminAuth(AuthenticationBackend):
     async def login(self, request: StarletteRequest) -> bool:
+        # The direct peer: uvicorn trusts X-Forwarded-For only from 127.0.0.1, and
+        # ProxyHeadersMiddleware rewrites the scheme, not the client.
+        ip = request.client.host if request.client else "unknown"
+        now = time.monotonic()
+        recent = [t for t in _login_failures.get(ip, []) if now - t < _LOGIN_WINDOW_S]
+        _login_failures[ip] = recent
+        if len(recent) >= _LOGIN_MAX_FAILURES:
+            return False
         form = await request.form()
-        if CONSOLE_PASSWORD and form.get("password") == CONSOLE_PASSWORD:
+        password = form.get("password")
+        if (
+            CONSOLE_PASSWORD
+            and isinstance(password, str)
+            and hmac.compare_digest(password.encode(), CONSOLE_PASSWORD.encode())
+        ):
+            _login_failures.pop(ip, None)
             request.session["admin_authenticated"] = True
             return True
+        recent.append(now)
         return False
 
     async def logout(self, request: StarletteRequest) -> bool:
@@ -97,13 +120,7 @@ class ProxyHeadersMiddleware(BaseHTTPMiddleware):
 
 app = FastAPI(title="LiveKit Bot Runner")
 app.add_middleware(ProxyHeadersMiddleware)
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# No CORS: the runner is private; only meet's server calls it.
 # SessionMiddleware is required for SQLAdmin CSRF tokens on create/edit forms.
 app.add_middleware(SessionMiddleware, secret_key=LIVEKIT_API_SECRET)
 
@@ -1648,15 +1665,32 @@ async def conversation_speakers(conv_id: str, _=Depends(verify_api_key)):
     """Who took part, in the order they first spoke, with the Prolific ID a paid study is
     matched and paid on (docs/study-support.md). People only, not the bot."""
     async with AsyncSessionLocal() as db:
-        if not await db.get(Conversation, conv_id):
+        if not (conv := await db.get(Conversation, conv_id)):
             return JSONResponse({"error": "conversation not found"}, status_code=404)
         rows = (await db.execute(
             select(Speaker, func.min(Utterance.ts)).join(Utterance, Utterance.speaker_id == Speaker.id)
             .where(Utterance.conv_id == conv_id).group_by(Speaker.id).order_by(func.min(Utterance.ts))
         )).all()
+    return {"room_name": conv.room_name, "started_at": conv.started_at.isoformat(),
+            "speakers": [{"speaker": sp.id, "display_name": sp.meta.get("display_name"),
+                          "prolific_id": sp.meta.get("prolific_id"), "prolific_id_invalid": sp.meta.get("prolific_id_invalid"),
+                          "first_spoke_at": datetime.fromtimestamp(ts, timezone.utc).isoformat() if ts is not None else None}
+                         for sp, ts in rows if sp.meta.get("role") != "bot"]}
+
+
+@app.get("/rooms/{room_name}/speakers")
+async def room_speakers(room_name: str, _=Depends(verify_api_key)):
+    """Who spoke in any of a room's sessions: meet's evidence that a participant took part
+    before it shows them a completion code (docs/study-support.md). People only, not the bot."""
+    async with AsyncSessionLocal() as db:
+        rows = (await db.execute(
+            select(Speaker).join(Utterance, Utterance.speaker_id == Speaker.id)
+            .join(Conversation, Conversation.id == Utterance.conv_id)
+            .where(Conversation.room_name == room_name).group_by(Speaker.id).order_by(func.min(Utterance.ts))
+        )).scalars().all()
     return {"speakers": [{"speaker": sp.id, "display_name": sp.meta.get("display_name"),
-                          "prolific_id": sp.meta.get("prolific_id"), "prolific_id_invalid": sp.meta.get("prolific_id_invalid")}
-                         for sp, _ in rows if sp.meta.get("role") != "bot"]}
+                          "prolific_id": sp.meta.get("prolific_id")}
+                         for sp in rows if sp.meta.get("role") != "bot"]}
 
 
 @app.post("/conversations/{conv_id}/transcript")

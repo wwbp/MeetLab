@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { buttonClass } from '@/components/console/swiss';
+import { carryQuery } from '@/lib/join';
 
 export function StartClient({ token }: { token: string }) {
   const [loading, setLoading] = useState(false);
@@ -18,7 +19,8 @@ export function StartClient({ token }: { token: string }) {
       });
       const data = (await res.json().catch(() => ({}))) as { url?: string; error?: string };
       if (res.ok && data.url) {
-        window.location.assign(data.url);
+        // Keep ?PROLIFIC_PID=... from the study link.
+        window.location.assign(carryQuery(data.url, window.location.search));
         return; // keep the spinner while the browser navigates
       }
       setError(data.error || 'Failed to start the meeting — please try again');

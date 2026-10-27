@@ -36,3 +36,13 @@ export const EMPTY_CONFIG: Omit<BotConfig, 'scope'> = {
   session_limit_minutes: 0,
   closing_message: '',
 };
+
+// The scope typed in "Applies to": a room's name, or global when the box is empty.
+export const scopeOf = (typed: string): string => typed.trim() || 'global';
+
+// Saving the global settings changes every live study at once, so the console asks first.
+export function saveConfirmation(scope: string): string | null {
+  return scope === 'global'
+    ? 'This changes the bot for every room without its own settings, including studies running now. Save?'
+    : null;
+}

@@ -42,7 +42,10 @@ class EventsApiTests(unittest.TestCase):
             from meetlab_api import runner as runner_module
             cls.runner_module = runner_module
 
-        cls._client_ctx = TestClient(cls.runner_module.app)
+        cls._client_ctx = TestClient(
+            cls.runner_module.app,
+            headers={"Authorization": f"Bearer {cls.runner_module.BOT_RUNNER_SECRET}"},
+        )
         cls.client = cls._client_ctx.__enter__()
 
     @classmethod

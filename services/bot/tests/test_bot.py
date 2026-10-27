@@ -474,3 +474,18 @@ class TestSelfHostedModels(unittest.TestCase):
         env = {k: v for k, v in os.environ.items() if k != "KOKORO_TTS_URL"}
         with mock.patch.dict(os.environ, env, clear=True), self.assertRaises(ValueError):
             _build_tts(self._config(tts_provider="kokoro"), "sk-test", "el-test", None)
+
+
+class TestAvatar(unittest.IsolatedAsyncioTestCase):
+    async def test_the_avatar_is_published_as_one_rgba_frame(self):
+        """The bot's only use of Pillow (pinned for security fixes): decode the avatar to RGBA."""
+        from meetlab_bot import bot
+
+        with patch.object(bot.rtc, "VideoFrame") as frame, patch.object(bot.rtc, "VideoSource"), \
+                patch.object(bot.rtc, "LocalVideoTrack"), patch.object(bot.asyncio, "create_task") as task:
+            task.side_effect = lambda coro: coro.close() or MagicMock()
+            room = MagicMock()
+            room.local_participant.publish_track = mock.AsyncMock()
+            await bot._publish_avatar(room)
+        w, h, _, pixels = frame.call_args.args
+        self.assertEqual(len(pixels), w * h * 4)

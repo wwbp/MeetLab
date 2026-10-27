@@ -45,7 +45,7 @@ from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.services.tts_service import TextAggregationMode
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.openai.stt import OpenAIRealtimeSTTService, OpenAIRealtimeSTTSettings
-from pipecat.transports.livekit.transport import LiveKitParams
+from pipecat.transports.livekit.transport import LiveKitParams, LiveKitTransport  # one resampler per participant (F11, 1.13+)
 from sqlalchemy import select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
@@ -53,7 +53,6 @@ from meetlab_bot import audio_tracks
 from meetlab_core.config import load_config, require
 from meetlab_core.db.config_loader import load_bot_config
 from meetlab_core.heartbeat import beat_forever
-from meetlab_bot.livekit_input import LiveKitTransport  # one resampler per participant (F11)
 from meetlab_bot.presence import wait_until_empty
 from meetlab_core.sessions import end
 from meetlab_core.db.engine import AsyncSessionLocal

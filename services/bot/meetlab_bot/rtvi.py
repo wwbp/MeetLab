@@ -18,9 +18,12 @@ from pipecat.processors.frameworks.rtvi.processor import RTVIProcessor
 
 OBSERVER_PARAMS = RTVIObserverParams(
     bot_output_enabled=False, bot_llm_enabled=False, bot_tts_enabled=False, user_llm_enabled=False,
-    user_mute_enabled=False, user_transcription_enabled=False, metrics_enabled=False,
+    user_mute_enabled=False, user_input_enabled=False, metrics_enabled=False,
     bot_speaking_enabled=True, user_speaking_enabled=True,
 )
+# ponytail: the only switch for the user-transcription message, deprecated in 1.13 with no
+# replacement (the message goes in 2.0); set after construction: only __init__ warns.
+OBSERVER_PARAMS.user_transcription_enabled = False
 
 
 class RoomRTVIProcessor(RTVIProcessor):

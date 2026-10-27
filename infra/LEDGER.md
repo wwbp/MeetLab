@@ -6,6 +6,8 @@ transfer. Budget rule (2026-09-30): staging may cost up to v1 production's avera
 
 ## Where we stand (2026-10-27)
 
+> ⚠️ **Researchers: from #254, a participant gets a completion code only if the bot heard them speak.** Someone who joins and stays silent gets none and is told to contact you. Say so in the study description (`docs/study-support.md`, top).
+
 **Production** (meet.wwbp.org, LiveKit Cloud) runs v2.1.5 since 2026-10-14; quiet since. A review of security, participant and researcher experience (2026-10-27) found no exposed admin, database or recording API and no committed secrets, but holes on the public participant endpoints, fixed in #252–#254 and participant-flow bugs in #251 (merge order #252, #253, #254, #251; then a `v2.*` release). Open: Pillow's alerts (needs Pipecat 1.14), the items in Follow-ups dated 2026-10-27, and the pinned signed join links (1b).
 
 ## Where we stood (2026-10-05, before the cutover)

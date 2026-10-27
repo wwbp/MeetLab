@@ -6,11 +6,12 @@ import { SignJWT, jwtVerify } from 'jose';
  *
  * A start link embeds a signed JWT carrying the pool of bot-config scopes the admin
  * selected. Every click provisions a fresh room with one scope picked uniformly at
- * random. The token is signed with LIVEKIT_API_SECRET (same key as the console
- * session, see lib/console/auth.ts) and deliberately has NO expiry: all concierge
+ * random. The token is signed with LIVEKIT_API_SECRET (links already sent to
+ * participants depend on it; the console session has its own key,
+ * CONSOLE_SESSION_SECRET) and deliberately has NO expiry: all concierge
  * state in meet is in-memory, so links must survive restarts. The `purpose` claim
  * keeps these tokens from being accepted anywhere else signed with the same secret
- * (middleware requires sub === 'console' for console sessions).
+ * (LiveKit participant tokens).
  */
 const PURPOSE = 'meetlab-start-link';
 

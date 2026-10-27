@@ -15,19 +15,24 @@ vi.mock('@/lib/config/server', () => ({
 }));
 
 const LIVEKIT_SECRET = 'livekit-secret-livekit-secret-1234';
+const CONSOLE_SECRET = 'console-session-secret-console-1234';
 const DEFAULT_CONFIG = {
   botRunnerUrl: 'http://agent-runner:7860/',
   botRunnerSecret: 'test-secret',
   livekitApiSecret: LIVEKIT_SECRET,
+  consoleSessionSecret: CONSOLE_SECRET,
 };
 
 // F10: only a logged-in console session may record (lib/record-auth.ts).
 let consoleSession = '';
+let livekitSignedSession = '';
 let roomToken = '';
 beforeAll(async () => {
   const key = new TextEncoder().encode(LIVEKIT_SECRET);
   const exp = Math.floor(Date.now() / 1000) + 300;
-  consoleSession = await new SignJWT({ sub: 'console' }).setProtectedHeader({ alg: 'HS256' }).setExpirationTime(exp).sign(key);
+  consoleSession = await new SignJWT({ sub: 'console' }).setProtectedHeader({ alg: 'HS256' }).setExpirationTime(exp).sign(new TextEncoder().encode(CONSOLE_SECRET));
+  // Every bot task and LiveKit Cloud hold LIVEKIT_API_SECRET: a console session it signs is forged.
+  livekitSignedSession = await new SignJWT({ sub: 'console' }).setProtectedHeader({ alg: 'HS256' }).setExpirationTime(exp).sign(key);
   roomToken = await new SignJWT({ video: { room: 'my-room', roomJoin: true } }).setProtectedHeader({ alg: 'HS256' }).setExpirationTime(exp).sign(key);
 });
 
@@ -72,6 +77,10 @@ describe('GET /api/record/start', () => {
   it('returns 401 to anyone but a console session, a participant of the room included (F10)', async () => {
     expect((await startRecording(startReq('my-room', 'nobody'))).status).toBe(401);
     expect((await startRecording(startReq('my-room', 'participant'))).status).toBe(401);
+    const forged = new NextRequest('http://localhost/api/record/start?roomName=my-room', {
+      headers: { cookie: `console-session=${livekitSignedSession}` },
+    });
+    expect((await startRecording(forged)).status).toBe(401);
     expect(mockFetch).not.toHaveBeenCalled();
   });
 
@@ -82,7 +91,7 @@ describe('GET /api/record/start', () => {
   });
 
   it('returns 500 when botRunnerUrl is not configured', async () => {
-    mockGetServerConfig.mockReturnValue({ botRunnerUrl: undefined, botRunnerSecret: undefined, livekitApiSecret: LIVEKIT_SECRET });
+    mockGetServerConfig.mockReturnValue({ botRunnerUrl: undefined, botRunnerSecret: undefined, livekitApiSecret: LIVEKIT_SECRET, consoleSessionSecret: CONSOLE_SECRET });
     const res = await startRecording(startReq('my-room'));
     expect(res.status).toBe(500);
     expect(mockFetch).not.toHaveBeenCalled();
@@ -147,7 +156,7 @@ describe('GET /api/record/stop', () => {
   });
 
   it('returns 500 when botRunnerUrl is not configured', async () => {
-    mockGetServerConfig.mockReturnValue({ botRunnerUrl: undefined, botRunnerSecret: undefined, livekitApiSecret: LIVEKIT_SECRET });
+    mockGetServerConfig.mockReturnValue({ botRunnerUrl: undefined, botRunnerSecret: undefined, livekitApiSecret: LIVEKIT_SECRET, consoleSessionSecret: CONSOLE_SECRET });
     const res = await stopRecording(stopReq('my-room'));
     expect(res.status).toBe(500);
     expect(mockFetch).not.toHaveBeenCalled();

@@ -71,12 +71,34 @@ class TestConversationSpeakers(unittest.TestCase):
         r = _http.get(f"{BASE}/conversations/{conv_id}/speakers", headers=AUTH, timeout=10)
         self.assertEqual(r.status_code, 200, r.text)
         self.assertEqual(r.json()["speakers"], [
-            {"speaker": ana, "display_name": "Ana", "prolific_id": "5f2a91b3c4d5e6f708192a3b", "prolific_id_invalid": None},
-            {"speaker": ben, "display_name": "Ben", "prolific_id": None, "prolific_id_invalid": "oops"},
+            {"speaker": ana, "display_name": "Ana", "prolific_id": "5f2a91b3c4d5e6f708192a3b", "prolific_id_invalid": None,
+             "first_spoke_at": "1970-01-01T00:00:01+00:00"},
+            {"speaker": ben, "display_name": "Ben", "prolific_id": None, "prolific_id_invalid": "oops",
+             "first_spoke_at": "1970-01-01T00:00:02+00:00"},
         ])
+        # The console's people CSV names the room and when the meeting started.
+        self.assertEqual(r.json()["room_name"], f"ppl-{conv_id[:6]}")
+        self.assertTrue(r.json()["started_at"])
 
     def test_an_unknown_conversation_is_404(self):
         self.assertEqual(_http.get(f"{BASE}/conversations/{uuid.uuid4()}/speakers", headers=AUTH, timeout=10).status_code, 404)
+
+
+class TestRoomSpeakers(unittest.TestCase):
+    """GET /rooms/{room}/speakers: everyone who spoke in any of a room's sessions, the evidence
+    meet needs before it issues a completion code (docs/study-support.md)."""
+
+    def test_people_who_spoke_in_the_room(self):
+        conv_id = str(uuid.uuid4())
+        ana, ben = asyncio.run(_seed_people(conv_id))
+        r = _http.get(f"{BASE}/rooms/ppl-{conv_id[:6]}/speakers", headers=AUTH, timeout=10)
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertEqual([s["prolific_id"] for s in r.json()["speakers"]], ["5f2a91b3c4d5e6f708192a3b", None])
+
+    def test_a_room_nobody_spoke_in_has_none(self):
+        r = _http.get(f"{BASE}/rooms/nobody-{uuid.uuid4().hex[:6]}/speakers", headers=AUTH, timeout=10)
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertEqual(r.json()["speakers"], [])
 
 
 class TestConversationUtterances(unittest.TestCase):
@@ -99,7 +121,6 @@ class TestConversationUtterances(unittest.TestCase):
         r = _http.get(f"{BASE}/conversations/{uuid.uuid4()}/utterances", headers=AUTH, timeout=10)
         self.assertEqual(r.status_code, 404)
 
-    @unittest.skipUnless(os.environ.get("BOT_RUNNER_SECRET"), "the runner is open when no key is set (local default)")
     def test_it_needs_the_runner_key(self):
         r = _http.get(f"{BASE}/conversations/{uuid.uuid4()}/utterances", timeout=10)
         self.assertIn(r.status_code, (401, 403))

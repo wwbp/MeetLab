@@ -10,9 +10,8 @@ import { noteRouteError } from '@/lib/concierge/event-log';
 export const dynamic = 'force-dynamic';
 
 // Provisioning spins up a room + a GPU-backed bot — keep the public window tight.
-// Tunable per deployment: START_LINK_MAX_PER_MINUTE (default 5/min/IP). Note the IP
-// comes from X-Forwarded-For, trustworthy only behind a proxy that overwrites it
-// (EB/nginx in prod) — same trust model as /api/connection-details.
+// Tunable per deployment: START_LINK_MAX_PER_MINUTE (default 5/min/IP). The IP is the
+// last X-Forwarded-For entry, the one the ALB appended (lib/rate-limit.ts).
 const RATE_LIMIT_MAX = Number(process.env.START_LINK_MAX_PER_MINUTE) || 5;
 const RATE_LIMIT_WINDOW_MS = 60_000;
 

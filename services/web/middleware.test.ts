@@ -48,6 +48,8 @@ describe('console auth matcher', () => {
       '/api/meetings/abc-123/transcript',
       '/api/meetings/abc-123/files/def-456/download',
       '/api/meetings/abc-123/audio-tracks/download',
+      '/api/meetings/abc-123/speakers',
+      '/api/meetings/abc-123/people',
       '/api/meetings/reconcile',
       '/api/console/config',
       '/api/console/configs',
@@ -79,6 +81,8 @@ describe('console auth matcher', () => {
     for (const route of [
       '/api/health',
       '/api/connection-details',
+      // Gated by the runner instead: only a Prolific ID heard in the room gets a code.
+      '/api/completion-code',
       '/api/start-link',
       '/api/console/login',
       '/rooms/some-room',

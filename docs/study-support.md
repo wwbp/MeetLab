@@ -1,10 +1,18 @@
 # Running a paid study
 
+!!! warning "A participant must speak to get a completion code (since 2026-10-27)"
+    The completion code is shown only to a participant the bot has **heard speak** in
+    the room. Someone who joins but never says anything gets **no code**; their screen
+    tells them to contact the researcher. Tell participants up front, in the study
+    description: *"Talk with the assistant; your completion code appears when you leave."*
+    Why: before this, anyone could fetch a valid code without attending (§2).
+
 Two things a study needs that a demo does not: every session has to be
 attributable to a participant who can be paid, and every participant has to
-leave with proof they sat the session. Neither is a gate — nobody is blocked
-from the room and nobody is disconnected — because the pilot showed that a
-participant stuck on a form is a participant who emails you instead.
+leave with proof they sat the session. Nobody is blocked from the room and
+nobody is disconnected, because the pilot showed that a participant stuck on a
+form is a participant who emails you instead. The one gate is the code itself:
+it needs the participant to have spoken.
 
 ## 0. Prepare for study (before the first participant)
 
@@ -57,14 +65,17 @@ under `prolific_id_invalid` rather than dropped. An unmatched session is a
 participant who did the work and cannot be paid, so it is worth keeping what
 they typed.
 
-To pull the IDs for a finished study, ask the console for each session's people:
+To pull the IDs for a finished study, open the console's **Meetings** page and press
+**People** under a meeting: it lists everyone who spoke with their Prolific ID, and
+**Download CSV** saves them as a spreadsheet (room, meeting start, display name,
+prolific_id, first spoke at, prolific_id_invalid). The same data as JSON:
 `GET /api/meetings/<conversation id>/speakers` (logged in) lists everyone who spoke, in the
 order they first spoke, with `prolific_id` (or `prolific_id_invalid`). In SQL it is a join
 of `utterances` → `speakers` reading `meta->>'prolific_id'`.
 
 The whole flow is checked live after every deploy: a participant joins with a Prolific ID
-before the bot, their completion code must equal HMAC(room:ID) and their ID must be stored
-(`study_prolific`); and a room limited to one minute must hear its closing message
+before the bot, they get no completion code until the bot has heard them, then it must equal
+HMAC(room:ID), and their ID must be stored (`study_prolific`); and a room limited to one minute must hear its closing message
 (`session_limit`). `tests/system/acceptance.py`.
 
 ## 2. The closing message and the completion code
@@ -89,6 +100,13 @@ When the participant leaves, the room is replaced by a screen showing their
 **completion code** — eight characters, with a copy button. That is the string
 they paste into the survey.
 
+The screen asks for the code when it opens (`/api/completion-code`), and meet
+issues it only to a Prolific ID the bot heard speak in one of that room's
+sessions. Until 2026-10-27 it came with the join, so anyone could fetch a code
+for any Prolific ID without attending. A participant who never spoke sees
+"We could not confirm you took part" and a **Try again** button instead, and
+should contact the researcher.
+
 That screen only appears if they press **Leave**. Closing the tab or window
 mid-call would skip it, so while they are in the call the browser asks
 "Leave site?" first. The wording is the browser's own and cannot be changed;
@@ -102,11 +120,13 @@ characters people get wrong when retyping. So:
   (all of its state is in-memory);
 - a code is specific to one participant in one room, so it cannot be passed
   around or reused from an earlier session;
-- nobody can produce one without the secret;
+- nobody can produce one without the secret, and meet only shows it to someone
+  who spoke in the room;
 - you can recompute anyone's code from your Prolific export to check it.
 
-There is deliberately **no completion gate**. The session ends when the timer
-runs out; participants who left early or never spoke are filtered out of the
+There is deliberately **no completion gate** on leaving. The session ends when the timer
+runs out, and anyone may leave at any time; the only check is the one above, that the
+code goes to someone who spoke. Participants who left early are filtered out of the
 data afterwards, which is both easier and more honest than blocking the exit.
 
 ### Is the code unique?
@@ -114,9 +134,8 @@ data afterwards, which is both easier and more honest than blocking the exit.
 Per participant per room, yes: it is 8 characters from a 32-letter alphabet (about 1.1
 trillion codes), so two participants practically never share one. It is also *repeatable*:
 the same person in the same room always gets the same code, even after reconnecting, which
-is what lets you recompute and check it. One exception: someone who joins **without** a
-Prolific ID gets a code from their display name, so two people both called "Ana" in one room,
-neither with an ID, would share a code. Studies require the ID on the pre-join screen.
+is what lets you recompute and check it. There is no code without a Prolific ID: the pre-join
+screen requires one.
 
 ## 3. Typed chat (how it behaves today)
 

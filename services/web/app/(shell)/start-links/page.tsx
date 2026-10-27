@@ -76,7 +76,7 @@ export default function StartLinksPage() {
     <div className="mx-auto w-full max-w-6xl px-6 py-10">
       <PageHeader
         title="Start links"
-        lead="A link for participants. Each time it’s opened it starts a new meeting with a bot, using one of the settings you add, picked at random."
+        lead="A link for participants. Each time it’s opened it starts a new meeting with a bot, using one of the settings you add, picked at random. A participant gets a completion code only if the bot heard them speak."
       />
 
       {loading ? (

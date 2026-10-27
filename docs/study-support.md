@@ -57,7 +57,10 @@ under `prolific_id_invalid` rather than dropped. An unmatched session is a
 participant who did the work and cannot be paid, so it is worth keeping what
 they typed.
 
-To pull the IDs for a finished study, ask the console for each session's people:
+To pull the IDs for a finished study, open the console's **Meetings** page and press
+**People** under a meeting: it lists everyone who spoke with their Prolific ID, and
+**Download CSV** saves them as a spreadsheet (room, meeting start, display name,
+prolific_id, first spoke at, prolific_id_invalid). The same data as JSON:
 `GET /api/meetings/<conversation id>/speakers` (logged in) lists everyone who spoke, in the
 order they first spoke, with `prolific_id` (or `prolific_id_invalid`). In SQL it is a join
 of `utterances` → `speakers` reading `meta->>'prolific_id'`.

@@ -48,6 +48,8 @@ describe('console auth matcher', () => {
       '/api/meetings/abc-123/transcript',
       '/api/meetings/abc-123/files/def-456/download',
       '/api/meetings/abc-123/audio-tracks/download',
+      '/api/meetings/abc-123/speakers',
+      '/api/meetings/abc-123/people',
       '/api/meetings/reconcile',
       '/api/console/config',
       '/api/console/configs',

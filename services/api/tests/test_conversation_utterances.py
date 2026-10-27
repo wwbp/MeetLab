@@ -71,9 +71,14 @@ class TestConversationSpeakers(unittest.TestCase):
         r = _http.get(f"{BASE}/conversations/{conv_id}/speakers", headers=AUTH, timeout=10)
         self.assertEqual(r.status_code, 200, r.text)
         self.assertEqual(r.json()["speakers"], [
-            {"speaker": ana, "display_name": "Ana", "prolific_id": "5f2a91b3c4d5e6f708192a3b", "prolific_id_invalid": None},
-            {"speaker": ben, "display_name": "Ben", "prolific_id": None, "prolific_id_invalid": "oops"},
+            {"speaker": ana, "display_name": "Ana", "prolific_id": "5f2a91b3c4d5e6f708192a3b", "prolific_id_invalid": None,
+             "first_spoke_at": "1970-01-01T00:00:01+00:00"},
+            {"speaker": ben, "display_name": "Ben", "prolific_id": None, "prolific_id_invalid": "oops",
+             "first_spoke_at": "1970-01-01T00:00:02+00:00"},
         ])
+        # The console's people CSV names the room and when the meeting started.
+        self.assertEqual(r.json()["room_name"], f"ppl-{conv_id[:6]}")
+        self.assertTrue(r.json()["started_at"])
 
     def test_an_unknown_conversation_is_404(self):
         self.assertEqual(_http.get(f"{BASE}/conversations/{uuid.uuid4()}/speakers", headers=AUTH, timeout=10).status_code, 404)

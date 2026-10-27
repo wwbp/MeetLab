@@ -1,10 +1,10 @@
 'use client';
 
 import { createContext, useContext, useEffect, useState, type FormEvent } from 'react';
-import { EMPTY_CONFIG, type BotConfig } from '@/lib/bot-config';
+import { EMPTY_CONFIG, saveConfirmation, scopeOf, type BotConfig } from '@/lib/bot-config';
 import { CONFIG_INFO, SECTIONS } from '@/lib/config-info';
 import { LLM_MODELS, STT_MODELS, TTS_PROVIDERS, label } from '@/lib/model-choices';
-import { KeyStat, Label, PageHeader, SectionHeading, inputClass } from '@/components/console/swiss';
+import { KeyStat, Label, PageHeader, SectionHeading, inputClass, textActionClass } from '@/components/console/swiss';
 
 // Which setting (or category) the info panel explains: the one hovered or focused last.
 const Explain = createContext<(key: string) => void>(() => {});
@@ -73,6 +73,11 @@ export default function ConfigPage() {
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
+    // The scope as typed now, even if it was never loaded (blur no longer reloads it).
+    const target = scopeOf(scope);
+    const question = saveConfirmation(target);
+    if (question && !window.confirm(question)) return;
+    setScope(target);
     setSaving(true);
     setNotice('');
     setError('');
@@ -80,14 +85,14 @@ export default function ConfigPage() {
       const res = await fetch('/api/console/config', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ scope, ...form }),
+        body: JSON.stringify({ scope: target, ...form }),
       });
       const data = await res.json();
       if (!res.ok) {
         setError((data as { error?: string }).error ?? 'Save failed');
         return;
       }
-      setNotice(`Saved config for scope "${scope}"`);
+      setNotice(target === 'global' ? 'Saved the global settings' : `Saved the settings for ${target}`);
     } catch {
       setError('Network error saving config');
     } finally {
@@ -129,18 +134,26 @@ export default function ConfigPage() {
 
       <div className="min-w-0 space-y-6">
       <PageHeader title="Bot settings" lead="What every bot runs with. The global settings apply everywhere; a room can have its own.">
-        <div className="flex items-center gap-3 pt-4">
+        {/* Enter or Show loads the typed scope. Not on blur: clicking Save blurred the box,
+            reloaded the form and swallowed the click. */}
+        <form
+          className="flex items-center gap-3 pt-4"
+          onSubmit={(e) => {
+            e.preventDefault();
+            handleScopeChange(scopeOf(scope));
+          }}
+        >
           <Label>Applies to</Label>
           <input
             type="text"
             value={scope}
             onChange={(e) => setScope(e.target.value)}
-            onBlur={(e) => handleScopeChange(e.target.value.trim() || 'global')}
             className={inputClass.replace('w-full', 'w-56') + ' font-mono'}
             placeholder="global"
           />
+          <button type="submit" className={textActionClass}>Show</button>
           <span className="text-muted-foreground text-sm">global, or a room&apos;s name</span>
-        </div>
+        </form>
       </PageHeader>
 
       {loading ? (
@@ -378,7 +391,7 @@ export default function ConfigPage() {
               disabled={saving}
               className="bg-foreground text-background rounded-sm px-5 py-2.5 text-sm font-medium disabled:opacity-50"
             >
-              {saving ? 'Saving…' : scope === 'global' ? 'Save global settings' : `Save settings for ${scope}`}
+              {saving ? 'Saving…' : scopeOf(scope) === 'global' ? 'Save global settings' : `Save settings for ${scopeOf(scope)}`}
             </button>
             {error && <p className="text-destructive text-sm">{error}</p>}
             {notice && <p className="text-sm">{notice}</p>}

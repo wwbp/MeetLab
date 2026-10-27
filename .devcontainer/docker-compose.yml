@@ -106,7 +106,7 @@ services:
       - ../.env
     environment: &runner-env
       DATABASE_URL: "postgresql+asyncpg://meetlab:meetlab@postgres:5432/meetlab"
-      BOT_RUNNER_SECRET: "${BOT_RUNNER_SECRET:-}"
+      BOT_RUNNER_SECRET: "${BOT_RUNNER_SECRET:-changeme}"
       # Speech-to-text as production runs it: Parakeet on our CPU server (stt-cpu below,
       # infra/stack/stt_cpu.tf), so dev catches what prod would hit.
       STT_MODEL_OVERRIDE: "${STT_MODEL_OVERRIDE-parakeet-tdt-0.6b-v2}"
@@ -173,7 +173,7 @@ services:
       - ../services/web/.env.local
     environment:
       - BOT_RUNNER_URL=http://agent-runner:7860/
-      - BOT_RUNNER_SECRET=${BOT_RUNNER_SECRET:-}
+      - BOT_RUNNER_SECRET=${BOT_RUNNER_SECRET:-changeme}
     volumes:
       - ../services/web:/app:cached
       # Anonymous, so `make up` (--renew-anon-volumes) reseeds it from the image: a named

@@ -1,4 +1,5 @@
 import asyncio
+import hmac
 import io
 import os
 import socket
@@ -11,7 +12,6 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Dict
 
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Request
-from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from livekit import api
 from loguru import logger
@@ -56,10 +56,10 @@ LIVEKIT_URL = require(config.livekit_url, "LIVEKIT_URL")
 
 
 def verify_api_key(request: Request):
-    if BOT_RUNNER_SECRET:
-        auth = request.headers.get("Authorization", "")
-        if auth != f"Bearer {BOT_RUNNER_SECRET}":
-            raise HTTPException(status_code=401, detail="Unauthorized")
+    # Fails closed: with no secret configured, nothing gets in.
+    auth = request.headers.get("Authorization", "")
+    if not BOT_RUNNER_SECRET or not hmac.compare_digest(auth.encode(), f"Bearer {BOT_RUNNER_SECRET}".encode()):
+        raise HTTPException(status_code=401, detail="Unauthorized")
 
 
 CONSOLE_PASSWORD = os.environ.get("CONSOLE_PASSWORD")
@@ -97,13 +97,7 @@ class ProxyHeadersMiddleware(BaseHTTPMiddleware):
 
 app = FastAPI(title="LiveKit Bot Runner")
 app.add_middleware(ProxyHeadersMiddleware)
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# No CORS: the runner is private; only meet's server calls it.
 # SessionMiddleware is required for SQLAdmin CSRF tokens on create/edit forms.
 app.add_middleware(SessionMiddleware, secret_key=LIVEKIT_API_SECRET)
 

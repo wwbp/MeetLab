@@ -99,7 +99,6 @@ class TestConversationUtterances(unittest.TestCase):
         r = _http.get(f"{BASE}/conversations/{uuid.uuid4()}/utterances", headers=AUTH, timeout=10)
         self.assertEqual(r.status_code, 404)
 
-    @unittest.skipUnless(os.environ.get("BOT_RUNNER_SECRET"), "the runner is open when no key is set (local default)")
     def test_it_needs_the_runner_key(self):
         r = _http.get(f"{BASE}/conversations/{uuid.uuid4()}/utterances", timeout=10)
         self.assertIn(r.status_code, (401, 403))

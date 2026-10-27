@@ -16,6 +16,7 @@ import {
   LocalUserChoices,
   PreJoin,
   RoomContext,
+  useRemoteParticipants,
   VideoConference,
 } from '@livekit/components-react';
 import { SettingsMenu } from '@/lib/SettingsMenu';
@@ -40,6 +41,7 @@ import { armLeaveWarning } from '@/lib/leave-warning';
 import {
   JOIN_FAILED,
   PRE_JOIN_DEFAULTS,
+  botNotice,
   endsStudy,
   mediaErrorMessage,
   readConnectionDetails,
@@ -458,6 +460,7 @@ function VideoConferenceComponent(props: {
       )}
       <RoomContext.Provider value={room}>
         <KeyboardShortcuts />
+        <BotNotice />
         <ConferenceErrorBoundary onRecover={handleRecover}>
           <VideoConference
             chatMessageFormatter={formatChatMessageLinks}
@@ -523,5 +526,31 @@ function CompletionScreen(props: { code: string; onDone: () => void }) {
         </div>
       </div>
     </main>
+  );
+}
+
+/** "Your conversation partner is joining/reconnecting" while no bot is in the room. */
+function BotNotice() {
+  const identities = useRemoteParticipants().map((p) => p.identity);
+  const [botSeen, setBotSeen] = React.useState(false);
+  const notice = botNotice(identities, botSeen);
+  if (notice === null && !botSeen) setBotSeen(true);
+  return (
+    <p
+      aria-live="polite"
+      style={{
+        position: 'absolute',
+        top: 72,
+        left: '50%',
+        transform: 'translateX(-50%)',
+        zIndex: 10,
+        margin: 0,
+        maxWidth: 'calc(100% - 2rem)',
+        background: 'var(--lk-bg)',
+        padding: notice ? '0.5rem 1rem' : 0,
+      }}
+    >
+      {notice}
+    </p>
   );
 }

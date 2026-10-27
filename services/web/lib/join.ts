@@ -44,3 +44,14 @@ export function mediaErrorMessage(error: Error): string {
   }
   return 'Something went wrong with your call. Please reload this page and try again.';
 }
+
+/**
+ * The notice shown in the call while no bot (`bot_*` identity) is present: it is
+ * starting (up to ~3 minutes cold) or, if one was here before, being replaced.
+ */
+export function botNotice(identities: string[], botSeenBefore: boolean): string | null {
+  if (identities.some((id) => id.startsWith('bot_'))) return null;
+  return botSeenBefore
+    ? 'Your conversation partner is reconnecting…'
+    : 'Your conversation partner is joining. This can take up to 3 minutes. Please stay on this page.';
+}

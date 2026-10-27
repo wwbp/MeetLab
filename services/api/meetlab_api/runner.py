@@ -1,4 +1,5 @@
 import asyncio
+import hmac
 import io
 import os
 import socket
@@ -65,12 +66,35 @@ def verify_api_key(request: Request):
 CONSOLE_PASSWORD = os.environ.get("CONSOLE_PASSWORD")
 
 
+# Failed SQLAdmin logins per client IP, as monotonic timestamps.
+# ponytail: per process (each uvicorn worker and ECS task counts on its own); move to
+# Postgres or Redis if the limit must hold across them.
+_login_failures: dict[str, list[float]] = {}
+_LOGIN_MAX_FAILURES = 5
+_LOGIN_WINDOW_S = 60.0
+
+
 class AdminAuth(AuthenticationBackend):
     async def login(self, request: StarletteRequest) -> bool:
+        # The direct peer: uvicorn trusts X-Forwarded-For only from 127.0.0.1, and
+        # ProxyHeadersMiddleware rewrites the scheme, not the client.
+        ip = request.client.host if request.client else "unknown"
+        now = time.monotonic()
+        recent = [t for t in _login_failures.get(ip, []) if now - t < _LOGIN_WINDOW_S]
+        _login_failures[ip] = recent
+        if len(recent) >= _LOGIN_MAX_FAILURES:
+            return False
         form = await request.form()
-        if CONSOLE_PASSWORD and form.get("password") == CONSOLE_PASSWORD:
+        password = form.get("password")
+        if (
+            CONSOLE_PASSWORD
+            and isinstance(password, str)
+            and hmac.compare_digest(password.encode(), CONSOLE_PASSWORD.encode())
+        ):
+            _login_failures.pop(ip, None)
             request.session["admin_authenticated"] = True
             return True
+        recent.append(now)
         return False
 
     async def logout(self, request: StarletteRequest) -> bool:

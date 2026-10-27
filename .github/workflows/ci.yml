@@ -35,6 +35,11 @@ jobs:
       - name: Run tests
         run: make test
 
+      # Three people talking over each other, each stored as themselves (F11). Three runs:
+      # a registration race once merged turns 2 in 3 (Pipecat 1.14), so one run proves little.
+      - name: Overlapping speakers keep their own words
+        run: for i in 1 2 3; do make sim-attribution SPEAKERS=abc; done
+
       - name: Show compose logs on failure
         if: failure()
         run: docker compose -f .devcontainer/docker-compose.yml logs --tail=300

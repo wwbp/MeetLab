@@ -36,7 +36,7 @@ resource "aws_ecs_task_definition" "meet_app" {
       { name = "MEET_BASE_URL", value = "https://meet${var.hostname_suffix}.wwbp.org" },
       { name = "BOT_RUNNER_URL", value = "http://agent-runner:7860/" },
     ])
-    secrets = concat(local.livekit_secrets, [for n in ["BOT_RUNNER_SECRET", "CONSOLE_PASSWORD"] :
+    secrets = concat(local.livekit_secrets, [for n in ["BOT_RUNNER_SECRET", "CONSOLE_PASSWORD", "CONSOLE_SESSION_SECRET"] :
     { name = n, valueFrom = "${local.parameters}/${n}" }])
     logConfiguration = {
       logDriver = "awslogs"

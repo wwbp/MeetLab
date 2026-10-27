@@ -1,7 +1,9 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
-import { config } from './middleware';
+import { NextRequest } from 'next/server';
+import { SignJWT } from 'jose';
+import { config, middleware } from './middleware';
 
 /**
  * The console's auth is a path allow-list, which means a new console page or a new
@@ -96,5 +98,40 @@ describe('console auth matcher', () => {
     // also burns the scarce concurrent-egress quota. It needs room-scoped auth.
     expect(isProtected('/api/record/start')).toBe(false);
     expect(isProtected('/api/record/stop')).toBe(false);
+  });
+});
+
+describe('console session signature', () => {
+  // The console session has its own key. LIVEKIT_API_SECRET is held by every bot task and
+  // by LiveKit Cloud, so a session it signs must not open the console.
+  const CONSOLE = 'console-session-secret-console-session';
+  const LIVEKIT = 'livekit-secret-livekit-secret-livekit';
+  const sign = (secret: string) =>
+    new SignJWT({ sub: 'console' })
+      .setProtectedHeader({ alg: 'HS256' })
+      .setExpirationTime('1h')
+      .sign(new TextEncoder().encode(secret));
+  const status = async (cookie: string) =>
+    (await middleware(new NextRequest('http://localhost/api/meetings', { headers: { cookie: `console-session=${cookie}` } }))).status;
+
+  afterEach(() => vi.unstubAllEnvs());
+
+  it('accepts a session signed with CONSOLE_SESSION_SECRET', async () => {
+    vi.stubEnv('CONSOLE_SESSION_SECRET', CONSOLE);
+    vi.stubEnv('LIVEKIT_API_SECRET', LIVEKIT);
+    expect(await status(await sign(CONSOLE))).toBe(200);
+  });
+
+  it('rejects a session signed with LIVEKIT_API_SECRET', async () => {
+    vi.stubEnv('CONSOLE_SESSION_SECRET', CONSOLE);
+    vi.stubEnv('LIVEKIT_API_SECRET', LIVEKIT);
+    expect(await status(await sign(LIVEKIT))).toBe(401);
+  });
+
+  it('rejects every session when CONSOLE_SESSION_SECRET is unset (fails closed)', async () => {
+    vi.stubEnv('CONSOLE_SESSION_SECRET', '');
+    vi.stubEnv('LIVEKIT_API_SECRET', LIVEKIT);
+    expect(await status(await sign(LIVEKIT))).toBe(401);
+    expect(await status(await sign(CONSOLE))).toBe(401);
   });
 });

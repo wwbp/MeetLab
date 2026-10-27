@@ -49,13 +49,13 @@ export async function middleware(request: NextRequest) {
   }
 
   const token = request.cookies.get(COOKIE_NAME)?.value;
-  if (token) {
+  // The console session has its own key (not LIVEKIT_API_SECRET, which every bot task and
+  // LiveKit Cloud hold). Unset, every request is rejected: fail closed.
+  const consoleSecret = process.env.CONSOLE_SESSION_SECRET;
+  if (token && consoleSecret) {
     try {
-      const secret = new TextEncoder().encode(process.env.LIVEKIT_API_SECRET ?? '');
-      const { payload } = await jwtVerify(token, secret);
-      // Only a real console session may pass. Other JWTs signed with the same secret
-      // exist (LiveKit participant tokens, public start-link tokens) — without this
-      // claim check any of them could be pasted in as a console-session cookie.
+      const { payload } = await jwtVerify(token, new TextEncoder().encode(consoleSecret));
+      // Defence in depth: only a real console session may pass, whatever else the key signs.
       if (payload.sub === 'console') {
         return NextResponse.next();
       }

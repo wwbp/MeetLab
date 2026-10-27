@@ -1,10 +1,18 @@
 # Running a paid study
 
+!!! warning "A participant must speak to get a completion code (since 2026-10-27)"
+    The completion code is shown only to a participant the bot has **heard speak** in
+    the room. Someone who joins but never says anything gets **no code**; their screen
+    tells them to contact the researcher. Tell participants up front, in the study
+    description: *"Talk with the assistant; your completion code appears when you leave."*
+    Why: before this, anyone could fetch a valid code without attending (§2).
+
 Two things a study needs that a demo does not: every session has to be
 attributable to a participant who can be paid, and every participant has to
-leave with proof they sat the session. Neither is a gate — nobody is blocked
-from the room and nobody is disconnected — because the pilot showed that a
-participant stuck on a form is a participant who emails you instead.
+leave with proof they sat the session. Nobody is blocked from the room and
+nobody is disconnected, because the pilot showed that a participant stuck on a
+form is a participant who emails you instead. The one gate is the code itself:
+it needs the participant to have spoken.
 
 ## 0. Prepare for study (before the first participant)
 

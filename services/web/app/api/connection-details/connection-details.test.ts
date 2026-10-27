@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { NextRequest } from 'next/server';
+import { decodeJwt } from 'jose';
 
 const mockFetch = vi.hoisted(() => vi.fn());
 const mockGetServerConfig = vi.hoisted(() => vi.fn());
@@ -120,5 +121,42 @@ describe('GET /api/connection-details — session limit', () => {
     });
     expect((await GET(bad)).status).toBe(400);
     expect(mockFetch).not.toHaveBeenCalled();
+  });
+});
+
+describe('GET /api/connection-details — who the participant can be', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockGetServerConfig.mockReturnValue(DEFAULT_CONFIG);
+    mockFetch.mockResolvedValue(runnerConfig({ session_limit_minutes: 0 }));
+  });
+
+  const join = (participantName: string, cookie?: string) => {
+    ipCounter += 1;
+    return GET(
+      new NextRequest(
+        `http://localhost/api/connection-details?roomName=room-1&participantName=${encodeURIComponent(participantName)}&metadata=5f2a91b3c4d5e6f708192a3b`,
+        { headers: { 'x-forwarded-for': `10.0.2.${ipCounter}`, ...(cookie ? { cookie } : {}) } },
+      ),
+    );
+  };
+
+  it('does not hand out the completion code at join (anyone could fetch it without attending)', async () => {
+    const body = await (await join('abby')).json();
+    expect(body.participantToken).toBeTruthy();
+    expect(body).not.toHaveProperty('completionCode');
+  });
+
+  it("refuses a name that would make the participant look like the bot (identity.startsWith('bot_'))", async () => {
+    for (const name of ['bot_x', 'BOT_x', 'Bot_ana']) {
+      expect((await join(name)).status, name).toBe(400);
+    }
+    expect((await join('robot_ana')).status).toBe(200);
+  });
+
+  it('picks the identity suffix itself, so a cookie cannot reuse (and kick) someone else', async () => {
+    const body = await (await join('abby', 'random-participant-postfix=VICTIM')).json();
+    expect(decodeJwt(body.participantToken).sub).not.toBe('abby__VICTIM');
+    expect(decodeJwt(body.participantToken).sub).toMatch(/^abby__/);
   });
 });

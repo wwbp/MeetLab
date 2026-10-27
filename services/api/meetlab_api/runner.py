@@ -1676,6 +1676,21 @@ async def conversation_speakers(conv_id: str, _=Depends(verify_api_key)):
                          for sp, _ in rows if sp.meta.get("role") != "bot"]}
 
 
+@app.get("/rooms/{room_name}/speakers")
+async def room_speakers(room_name: str, _=Depends(verify_api_key)):
+    """Who spoke in any of a room's sessions: meet's evidence that a participant took part
+    before it shows them a completion code (docs/study-support.md). People only, not the bot."""
+    async with AsyncSessionLocal() as db:
+        rows = (await db.execute(
+            select(Speaker).join(Utterance, Utterance.speaker_id == Speaker.id)
+            .join(Conversation, Conversation.id == Utterance.conv_id)
+            .where(Conversation.room_name == room_name).group_by(Speaker.id).order_by(func.min(Utterance.ts))
+        )).scalars().all()
+    return {"speakers": [{"speaker": sp.id, "display_name": sp.meta.get("display_name"),
+                          "prolific_id": sp.meta.get("prolific_id")}
+                         for sp in rows if sp.meta.get("role") != "bot"]}
+
+
 @app.post("/conversations/{conv_id}/transcript")
 async def queue_transcript(
     conv_id: str,

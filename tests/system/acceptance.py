@@ -600,21 +600,33 @@ def _join_as_participant(room: str, name: str, prolific: str = ""):
     return json.loads(_web.open(f"{MEET}/api/connection-details?{q}", timeout=30).read())
 
 
+def _completion_code(room: str, prolific: str):
+    """What the completion screen fetches: the code, or None when meet will not issue one (404)."""
+    q = urllib.parse.urlencode({"roomName": room, "prolificId": prolific})
+    try:
+        return json.loads(_web.open(f"{MEET}/api/completion-code?{q}", timeout=30).read())["completionCode"]
+    except urllib.error.HTTPError as e:
+        if e.code != 404:
+            raise
+        return None
+
+
 def _meeting_get(session: str, what: str) -> list:
     return json.loads(_web.open(f"{MEET}/api/meetings/{session}/{what}", timeout=30).read())[what]
 
 
 async def scenario_study_prolific():
     """D2: a participant joins with their Prolific ID before the bot, as studies run. Their
-    completion code is HMAC(room:ID) (docs/study-support.md) and their speaker record keeps the
-    ID a paid study is matched on (lost for early joiners until #163)."""
+    completion code is HMAC(room:ID) (docs/study-support.md), issued only once the bot has heard
+    them, and their speaker record keeps the ID a paid study is matched on (lost for early
+    joiners until #163)."""
     room, pid = f"accept-{uuid.uuid4().hex[:6]}", uuid.uuid4().hex[:24]
     _post("/api/console/login", {"password": os.environ["CONSOLE_PASSWORD"]})
     _post("/api/concierge/rooms", {"name": room})
     details = _join_as_participant(room, "Ana", pid)
     expected = completion_code(room, pid, os.environ["LIVEKIT_API_SECRET"])
-    if details["completionCode"] != expected:
-        raise Fail(f"completion code {details['completionCode']} is not HMAC(room:ID) {expected}")
+    if "completionCode" in details or _completion_code(room, pid) is not None:
+        raise Fail("a completion code was issued before the participant took part")
     person = rtc.Room()
     await person.connect(os.environ["LIVEKIT_URL"], details["participantToken"])
     try:
@@ -627,7 +639,9 @@ async def scenario_study_prolific():
         ana = next(s for s in _meeting_get(session, "speakers") if s["display_name"] == "Ana")
         if ana["prolific_id"] != pid:
             raise Fail(f"stored Prolific ID {ana['prolific_id']!r}, expected {pid}")
-        return f"completion code {expected} = HMAC(room:ID); Prolific ID stored for a participant who joined before the bot"
+        if (got := _completion_code(room, pid)) != expected:
+            raise Fail(f"completion code {got} is not HMAC(room:ID) {expected}")
+        return f"completion code {expected} = HMAC(room:ID), only after speaking; Prolific ID stored for a participant who joined before the bot"
     finally:
         await person.disconnect()
 

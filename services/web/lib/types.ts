@@ -14,6 +14,4 @@ export type ConnectionDetails = {
   participantToken: string;
   /** Advisory session cap for this room, in seconds. 0 = unlimited. */
   sessionLimitSeconds: number;
-  /** What the participant copies into the study survey when they leave. */
-  completionCode: string;
 };

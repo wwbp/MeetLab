@@ -79,6 +79,8 @@ describe('console auth matcher', () => {
     for (const route of [
       '/api/health',
       '/api/connection-details',
+      // Gated by the runner instead: only a Prolific ID heard in the room gets a code.
+      '/api/completion-code',
       '/api/start-link',
       '/api/console/login',
       '/rooms/some-room',

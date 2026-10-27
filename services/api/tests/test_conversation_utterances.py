@@ -79,6 +79,23 @@ class TestConversationSpeakers(unittest.TestCase):
         self.assertEqual(_http.get(f"{BASE}/conversations/{uuid.uuid4()}/speakers", headers=AUTH, timeout=10).status_code, 404)
 
 
+class TestRoomSpeakers(unittest.TestCase):
+    """GET /rooms/{room}/speakers: everyone who spoke in any of a room's sessions, the evidence
+    meet needs before it issues a completion code (docs/study-support.md)."""
+
+    def test_people_who_spoke_in_the_room(self):
+        conv_id = str(uuid.uuid4())
+        ana, ben = asyncio.run(_seed_people(conv_id))
+        r = _http.get(f"{BASE}/rooms/ppl-{conv_id[:6]}/speakers", headers=AUTH, timeout=10)
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertEqual([s["prolific_id"] for s in r.json()["speakers"]], ["5f2a91b3c4d5e6f708192a3b", None])
+
+    def test_a_room_nobody_spoke_in_has_none(self):
+        r = _http.get(f"{BASE}/rooms/nobody-{uuid.uuid4().hex[:6]}/speakers", headers=AUTH, timeout=10)
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertEqual(r.json()["speakers"], [])
+
+
 class TestConversationUtterances(unittest.TestCase):
     def test_turns_in_order_with_times_and_who_spoke(self):
         conv_id = str(uuid.uuid4())

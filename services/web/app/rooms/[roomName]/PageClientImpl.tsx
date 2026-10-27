@@ -26,6 +26,7 @@ import {
   VideoPresets,
   Room,
   DeviceUnsupportedError,
+  DisconnectReason,
   RoomConnectOptions,
   RoomEvent,
   TrackPublishDefaults,
@@ -36,6 +37,13 @@ import { useSetupE2EE } from '@/lib/useSetupE2EE';
 import { useLowCPUOptimizer } from '@/lib/usePerfomanceOptimiser';
 import { normalizeProlificId, prolificIdFromParams } from '@/lib/study';
 import { armLeaveWarning } from '@/lib/leave-warning';
+import {
+  JOIN_FAILED,
+  PRE_JOIN_DEFAULTS,
+  endsStudy,
+  mediaErrorMessage,
+  readConnectionDetails,
+} from '@/lib/join';
 
 const CONN_DETAILS_ENDPOINT =
   process.env.NEXT_PUBLIC_CONN_DETAILS_ENDPOINT ?? '/api/connection-details';
@@ -101,13 +109,7 @@ export function PageClientImpl(props: {
   const [preJoinChoices, setPreJoinChoices] = React.useState<LocalUserChoices | undefined>(
     undefined,
   );
-  const preJoinDefaults = React.useMemo(() => {
-    return {
-      username: '',
-      videoEnabled: true,
-      audioEnabled: true,
-    };
-  }, []);
+  const [joinError, setJoinError] = React.useState('');
   const [connectionDetails, setConnectionDetails] = React.useState<ConnectionDetails | undefined>(
     undefined,
   );
@@ -148,9 +150,12 @@ export function PageClientImpl(props: {
       if (props.region) {
         url.searchParams.append('region', props.region);
       }
-      const connectionDetailsResp = await fetch(url.toString());
-      const connectionDetailsData = await connectionDetailsResp.json();
-      setConnectionDetails(connectionDetailsData);
+      setJoinError('');
+      try {
+        setConnectionDetails(await readConnectionDetails(await fetch(url.toString())));
+      } catch {
+        setJoinError(JOIN_FAILED);
+      }
     },
     [props.roomName, props.region, validProlificId],
   );
@@ -190,11 +195,16 @@ export function PageClientImpl(props: {
               </span>
             </div>
             <PreJoin
-              defaults={preJoinDefaults}
+              defaults={PRE_JOIN_DEFAULTS}
               onSubmit={handlePreJoinSubmit}
               onValidate={(values) => values.username.trim().length > 0 && !!validProlificId}
               onError={handlePreJoinError}
             />
+            {joinError && (
+              <p role="alert" style={{ margin: 0, fontSize: '0.875rem', color: SIGNAL }}>
+                {joinError}
+              </p>
+            )}
           </div>
         </div>
       ) : (
@@ -341,17 +351,28 @@ function VideoConferenceComponent(props: {
 
   const router = useRouter();
   const [hasLeft, setHasLeft] = React.useState(false);
-  const handleOnLeave = React.useCallback(() => {
+  // A dropped connection (not Leave) offers Rejoin instead of ending the study.
+  const [dropped, setDropped] = React.useState(false);
+  const handleOnLeave = React.useCallback((reason?: DisconnectReason) => {
     // Defer one tick so LiveKit can finish internal layout teardown. Used to push
     // straight to the landing page; a study participant needs their completion
     // code first, and this is the only moment they are guaranteed to see it.
-    window.setTimeout(() => setHasLeft(true), 0);
+    window.setTimeout(() => (endsStudy(reason) ? setHasLeft(true) : setDropped(true)), 0);
   }, []);
+  // The layout-teardown error only happens while leaving.
+  const handleRecover = React.useCallback(
+    () => handleOnLeave(DisconnectReason.CLIENT_INITIATED),
+    [handleOnLeave],
+  );
   // Closing the tab mid-call skips the completion screen; Leave disarms this.
-  React.useEffect(() => (hasLeft ? undefined : armLeaveWarning(window)), [hasLeft]);
+  React.useEffect(
+    () => (hasLeft || dropped ? undefined : armLeaveWarning(window)),
+    [hasLeft, dropped],
+  );
+  const [errorMessage, setErrorMessage] = React.useState('');
   const handleError = React.useCallback((error: Error) => {
     console.error(error);
-    alert(`Encountered an unexpected error, check the console logs for details: ${error.message}`);
+    setErrorMessage(mediaErrorMessage(error));
   }, []);
   const handleEncryptionError = React.useCallback((error: Error) => {
     console.error(error);
@@ -366,6 +387,24 @@ function VideoConferenceComponent(props: {
     }
   }, [lowPowerMode]);
 
+  if (dropped && !hasLeft) {
+    return (
+      <main
+        data-lk-theme="default"
+        className={inter.className}
+        style={{ display: 'grid', placeItems: 'center', height: '100%', padding: '1rem' }}
+      >
+        <div style={{ display: 'grid', gap: '1.25rem', justifyItems: 'start', maxWidth: '32rem' }}>
+          <h1 style={{ margin: 0, fontSize: '2.5rem', fontWeight: 700, letterSpacing: '-0.02em' }}>You were disconnected</h1>
+          <p style={{ margin: 0, color: 'var(--lk-fg2)' }}>Your connection dropped. Rejoin to carry on with the conversation.</p>
+          <button className="lk-button" onClick={() => window.location.reload()}>
+            Rejoin
+          </button>
+        </div>
+      </main>
+    );
+  }
+
   if (hasLeft) {
     return (
       <CompletionScreen
@@ -377,6 +416,25 @@ function VideoConferenceComponent(props: {
 
   return (
     <div className="lk-room-container">
+      {errorMessage && (
+        <p
+          role="alert"
+          style={{
+            position: 'absolute',
+            top: 40,
+            left: '50%',
+            transform: 'translateX(-50%)',
+            zIndex: 10,
+            margin: 0,
+            maxWidth: 'calc(100% - 2rem)',
+            background: 'var(--lk-bg)',
+            color: SIGNAL,
+            padding: '0.5rem 1rem',
+          }}
+        >
+          {errorMessage}
+        </p>
+      )}
       {props.forceRelay && (
         <div
           style={{
@@ -400,7 +458,7 @@ function VideoConferenceComponent(props: {
       )}
       <RoomContext.Provider value={room}>
         <KeyboardShortcuts />
-        <ConferenceErrorBoundary onRecover={handleOnLeave}>
+        <ConferenceErrorBoundary onRecover={handleRecover}>
           <VideoConference
             chatMessageFormatter={formatChatMessageLinks}
             chatMessageEncoder={chatEncoder}

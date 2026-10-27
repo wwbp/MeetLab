@@ -8,10 +8,6 @@ import { AccessToken, AccessTokenOptions, VideoGrant } from 'livekit-server-sdk'
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerConfig, requireEnv } from '@/lib/config/server';
 import { noteRouteError } from '@/lib/concierge/event-log';
-import { completionCode } from '@/lib/completion-code';
-import { normalizeProlificId } from '@/lib/study';
-
-const COOKIE_KEY = 'random-participant-postfix';
 
 // The bot runner is not on the critical path for joining — if the config lookup
 // is slow or fails, the participant joins with no session limit rather than not
@@ -94,11 +90,13 @@ export async function GET(request: NextRequest) {
     if (participantName === null) {
       return new NextResponse('Missing required query parameter: participantName', { status: 400 });
     }
-
-    let randomParticipantPostfix = request.cookies.get(COOKIE_KEY)?.value;
-    if (!randomParticipantPostfix) {
-      randomParticipantPostfix = randomString(4);
+    // The room treats identity.startsWith('bot_') as the bot.
+    if (participantName.toLowerCase().startsWith('bot_')) {
+      return new NextResponse('participantName may not start with bot_', { status: 400 });
     }
+
+    // Always ours: a client-chosen suffix could reuse someone's identity and kick them out.
+    const randomParticipantPostfix = randomString(4);
 
     const [participantToken, sessionLimitSeconds] = await Promise.all([
       createParticipantToken(
@@ -120,20 +118,9 @@ export async function GET(request: NextRequest) {
       participantToken,
       participantName,
       sessionLimitSeconds,
-      // Keyed on the Prolific ID where there is one, so a researcher can recompute
-      // a participant's code from their Prolific export. Falls back to the display
-      // name so a room outside a study still gets a working code.
-      completionCode: completionCode(
-        roomName,
-        normalizeProlificId(metadata) ?? metadata ?? participantName,
-        apiSecret,
-      ),
     };
     return new NextResponse(JSON.stringify(data), {
-      headers: {
-        'Content-Type': 'application/json',
-        'Set-Cookie': `${COOKIE_KEY}=${randomParticipantPostfix}; Path=/; HttpOnly; SameSite=Strict; Secure; Expires=${getCookieExpirationTime()}`,
-      },
+      headers: { 'Content-Type': 'application/json' },
     });
   } catch (error) {
     noteRouteError('GET /api/connection-details', error);
@@ -187,10 +174,4 @@ function createParticipantToken(
   };
   at.addGrant(grant);
   return at.toJwt();
-}
-
-function getCookieExpirationTime(): string {
-  const now = new Date();
-  now.setTime(now.getTime() + 60 * 120 * 1000);
-  return now.toUTCString();
 }

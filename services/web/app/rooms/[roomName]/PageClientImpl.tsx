@@ -369,7 +369,8 @@ function VideoConferenceComponent(props: {
   if (hasLeft) {
     return (
       <CompletionScreen
-        code={props.connectionDetails.completionCode}
+        roomName={props.connectionDetails.roomName}
+        prolificId={room.localParticipant.metadata ?? ''}
         onDone={() => router.push('/')}
       />
     );
@@ -419,17 +420,32 @@ function VideoConferenceComponent(props: {
  * What a participant sees after leaving. The code is the only thing on it,
  * because the only thing they have to do is paste it into the survey — the bot
  * says as much on its way out (bot_config.closing_message).
+ *
+ * Fetched now rather than handed out at join: the server only issues it to a
+ * Prolific ID the bot heard in this room (/api/completion-code).
  */
-function CompletionScreen(props: { code: string; onDone: () => void }) {
+function CompletionScreen(props: { roomName: string; prolificId: string; onDone: () => void }) {
+  const [code, setCode] = React.useState<string | null>(null);
+  const [failed, setFailed] = React.useState(false);
+  const fetchCode = React.useCallback(() => {
+    const q = new URLSearchParams({ roomName: props.roomName, prolificId: props.prolificId });
+    fetch(`/api/completion-code?${q}`)
+      .then((res) => (res.ok ? res.json() : Promise.reject(res.status)))
+      .then((body) => setCode(body.completionCode))
+      .catch(() => setFailed(true));
+  }, [props.roomName, props.prolificId]);
+  React.useEffect(fetchCode, [fetchCode]);
+
   const [copied, setCopied] = React.useState(false);
   const copy = React.useCallback(() => {
     // Clipboard access is denied in some embedded contexts; the code is on screen
     // either way, so a failure just means they type it.
-    navigator.clipboard?.writeText(props.code).then(
+    if (!code) return;
+    navigator.clipboard?.writeText(code).then(
       () => setCopied(true),
       () => setCopied(false),
     );
-  }, [props.code]);
+  }, [code]);
 
   return (
     <main
@@ -453,12 +469,29 @@ function CompletionScreen(props: { code: string; onDone: () => void }) {
             userSelect: 'all',
           }}
         >
-          {props.code}
+          {code ?? '…'}
         </code>
+        {failed && (
+          <p style={{ margin: 0, color: SIGNAL }}>
+            We could not confirm you took part yet. Try again in a moment, or contact the researcher.
+          </p>
+        )}
         <div style={{ display: 'flex', gap: '0.5rem' }}>
-          <button className="lk-button" onClick={copy}>
-            {copied ? 'Copied' : 'Copy code'}
-          </button>
+          {failed ? (
+            <button
+              className="lk-button"
+              onClick={() => {
+                setFailed(false);
+                fetchCode();
+              }}
+            >
+              Try again
+            </button>
+          ) : (
+            <button className="lk-button" onClick={copy} disabled={!code}>
+              {copied ? 'Copied' : 'Copy code'}
+            </button>
+          )}
           <button className="lk-button" onClick={props.onDone}>
             Done
           </button>

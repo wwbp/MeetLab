@@ -568,14 +568,14 @@ class TestSpeakerLabelInjector(unittest.IsolatedAsyncioTestCase):
         transcripts = [f for f in self.sink.received if isinstance(f, TranscriptionFrame)]
         self.assertTrue(all(f.user_id == "alice_sid" for f in transcripts))
 
-    async def test_unknown_sid_text_unchanged(self):
-        await self.injector.process_frame(_make_transcription("unknown_sid", "mystery"), FrameDirection.DOWNSTREAM)
+    async def test_a_speaker_not_yet_registered_is_labeled_by_their_identity(self):
+        """Since Pipecat 1.8 user_id is the identity. Three people starting 0.15 s apart
+        (make sim-attribution SPEAKERS=abc, Pipecat 1.14): Bob's first words arrived before
+        his connect callback, went in unlabeled and were folded into Carol's turn."""
+        await self.injector.process_frame(_make_transcription("bob__x1y2", "we are seeing latency"), FrameDirection.DOWNSTREAM)
 
         transcripts = [f for f in self.sink.received if isinstance(f, TranscriptionFrame)]
-        self.assertTrue(
-            any(f.text == "mystery" for f in transcripts),
-            "Unknown SID should not have label prepended",
-        )
+        self.assertEqual([f.text for f in transcripts], ["bob: we are seeing latency"])
 
     async def test_empty_text_not_labeled(self):
         await self.injector.process_frame(_make_transcription("alice_sid", ""), FrameDirection.DOWNSTREAM)
@@ -590,10 +590,10 @@ class TestSpeakerLabelInjector(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(len(vad_frames) >= 1, "UserStartedSpeakingFrame should pass through")
 
     async def test_live_dict_update_reflected(self):
-        # Unknown SID — no label
+        # Not registered yet: labeled by the identity itself
         await self.injector.process_frame(_make_transcription("charlie_sid", "new person"), FrameDirection.DOWNSTREAM)
         before = [f for f in self.sink.received if isinstance(f, TranscriptionFrame)]
-        self.assertTrue(any(f.text == "new person" for f in before), "Before: text should be unlabeled")
+        self.assertTrue(any(f.text == "charlie_sid: new person" for f in before), [f.text for f in before])
 
         self.sink.received.clear()
         self.sid_map["charlie_sid"] = "charlie_789"  # live update — same dict reference

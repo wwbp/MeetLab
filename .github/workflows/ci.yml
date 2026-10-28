@@ -38,7 +38,16 @@ jobs:
       # Three people talking over each other, each stored as themselves (F11). Three runs:
       # a registration race once merged turns 2 in 3 (Pipecat 1.14), so one run proves little.
       - name: Overlapping speakers keep their own words
-        run: for i in 1 2 3; do make sim-attribution SPEAKERS=abc; done
+        run: |
+          # Bot containers remove themselves on exit: follow each one's log while it runs.
+          mkdir -p bot-logs
+          docker events --filter event=start --filter label=meetlab.session --format '{{.Actor.Attributes.name}}' |
+            while read -r n; do docker logs -f "$n" > "bot-logs/$n.log" 2>&1 & done &
+          for i in 1 2 3; do make sim-attribution SPEAKERS=abc; done
+
+      - name: Show bot logs on failure
+        if: failure()
+        run: tail -n 80 bot-logs/*.log || true
 
       - name: Show compose logs on failure
         if: failure()

@@ -7,7 +7,7 @@ from meetlab_core.db.models import Match, StartLink, Ticket, TICKET_STATES, LIVE
 class GroupLinkModelsTest(unittest.TestCase):
     def test_start_links_columns(self):
         self.assertEqual(set(StartLink.__table__.c.keys()), {
-            "link_id", "name", "pool", "size", "min_size", "delay_s", "max_wait_s",
+            "link_id", "name", "pool", "size", "min_size", "delay_s", "max_wait_s", "ready_check_s",
             "password_hash", "active", "legacy", "created_at", "stopped_at"})
 
     def test_matches_columns(self):

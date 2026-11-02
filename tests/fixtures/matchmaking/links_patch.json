@@ -1,0 +1,17 @@
+{
+  "endpoint": "PATCH /links/{id}",
+  "request": {
+    "method": "PATCH",
+    "path": "/links/Qm9vdHN0cmFwTGlua0lEMQ",
+    "body": {
+      "active": false
+    }
+  },
+  "response": {
+    "status": 200,
+    "body": {
+      "link_id": "Qm9vdHN0cmFwTGlua0lEMQ",
+      "active": false
+    }
+  }
+}

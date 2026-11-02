@@ -1,0 +1,15 @@
+{
+  "endpoint": "GET /links/{id}/public",
+  "request": {
+    "method": "GET",
+    "path": "/links/Qm9vdHN0cmFwTGlua0lEMQ/public"
+  },
+  "response": {
+    "status": 200,
+    "body": {
+      "active": true,
+      "needs_password": true,
+      "size": 3
+    }
+  }
+}

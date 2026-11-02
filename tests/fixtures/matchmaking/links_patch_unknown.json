@@ -1,0 +1,16 @@
+{
+  "endpoint": "PATCH /links/{id}",
+  "request": {
+    "method": "PATCH",
+    "path": "/links/AAAAAAAAAAAAAAAAAAAAAA",
+    "body": {
+      "active": false
+    }
+  },
+  "response": {
+    "status": 404,
+    "body": {
+      "error": "not_found"
+    }
+  }
+}

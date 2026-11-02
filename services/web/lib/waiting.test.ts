@@ -110,7 +110,7 @@ describe('attention', () => {
       tone: false,
       focus: 'copy',
     });
-    expect(attention('ready_check', 'starting').title).toBe('Join meeting | MeetLab');
+    expect(attention('ready_check', 'starting')?.title).toBe('Join meeting | MeetLab');
   });
 
   it('nothing when the state did not change', () => {

@@ -8,7 +8,8 @@ export const dynamic = 'force-dynamic';
 export async function PATCH(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const active = (await request.json().catch(() => null))?.active;
-  if (typeof active !== 'boolean') return NextResponse.json({ error: 'active must be true or false' }, { status: 400 });
+  if (typeof active !== 'boolean')
+    return NextResponse.json({ error: 'active must be true or false' }, { status: 400 });
   const { status, body } = await setLinkActive(id, active);
   return NextResponse.json(body, { status });
 }

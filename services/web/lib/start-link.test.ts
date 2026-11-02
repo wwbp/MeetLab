@@ -131,19 +131,35 @@ describe('linkSettings', () => {
 
   it('fills the defaults: size 1, min size = size, no delay, 5 min max wait, no password', () => {
     expect(linkSettings(base)).toEqual({
-      link: { name: 'Pilot 3', pool: ['friendly'], size: 1, min_size: 1, delay_s: 0, max_wait_s: 300 },
+      link: {
+        name: 'Pilot 3',
+        pool: ['friendly'],
+        size: 1,
+        min_size: 1,
+        delay_s: 0,
+        max_wait_s: 300,
+      },
     });
     expect(linkSettings({ ...base, size: 3 })).toMatchObject({ link: { size: 3, min_size: 3 } });
   });
 
   it('keeps every value given, and the password when there is one', () => {
-    const link = { ...base, size: 3, min_size: 2, delay_s: 10, max_wait_s: 600, password: 'blue-river' };
+    const link = {
+      ...base,
+      size: 3,
+      min_size: 2,
+      delay_s: 10,
+      max_wait_s: 600,
+      password: 'blue-river',
+    };
     expect(linkSettings(link)).toEqual({ link });
     expect(linkSettings({ ...base, password: '' })).toEqual(linkSettings(base));
   });
 
   it('trims the name, and names an unnamed request (older callers send only the pool)', () => {
-    expect(linkSettings({ ...base, name: '  Pilot 3 ' })).toMatchObject({ link: { name: 'Pilot 3' } });
+    expect(linkSettings({ ...base, name: '  Pilot 3 ' })).toMatchObject({
+      link: { name: 'Pilot 3' },
+    });
     expect(linkSettings({ pool: ['friendly'] })).toMatchObject({ link: { name: 'Untitled link' } });
   });
 

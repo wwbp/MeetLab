@@ -1,14 +1,21 @@
 // Stop / start a stored link (one toggle): the console forwards { active } to the runner.
 import { describe, expect, it, vi } from 'vitest';
+import * as client from '@/lib/matchmaking-client';
+import { PATCH } from './route';
 
+// Hoisted above the imports by vitest.
 vi.mock('@/lib/matchmaking-client', () => ({ setLinkActive: vi.fn() }));
-const client = await import('@/lib/matchmaking-client');
-const { PATCH } = await import('./route');
 
 const patch = (id: string, body: unknown) =>
-  PATCH(new Request(`http://meet.test/api/console/start-link/${id}`, { method: 'PATCH', body: JSON.stringify(body) }), {
-    params: Promise.resolve({ id }),
-  });
+  PATCH(
+    new Request(`http://meet.test/api/console/start-link/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(body),
+    }),
+    {
+      params: Promise.resolve({ id }),
+    },
+  );
 
 describe('PATCH /api/console/start-link/[id]', () => {
   it('stops and starts a link', async () => {
@@ -23,7 +30,10 @@ describe('PATCH /api/console/start-link/[id]', () => {
   });
 
   it("passes the runner's 404 on", async () => {
-    vi.mocked(client.setLinkActive).mockResolvedValue({ status: 404, body: { error: 'not_found' } });
+    vi.mocked(client.setLinkActive).mockResolvedValue({
+      status: 404,
+      body: { error: 'not_found' },
+    });
     const res = await patch('AAAAAAAAAAAAAAAAAAAAAA', { active: true });
     expect(res.status).toBe(404);
   });

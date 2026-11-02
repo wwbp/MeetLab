@@ -8,6 +8,7 @@ from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace as Row
 
 from meetlab_core.rejoin import MAX_REJOINS, WINDOW, chain, context_messages, rejoin_due  # noqa: E402
+from meetlab_core.turns import BotReply, Turn, assistant_message, user_message
 
 NOW = datetime(2026, 10, 5, 12, 0, tzinfo=timezone.utc)
 
@@ -53,13 +54,17 @@ class TestChain(unittest.TestCase):
 
 class TestContext(unittest.TestCase):
     def test_turns_come_back_as_the_llm_saw_them(self):
-        turns = [Row(speaker_id="ana__x1", text="Hi, I'm Ana."), Row(speaker_id="bot_r1_1", text="Hello Ana!"),
-                 Row(speaker_id="ben__x2", text="And I'm Ben."), Row(speaker_id="bot_r1_2", text="Hi Ben.")]
+        # The same structured messages the live bot writes (bot.py: _write_turns_as_user_message,
+        # _reply_in_context): people as turns, the bot as its answer.
+        turns = [Row(speaker_id="ana__x1", text="Hi, I'm Ana.", meta={"source": "speech"}),
+                 Row(speaker_id="bot_r1_1", text="Hello Ana!", meta={"addressed_to": ["ana__x1"]}),
+                 Row(speaker_id="ben__x2", text="And I'm Ben.", meta={"source": "chat"}),
+                 Row(speaker_id="bot_r1_2", text="Hi Ben.", meta={})]
         self.assertEqual(context_messages(turns, names={"ana__x1": "Ana"}), [
-            {"role": "user", "content": "Ana: Hi, I'm Ana."},
-            {"role": "assistant", "content": "Hello Ana!"},
-            {"role": "user", "content": "ben: And I'm Ben."},  # no stored name: the identity, as live
-            {"role": "assistant", "content": "Hi Ben."},
+            user_message([Turn("ana__x1", "Ana", "Hi, I'm Ana.")]),
+            assistant_message(BotReply("Hello Ana!", ["ana__x1"])),
+            user_message([Turn("ben__x2", "ben", "And I'm Ben.", "chat")]),  # no stored name: the identity, as live
+            assistant_message(BotReply("Hi Ben.", [])),  # a spoken line (the greeting): to everyone
         ])
 
 

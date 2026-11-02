@@ -59,23 +59,24 @@ def _turn(obj) -> Turn:
 
 
 def parse_turns(content: str) -> list[Turn]:
-    """The turns in a committed user message: JSON objects as SpeakerLabelInjector wrote them,
-    joined by Pipecat's aggregator (several people when they talked over each other). One
-    person's consecutive fragments become one turn; empty words are dropped."""
+    """The turns in a committed user message: JSON turn objects as SpeakerLabelInjector wrote
+    them, or user_message's lists, as Pipecat's aggregator joins them with spaces (several people
+    when they talked over each other). One person's consecutive fragments become one turn; empty
+    words are dropped."""
     decoder, i, out = json.JSONDecoder(), 0, []
     content = content.strip()
     while i < len(content):
         obj, i = decoder.raw_decode(content, i)
-        t = _turn(obj)
         while i < len(content) and content[i].isspace():
             i += 1
-        text = t.text.strip()
-        if not text:
-            continue
-        if out and (out[-1].speaker_id, out[-1].source) == (t.speaker_id, t.source):
-            out[-1] = Turn(t.speaker_id, t.name, f"{out[-1].text} {text}", t.source)
-        else:
-            out.append(Turn(t.speaker_id, t.name, text, t.source))
+        for t in map(_turn, obj if isinstance(obj, list) else [obj]):
+            text = t.text.strip()
+            if not text:
+                continue
+            if out and (out[-1].speaker_id, out[-1].source) == (t.speaker_id, t.source):
+                out[-1] = Turn(t.speaker_id, t.name, f"{out[-1].text} {text}", t.source)
+            else:
+                out.append(Turn(t.speaker_id, t.name, text, t.source))
     return out
 
 

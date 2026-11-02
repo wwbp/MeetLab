@@ -21,9 +21,17 @@ from meetlab_bot.bot import (
     _text_similarity,
     _OpenAIRealtimeSTT,
 )
+from meetlab_core.turns import (
+    FORMAT_INSTRUCTIONS, RESPONSE_FORMAT, BotReply, Turn, assistant_message, parse_reply, parse_turns,
+    turn_json, user_message,
+)
 from pipecat.processors.audio.vad_processor import VADProcessor
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.openai.stt import OpenAIRealtimeSTTService
+
+
+ANA = Turn("ana__1a2b", "Ana", "What should we do first?")
+BEN = Turn("ben__3c4d", "Ben", "I'd start with the budget.")
 
 
 @dataclass
@@ -311,13 +319,6 @@ class TestSelfEchoHeuristic(unittest.TestCase):
         self.assertEqual(_text_similarity("", "anything at all"), 0.0)
         self.assertEqual(_text_similarity("anything at all", ""), 0.0)
 
-    def test_speaker_prefix_is_stripped_before_compare(self):
-        # SpeakerLabelInjector prepends "Alice: "; the bot text has no prefix.
-        # The name must not dilute the overlap, so this should read as a strong echo.
-        bot = "the boiling point of water is one hundred degrees"
-        user = "Alice: the boiling point of water is one hundred degrees"
-        self.assertGreaterEqual(_text_similarity(user, bot), 0.65)
-
     def test_partial_overlap_between_zero_and_one(self):
         sim = _text_similarity("the quick brown fox", "the quick red hound")
         self.assertGreater(sim, 0.0)
@@ -325,12 +326,6 @@ class TestSelfEchoHeuristic(unittest.TestCase):
 
     def test_normalize_drops_punctuation_and_case(self):
         self.assertEqual(_normalize_words("Hello, World!"), ["hello", "world"])
-
-    def test_normalize_strips_short_name_prefix_only(self):
-        # A colon early in the string is treated as a speaker prefix...
-        self.assertEqual(_normalize_words("Bob: hi"), ["hi"])
-        # ...but a colon deep in the text (no prefix) is not stripped.
-        self.assertIn("ratio", _normalize_words("the result was a strange ratio: forty two to one"))
 
 
 if __name__ == "__main__":
@@ -347,44 +342,69 @@ class TestBuildLLM(unittest.TestCase):
         from meetlab_bot.bot import _build_llm
 
         llm = _build_llm("sk-test", SimpleNamespace(llm_model="gpt-4o-mini", system_prompt="Facilitate."))
-        self.assertEqual((llm._settings.model, llm._settings.system_instruction), ("gpt-4o-mini", "Facilitate."))
+        self.assertEqual(llm._settings.model, "gpt-4o-mini")
+        # The researchers' prompt first, then how the conversation reaches the model.
+        self.assertEqual(llm._settings.system_instruction, f"Facilitate.\n\n{FORMAT_INSTRUCTIONS}")
+
+    def test_every_answer_is_held_to_the_reply_schema(self):
+        from types import SimpleNamespace
+
+        from meetlab_bot.bot import _build_llm
+
+        llm = _build_llm("sk-test", SimpleNamespace(llm_model="gpt-4o-mini", system_prompt="Facilitate."))
+        # What Pipecat sends on each streamed completion (base_llm.build_chat_completion_params).
+        self.assertIs(llm.build_chat_completion_params({"messages": []})["response_format"], RESPONSE_FORMAT)
 
 
-class TestSplitTurn(unittest.TestCase):
-    """A stored turn is one person's words, without the speaker label the LLM sees
-    (SpeakerLabelInjector). Pipecat's one user aggregator joins everyone's transcripts that land
-    within one end-of-turn window, so a turn can hold several people: each is stored as their own
-    utterance, under their own name. Before, the whole turn went to the last speaker with only
-    their label removed: sim_attribution stored b's and c's sentences as one turn of c's (F11,
-    2026-11-02)."""
+class TestStructuredTurns(unittest.TestCase):
+    """Who said what reaches the model, and comes back from it, as data (meetlab_core.turns):
+    no "Name: " label to parse back out. People talking over each other share one committed turn
+    (Pipecat's one user aggregator, F11); each is stored as their own utterance."""
 
-    def split(self, content, labels, default="x"):
-        from meetlab_bot.bot import split_turn
-        return split_turn(content, labels, default)
+    def test_a_committed_turn_is_written_to_the_context_as_one_list_of_turns(self):
+        from pipecat.processors.aggregators.llm_context import LLMContext
+        from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair
+        from pipecat.utils.string import TextPartForConcatenation
 
-    def test_overlapping_speakers_are_stored_apart(self):
-        # The stored text of sim-attr-6318d5 (one turn under sim_c_21a5), as the aggregator gave it.
-        content = ("sim_b_3bdc: Are we seeing higher latency on the transcription service since Tuesday? "
-                   "sim_c_21a5: Can you explain what a retrieval augmented generation system does?")
-        labels = {"sim_b_3bdc": "sim_b_3bdc", "sim_c_21a5": "sim_c_21a5"}
-        self.assertEqual(self.split(content, labels, "sim_c_21a5"), [
-            ("sim_b_3bdc", "Are we seeing higher latency on the transcription service since Tuesday?"),
-            ("sim_c_21a5", "Can you explain what a retrieval augmented generation system does?")])
+        from meetlab_bot.bot import _write_turns_as_user_message
 
-    def test_the_label_is_removed(self):
-        self.assertEqual(self.split("load_000: Why does that matter?", {"load_000": "load_000"}),
-                         [("load_000", "Why does that matter?")])
+        user = LLMContextAggregatorPair(LLMContext()).user()
+        _write_turns_as_user_message(user)
+        # As SpeakerLabelInjector writes each transcript, and the aggregator collects them.
+        for t in (BEN, ANA, Turn("ben__3c4d", "Ben", "And staffing.")):
+            user._aggregation.append(TextPartForConcatenation(turn_json(t), includes_inter_part_spaces=False))
+        content = user.aggregation_string()
+        self.assertEqual(content, user_message([BEN, ANA, Turn("ben__3c4d", "Ben", "And staffing.")])["content"])
+        self.assertEqual(len(parse_turns(content)), 3)  # on_user_turn_stopped stores one utterance each
 
-    def test_one_persons_fragments_stay_one_utterance(self):
-        self.assertEqual(self.split("Alice: Candidate A is strong. Alice: But B is popular.", {"Alice": "alice_x"}),
-                         [("alice_x", "Candidate A is strong. But B is popular.")])
+    def test_a_turn_is_stored_under_the_participant_it_names(self):
+        from meetlab_bot.bot import _speaker_of
 
-    def test_text_without_a_label_goes_to_the_default_speaker(self):
-        self.assertEqual(self.split("What should we prioritise?", {"Alice": "alice_x"}, "bob_y"),
-                         [("bob_y", "What should we prioritise?")])
+        sids = {"PA_1": "ana__1a2b", "PA_2": "ben__3c4d"}
+        self.assertEqual(_speaker_of("ben__3c4d", sids, "ana__1a2b"), "ben__3c4d")
+        # A sid the injector didn't know yet: its participant once known, else the resolved speaker.
+        self.assertEqual(_speaker_of("PA_2", sids, "ana__1a2b"), "ben__3c4d")
+        self.assertEqual(_speaker_of("PA_9", sids, "ana__1a2b"), "ana__1a2b")
 
-    def test_a_name_is_matched_literally(self):
-        self.assertEqual(self.split("Dr. A+B: Hello.", {"Dr. A+B": "dr"}), [("dr", "Hello.")])
+    def test_the_bots_turn_in_the_context_is_its_answer_with_what_was_said(self):
+        from pipecat.processors.aggregators.llm_context import LLMContext
+
+        from meetlab_bot.bot import _reply_in_context
+
+        # Pipecat's assistant aggregator writes the spoken text (the reply only, via ReplyStreamer).
+        context = LLMContext(messages=[user_message([BEN]), {"role": "assistant", "content": "Start with the budget."}])
+        _reply_in_context(context, "Start with the budget.", ["ben__3c4d"])
+        self.assertEqual(context.messages[-1], assistant_message(BotReply("Start with the budget.", ["ben__3c4d"])))
+        self.assertEqual(parse_reply(context.messages[-1]["content"]).reply, "Start with the budget.")
+
+    def test_another_assistant_message_is_left_alone(self):
+        from pipecat.processors.aggregators.llm_context import LLMContext
+
+        from meetlab_bot.bot import _reply_in_context
+
+        context = LLMContext(messages=[{"role": "assistant", "content": "Something else."}])
+        _reply_in_context(context, "Start with the budget.", [])
+        self.assertEqual(context.messages, [{"role": "assistant", "content": "Something else."}])
 
 
 class TestSmartTurnChain(unittest.TestCase):

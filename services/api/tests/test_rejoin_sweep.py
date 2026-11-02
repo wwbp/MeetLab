@@ -106,11 +106,12 @@ class LoadResumeTest(unittest.TestCase):
             async with AsyncSessionLocal() as db:
                 fresh = await load_resume(db, await db.get(Conversation, first))
                 resumed = await load_resume(db, await db.get(Conversation, second))
-            return fresh, resumed
-        fresh, resumed = self._run(scenario())
+            return fresh, resumed, ana
+        fresh, resumed, ana = self._run(scenario())
         self.assertIsNone(fresh)  # a session that resumes nothing starts fresh, with its greeting
-        self.assertEqual(resumed["messages"], [{"role": "assistant", "content": "Hello!"},
-                                               {"role": "user", "content": "Ana: Hi, I'm Ana."}])
+        from meetlab_core.turns import BotReply, Turn, assistant_message, user_message
+        self.assertEqual(resumed["messages"], [assistant_message(BotReply("Hello!", [])),
+                                               user_message([Turn(ana, "Ana", "Hi, I'm Ana.")])])
         self.assertAlmostEqual(resumed["elapsed_s"], 240, delta=5)
 
 

@@ -30,6 +30,7 @@ from pipecat.processors.frame_processor import FrameDirection, FrameProcessor, F
 from loguru import logger
 
 from meetlab_bot.multi_speaker_stt import MultiSpeakerSTT, SpeakerLabelInjector, _FrameCollector
+from meetlab_core.turns import Turn, turn_json
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────
@@ -558,7 +559,7 @@ class TestSpeakerLabelInjector(unittest.IsolatedAsyncioTestCase):
 
         transcripts = [f for f in self.sink.received if isinstance(f, TranscriptionFrame)]
         self.assertTrue(
-            any(f.text == "alice_123: what is X?" for f in transcripts),
+            any(f.text == turn_json(Turn("alice_123", "alice_123", "what is X?")) for f in transcripts),
             f"Expected labeled text, got: {[f.text for f in transcripts]}",
         )
 
@@ -568,14 +569,21 @@ class TestSpeakerLabelInjector(unittest.IsolatedAsyncioTestCase):
         transcripts = [f for f in self.sink.received if isinstance(f, TranscriptionFrame)]
         self.assertTrue(all(f.user_id == "alice_sid" for f in transcripts))
 
-    async def test_unknown_sid_text_unchanged(self):
+    async def test_unknown_sid_is_still_a_turn_under_its_sid(self):
+        # Every transcript reaches the context as a Turn; bot.py resolves an unknown sid to a
+        # participant when it stores the turn (_speaker_of).
         await self.injector.process_frame(_make_transcription("unknown_sid", "mystery"), FrameDirection.DOWNSTREAM)
 
         transcripts = [f for f in self.sink.received if isinstance(f, TranscriptionFrame)]
-        self.assertTrue(
-            any(f.text == "mystery" for f in transcripts),
-            "Unknown SID should not have label prepended",
-        )
+        self.assertEqual([f.text for f in transcripts], [turn_json(Turn("unknown_sid", "", "mystery"))])
+
+    async def test_typed_chat_is_marked_as_chat(self):
+        frame = _make_transcription("alice_sid", "typed words")
+        frame.metadata["source"] = "chat"  # as bot.py's _chat_turn queues it
+        await self.injector.process_frame(frame, FrameDirection.DOWNSTREAM)
+
+        transcripts = [f for f in self.sink.received if isinstance(f, TranscriptionFrame)]
+        self.assertEqual([f.text for f in transcripts], [turn_json(Turn("alice_123", "alice_123", "typed words", "chat"))])
 
     async def test_empty_text_not_labeled(self):
         await self.injector.process_frame(_make_transcription("alice_sid", ""), FrameDirection.DOWNSTREAM)
@@ -593,7 +601,7 @@ class TestSpeakerLabelInjector(unittest.IsolatedAsyncioTestCase):
         # Unknown SID — no label
         await self.injector.process_frame(_make_transcription("charlie_sid", "new person"), FrameDirection.DOWNSTREAM)
         before = [f for f in self.sink.received if isinstance(f, TranscriptionFrame)]
-        self.assertTrue(any(f.text == "new person" for f in before), "Before: text should be unlabeled")
+        self.assertTrue(any(f.text == turn_json(Turn("charlie_sid", "", "new person")) for f in before))
 
         self.sink.received.clear()
         self.sid_map["charlie_sid"] = "charlie_789"  # live update — same dict reference
@@ -601,7 +609,7 @@ class TestSpeakerLabelInjector(unittest.IsolatedAsyncioTestCase):
         await self.injector.process_frame(_make_transcription("charlie_sid", "new person"), FrameDirection.DOWNSTREAM)
         after = [f for f in self.sink.received if isinstance(f, TranscriptionFrame)]
         self.assertTrue(
-            any(f.text == "charlie_789: new person" for f in after),
+            any(f.text == turn_json(Turn("charlie_789", "charlie_789", "new person")) for f in after),
             f"After dict update: expected labeled text, got {[f.text for f in after]}",
         )
 
@@ -624,7 +632,7 @@ class TestSpeakerLabelInjector(unittest.IsolatedAsyncioTestCase):
 
         transcripts = [f for f in self.sink.received if isinstance(f, TranscriptionFrame)]
         self.assertTrue(
-            any(f.text == "alice_123: partial" for f in transcripts),
+            any(f.text == turn_json(Turn("alice_123", "alice_123", "partial")) for f in transcripts),
             f"Interim transcription should also be labeled, got: {[f.text for f in transcripts]}",
         )
 
@@ -663,7 +671,7 @@ class TestSpeakerLabelInjector(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(labeled[0].language, "fr", "language field should survive the label-prepend")
 
     async def test_postfix_stripped_when_no_name_map(self):
-        """Without sid_to_name, label uses identity with __postfix stripped."""
+        """Without sid_to_name, the name is the identity with __postfix stripped."""
         sid_map = {"alice_sid": "Alice__abc1"}
         injector = SpeakerLabelInjector(sid_map)
         sink = _Sink()
@@ -674,7 +682,7 @@ class TestSpeakerLabelInjector(unittest.IsolatedAsyncioTestCase):
         await injector.process_frame(_make_transcription("alice_sid", "hi"), FrameDirection.DOWNSTREAM)
         transcripts = [f for f in sink.received if isinstance(f, TranscriptionFrame)]
         self.assertTrue(
-            any(f.text == "Alice: hi" for f in transcripts),
+            any(f.text == turn_json(Turn("Alice__abc1", "Alice", "hi")) for f in transcripts),
             f"Expected postfix stripped label, got: {[f.text for f in transcripts]}",
         )
 
@@ -691,7 +699,7 @@ class TestSpeakerLabelInjector(unittest.IsolatedAsyncioTestCase):
         await injector.process_frame(_make_transcription("alice_sid", "hello"), FrameDirection.DOWNSTREAM)
         transcripts = [f for f in sink.received if isinstance(f, TranscriptionFrame)]
         self.assertTrue(
-            any(f.text == "Alice: hello" for f in transcripts),
+            any(f.text == turn_json(Turn("Alice__abc1", "Alice", "hello")) for f in transcripts),
             f"Expected clean name from sid_to_name, got: {[f.text for f in transcripts]}",
         )
 
@@ -708,7 +716,7 @@ class TestSpeakerLabelInjector(unittest.IsolatedAsyncioTestCase):
         await injector.process_frame(_make_transcription("alice_sid", "fallback"), FrameDirection.DOWNSTREAM)
         transcripts = [f for f in sink.received if isinstance(f, TranscriptionFrame)]
         self.assertTrue(
-            any(f.text == "Alice: fallback" for f in transcripts),
+            any(f.text == turn_json(Turn("Alice__abc1", "Alice", "fallback")) for f in transcripts),
             f"Expected stripped-identity fallback, got: {[f.text for f in transcripts]}",
         )
 

@@ -1,13 +1,7 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 import { createHash } from 'node:crypto';
 import { SignJWT } from 'jose';
-import {
-  linkSettings,
-  resolveLinkParam,
-  signStartLink,
-  verifyStartLink,
-} from './start-link';
-
+import { linkSettings, resolveLinkParam, signStartLink, verifyStartLink } from './start-link';
 
 beforeAll(() => {
   process.env.LIVEKIT_API_SECRET = 'test-secret-test-secret-test-secret';

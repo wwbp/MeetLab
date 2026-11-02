@@ -501,10 +501,15 @@ TEST_ROOMS = r"^accept-[0-9a-f]{6}$"
 
 async def purge_test_data() -> dict:
     """Delete everything of the live tests' rooms: sessions, turns, events, recording rows and
-    their files, per-room settings, and the speakers only they had. Nothing else."""
-    from sqlalchemy import delete, or_
-    test = Conversation.room_name.op("~")(TEST_ROOMS)
+    their files, per-room settings, and the speakers only they had. Nothing else. A test group
+    link is one whose pool names a test scope; its rooms (link-…) are test rooms too."""
+    from sqlalchemy import delete, or_, text
+    test_link = text("EXISTS (SELECT 1 FROM jsonb_array_elements_text(start_links.pool) AS p(scope)"
+                     " WHERE p.scope ~ :pattern)").bindparams(pattern=TEST_ROOMS)
     async with AsyncSessionLocal() as db, db.begin():
+        links = (await db.scalars(select(StartLink.link_id).where(test_link))).all()
+        rooms = (await db.scalars(select(Match.room_name).where(Match.link_id.in_(links)))).all()
+        test = or_(Conversation.room_name.op("~")(TEST_ROOMS), Conversation.room_name.in_(rooms))
         convs = select(Conversation.id).where(test)
         files = (await db.execute(select(MediaFile.path).where(MediaFile.conv_id.in_(convs)))).scalars().all()
         only_theirs = select(Utterance.speaker_id).where(Utterance.conv_id.in_(convs)).except_(
@@ -512,12 +517,16 @@ async def purge_test_data() -> dict:
         speakers = (await db.execute(only_theirs)).scalars().all()
         counts = {
             "events": (await db.execute(delete(Event).where(or_(
-                Event.conv_id.in_(convs), Event.room_name.op("~")(TEST_ROOMS))))).rowcount,
+                Event.conv_id.in_(convs), Event.room_name.op("~")(TEST_ROOMS), Event.room_name.in_(rooms))))).rowcount,
             "media_files": (await db.execute(delete(MediaFile).where(MediaFile.conv_id.in_(convs)))).rowcount,
             "utterances": (await db.execute(delete(Utterance).where(Utterance.conv_id.in_(convs)))).rowcount,
+            "tickets": (await db.execute(delete(Ticket).where(Ticket.link_id.in_(links)))).rowcount,
             "conversations": (await db.execute(delete(Conversation).where(test))).rowcount,
+            "matches": (await db.execute(delete(Match).where(Match.link_id.in_(links)))).rowcount,
+            "links": (await db.execute(delete(StartLink).where(StartLink.link_id.in_(links)))).rowcount,
             "speakers": (await db.execute(delete(Speaker).where(Speaker.id.in_(speakers)))).rowcount,
-            "settings": (await db.execute(delete(BotConfig).where(BotConfig.scope.op("~")(TEST_ROOMS)))).rowcount,
+            "settings": (await db.execute(delete(BotConfig).where(or_(
+                BotConfig.scope.op("~")(TEST_ROOMS), BotConfig.scope.in_(rooms))))).rowcount,
         }
     for path in files:  # after the rows are gone: a file left over is harmless, a row without its file is not
         if path:

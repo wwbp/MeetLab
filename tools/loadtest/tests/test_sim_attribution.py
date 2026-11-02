@@ -55,10 +55,12 @@ class DriveTicketTests(unittest.TestCase):
         replies, calls, now = iter(polls[1:]), [], [0.0]
 
         async def poll(tid):
+            self.assertEqual(tid, "t1")  # the ticket from the join reply
             calls.append("poll")
             return next(replies)
 
         async def ready(tid):
+            self.assertEqual(tid, "t1")
             calls.append("ready")
             return next(replies)
 

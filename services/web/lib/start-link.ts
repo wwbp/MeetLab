@@ -1,5 +1,6 @@
 import { createHash, randomInt, randomUUID } from 'node:crypto';
 import { SignJWT, jwtVerify } from 'jose';
+import type { NewLink } from '@/lib/matchmaking-client';
 
 /**
  * Stateless "meeting start link" tokens.
@@ -69,6 +70,35 @@ export async function resolveLinkParam(
   if (!pool) return null;
   const linkId = createHash('sha256').update(decoded).digest('base64url').slice(0, 22);
   return { linkId, legacyPool: pool };
+}
+
+const isInt = (v: unknown, min: number, max: number): v is number =>
+  Number.isInteger(v) && (v as number) >= min && (v as number) <= max;
+
+/**
+ * A new stored link's settings from the console's request: the defaults filled in (size 1,
+ * min size = size, no delay, 5 min max wait, no password) and every value checked, so the
+ * runner gets only a valid link. Older callers send only the pool: they get a name.
+ */
+export function linkSettings(body: unknown): { link: NewLink } | { error: string } {
+  if (typeof body !== 'object' || body === null || Array.isArray(body))
+    return { error: 'expected a JSON object' };
+  const b = body as Record<string, unknown>;
+  const name =
+    b.name === undefined ? 'Untitled link' : typeof b.name === 'string' ? b.name.trim() : '';
+  const { pool, size = 1, delay_s = 0, max_wait_s = 300, password = '' } = b;
+  const min_size = b.min_size ?? size;
+  if (!name) return { error: 'name is required' };
+  if (!isValidPool(pool)) return { error: 'pool must be a non-empty array of config scope names' };
+  if (!isInt(size, 1, 8)) return { error: 'room size must be a whole number from 1 to 8' };
+  if (!isInt(min_size, 1, size))
+    return { error: 'min size must be a whole number from 1 to the room size' };
+  if (!isInt(delay_s, 0, 300)) return { error: 'start delay must be 0 to 300 seconds' };
+  if (!isInt(max_wait_s, 60, 1800)) return { error: 'max wait must be 1 to 30 minutes' };
+  if (typeof password !== 'string') return { error: 'password must be text' };
+  return {
+    link: { name, pool, size, min_size, delay_s, max_wait_s, ...(password && { password }) },
+  };
 }
 
 /** Unbiased uniform pick (crypto.randomInt, not Math.random). */

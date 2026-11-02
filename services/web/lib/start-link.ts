@@ -1,4 +1,4 @@
-import { createHash, randomInt, randomUUID } from 'node:crypto';
+import { createHash } from 'node:crypto';
 import { SignJWT, jwtVerify } from 'jose';
 import type { NewLink } from '@/lib/matchmaking-client';
 
@@ -6,8 +6,8 @@ import type { NewLink } from '@/lib/matchmaking-client';
  * Stateless "meeting start link" tokens.
  *
  * A start link embeds a signed JWT carrying the pool of bot-config scopes the admin
- * selected. Every click provisions a fresh room with one scope picked uniformly at
- * random. The token is signed with LIVEKIT_API_SECRET (same key as the console
+ * selected. A click gets a ticket from the runner's matchmaker, which names the room and
+ * picks the least-used scope on the link (balanced). The token is signed with LIVEKIT_API_SECRET (same key as the console
  * session, see lib/console/auth.ts) and deliberately has NO expiry: all concierge
  * state in meet is in-memory, so links must survive restarts. The `purpose` claim
  * keeps these tokens from being accepted anywhere else signed with the same secret
@@ -109,14 +109,4 @@ export function linkSettings(body: unknown): { link: NewLink } | { error: string
       ...(password && { password }),
     },
   };
-}
-
-/** Unbiased uniform pick (crypto.randomInt, not Math.random). */
-export function pickUniform<T>(items: T[]): T {
-  return items[randomInt(items.length)];
-}
-
-/** Unique room name matching ROOM_NAME_PATTERN (^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$). */
-export function generateStartRoomName(): string {
-  return `link-${Date.now().toString(36)}-${randomUUID().replace(/-/g, '').slice(0, 8)}`;
 }

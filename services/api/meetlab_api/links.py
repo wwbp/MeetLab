@@ -166,13 +166,17 @@ async def list_links():
 
 @router.patch("/links/{link_id}")
 async def set_link_active(link_id: str, request: Request):
-    """Stop or start a link (R25). Stopping again keeps the first stop time; starting clears it."""
+    """Stop or start a link (R25). Stopping again keeps the first stop time; starting clears it.
+    Starting is refused while a pool setting is missing (it would stop again at once)."""
     body = await _json_object(request)
     active = (body or {}).get("active")
     if not isinstance(active, bool):
         return _error("active must be true or false", 400)
     stopped_at = None if active else func.coalesce(StartLink.stopped_at, datetime.now(timezone.utc))
     async with AsyncSessionLocal() as db, db.begin():
+        pool = await db.scalar(select(StartLink.pool).where(StartLink.link_id == link_id))
+        if active and pool and (missing := await missing_settings(db, pool)):
+            return _error(f"unknown bot settings: {', '.join(missing)}", 409)
         found = (await db.execute(update(StartLink).where(StartLink.link_id == link_id)
                                   .values(active=active, stopped_at=stopped_at)
                                   .returning(StartLink.link_id))).scalar_one_or_none()

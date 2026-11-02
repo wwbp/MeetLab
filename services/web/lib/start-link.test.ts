@@ -2,16 +2,12 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import { createHash } from 'node:crypto';
 import { SignJWT } from 'jose';
 import {
-  generateStartRoomName,
   linkSettings,
-  pickUniform,
   resolveLinkParam,
   signStartLink,
   verifyStartLink,
 } from './start-link';
 
-// Matches ROOM_NAME_PATTERN in app/api/concierge/rooms/route.ts
-const ROOM_NAME_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$/;
 
 beforeAll(() => {
   process.env.LIVEKIT_API_SECRET = 'test-secret-test-secret-test-secret';
@@ -53,38 +49,6 @@ describe('signStartLink / verifyStartLink', () => {
 
   it('signStartLink rejects an empty pool', async () => {
     await expect(signStartLink([])).rejects.toThrow();
-  });
-});
-
-describe('pickUniform', () => {
-  it('always returns a member', () => {
-    const items = ['a', 'b', 'c'];
-    for (let i = 0; i < 100; i++) {
-      expect(items).toContain(pickUniform(items));
-    }
-  });
-
-  it('is roughly uniform over 3 items x 3000 draws', () => {
-    const counts: Record<string, number> = { a: 0, b: 0, c: 0 };
-    for (let i = 0; i < 3000; i++) {
-      counts[pickUniform(['a', 'b', 'c'])]++;
-    }
-    // Expected ~1000 each; loose bounds to avoid flakes (p(<800) is astronomically small).
-    for (const k of ['a', 'b', 'c']) {
-      expect(counts[k]).toBeGreaterThan(800);
-    }
-  });
-});
-
-describe('generateStartRoomName', () => {
-  it('generates valid, distinct room names', () => {
-    const names = new Set<string>();
-    for (let i = 0; i < 200; i++) {
-      const name = generateStartRoomName();
-      expect(name).toMatch(ROOM_NAME_PATTERN);
-      names.add(name);
-    }
-    expect(names.size).toBe(200);
   });
 });
 

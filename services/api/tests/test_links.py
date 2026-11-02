@@ -215,6 +215,18 @@ class LinksApiTest(unittest.TestCase):
         row = self._listed(link_id)
         self.assertEqual((row["active"], row["stopped_at"]), (True, None))
 
+    def test_start_is_refused_while_a_pool_setting_is_missing(self):
+        import uuid
+        scope = f"gone-{uuid.uuid4().hex[:8]}"
+        self._settings(scope)
+        link_id = self._create(pool=[scope])
+        self.client.patch(f"/links/{link_id}", headers=AUTH, json={"active": False})
+        from sqlalchemy import text
+        self._db(lambda db: db.execute(text("DELETE FROM bot_config WHERE scope = :s"), {"s": scope}))
+        r = self.client.patch(f"/links/{link_id}", headers=AUTH, json={"active": True})
+        self.assertEqual((r.status_code, r.json()), (409, {"error": f"unknown bot settings: {scope}"}))
+        self.assertFalse(self._listed(link_id)["active"])
+
     def test_stopping_twice_keeps_the_first_stop_time(self):
         link_id = self._create()
         self.client.patch(f"/links/{link_id}", headers=AUTH, json={"active": False})

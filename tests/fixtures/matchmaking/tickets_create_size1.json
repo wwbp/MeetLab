@@ -1,0 +1,29 @@
+{
+  "endpoint": "POST /tickets",
+  "request": {
+    "method": "POST",
+    "path": "/tickets",
+    "body": {
+      "link_id": "x3Jd8kq0VbN2mT5wYc7HfA",
+      "participant_id": null,
+      "legacy": {
+        "pool": [
+          "global"
+        ]
+      }
+    }
+  },
+  "response": {
+    "status": 200,
+    "body": {
+      "ticket": "0b6f4c2e-1a3d-4e5f-9a8b-7c6d5e4f3a2b",
+      "link_id": "x3Jd8kq0VbN2mT5wYc7HfA",
+      "participant_id": null,
+      "view": {
+        "kind": "starting",
+        "room": "link-mh0abc12-1a2b3c4d",
+        "starts_in_ms": 0
+      }
+    }
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "endpoint": "GET /links/{id}/public",
+  "request": {
+    "method": "GET",
+    "path": "/links/x3Jd8kq0VbN2mT5wYc7HfA/public"
+  },
+  "response": {
+    "status": 404,
+    "body": {
+      "error": "not_found"
+    }
+  }
+}

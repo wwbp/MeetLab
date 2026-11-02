@@ -1,0 +1,25 @@
+{
+  "endpoint": "POST /links",
+  "request": {
+    "method": "POST",
+    "path": "/links",
+    "body": {
+      "name": "Pilot 3, groups of 3",
+      "pool": [
+        "friendly",
+        "neutral"
+      ],
+      "size": 3,
+      "min_size": 2,
+      "delay_s": 10,
+      "max_wait_s": 300,
+      "password": "blue-river"
+    }
+  },
+  "response": {
+    "status": 200,
+    "body": {
+      "link_id": "Qm9vdHN0cmFwTGlua0lEMQ"
+    }
+  }
+}

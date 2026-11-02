@@ -1,0 +1,17 @@
+{
+  "endpoint": "POST /tickets",
+  "request": {
+    "method": "POST",
+    "path": "/tickets",
+    "body": {
+      "link_id": "AAAAAAAAAAAAAAAAAAAAAA",
+      "participant_id": "5f8e2a1b3c4d5e6f7a8b9c0d"
+    }
+  },
+  "response": {
+    "status": 404,
+    "body": {
+      "error": "not_found"
+    }
+  }
+}

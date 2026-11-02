@@ -16,7 +16,23 @@ It survives restarts and deploys, which the previous in-memory version did not.
 | **LiveKit** (lost recording) | `egress_ended` with a failed or aborted egress | **error** |
 | **bot runner / bots** | any `logger.warning` or `logger.error` anywhere in the Python code | warning / error |
 
-The last row is the important one: it is a *catch-all*. Nobody has to remember to
+### Group start links
+
+The matchmaker (`services/api/meetlab_api/matchmaker.py`, `links.py`) records four events of
+its own. The warnings are signs a study is stuck; researchers read them in
+`docs/study-support.md` §4.
+
+| Event | Severity | When | Payload |
+|---|---|---|---|
+| `match_formed` | info | A link put enough waiting participants together: a new room | `room`, `size` (people in it), `scope` (its bot setting), `tickets` (their ticket IDs) |
+| `ready_failed` | **warning** | A group's time to confirm ran out with someone not ready; the room is closed | `room`, `removed` (tickets that missed it), `requeued` (tickets back in line, place kept) |
+| `ticket_expired` | **warning** | A participant waited the link's full max wait with no group | `ticket` |
+| `link_stopped` | **warning** | A link stopped itself: a bot setting in its pool no longer exists | `link_id`, `missing` (the setting names) |
+
+`match_formed` and `ready_failed` carry the room, so the console's room filter finds them;
+the other two have none. A ticket ID joins to `tickets.id` (who it was: `participant_id`).
+
+The last row of the first table is the important one: it is a *catch-all*. Nobody has to remember to
 report an error — every warning and error the runner or a bot logs is mirrored
 automatically, with the file, function, and line it came from. If the code did
 `logger.bind(room_name=..., conv_id=...)` first, the event is also joinable to the

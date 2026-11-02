@@ -54,7 +54,7 @@ from meetlab_core.config import load_config, require
 from meetlab_core.db.config_loader import load_bot_config
 from meetlab_core.heartbeat import beat_forever
 from meetlab_bot.livekit_input import LiveKitTransport  # one resampler per participant (F11)
-from meetlab_bot.presence import wait_until_empty
+from meetlab_bot.presence import humans, wait_until_empty
 from meetlab_core.sessions import end
 from meetlab_core.db.engine import AsyncSessionLocal
 from meetlab_core.db.models import Conversation, MediaFile, Speaker, Utterance
@@ -462,6 +462,28 @@ def _require_stt_backend(bot_config) -> None:
     every utterance to a bare /v1/audio/transcriptions and the bot never replies."""
     if bot_config.stt_model.startswith("parakeet-") and not os.environ.get("NEMOTRON_STT_URL"):
         raise ValueError(f"stt_model={bot_config.stt_model} needs NEMOTRON_STT_URL (a Parakeet NIM)")
+
+
+# A group room's greeting waits for the whole group, but no longer than this after the
+# first person joined (R18): someone who never arrives must not keep the others waiting.
+_GREETING_WAIT_S = 60
+
+
+def greeting_due(humans_present: int, expected: int | None, first_join_s: float, now_s: float) -> bool:
+    return humans_present >= (expected or 1) or now_s - first_join_s >= _GREETING_WAIT_S
+
+
+async def first_join(*, start_close, greet, humans_present, expected, now=time.monotonic, sleep=asyncio.sleep):
+    """The first human is here: start the closing timer now, so it matches the browser's
+    (anchored at the first join), then greet once the group is (greet=None: a resumed bot)."""
+    joined = now()
+    start_close(joined)
+    if greet is None:
+        return
+    await sleep(1)
+    while not greeting_due(humans_present(), expected, joined, now()):
+        await sleep(1)
+    await greet()
 
 
 async def bot(runner_args: LiveKitRunnerArguments):
@@ -1138,14 +1160,21 @@ async def _bot(runner_args: LiveKitRunnerArguments):
     @transport.event_handler("on_first_participant_joined")
     async def on_first_participant_joined(transport, participant_id):
         logger.info(f"First participant joined: {participant_id}")
-        await asyncio.sleep(1)
-        if not resume:  # a resumed bot carries on: the room already heard its greeting
-            await say(bot_config.greeting)
-        if bot_config.session_limit_minutes > 0:
-            # The session clock started with the conversation, not with this bot.
-            close_task = asyncio.create_task(_announce_close(time.monotonic() - (resume or {}).get("elapsed_s", 0)))
-            _bg_tasks.add(close_task)
-            close_task.add_done_callback(_bg_tasks.discard)
+
+        def start_close(joined_at: float) -> None:
+            if bot_config.session_limit_minutes > 0:
+                # The session clock started with the conversation, not with this bot.
+                close_task = asyncio.create_task(_announce_close(joined_at - (resume or {}).get("elapsed_s", 0)))
+                _bg_tasks.add(close_task)
+                close_task.add_done_callback(_bg_tasks.discard)
+
+        await first_join(
+            start_close=start_close,
+            # A resumed bot carries on: the room already heard its greeting.
+            greet=None if resume else lambda: say(bot_config.greeting),
+            humans_present=lambda: humans(transport._client.room.remote_participants.keys()),
+            expected=(runner_args.body or {}).get("expected_humans"),
+        )
 
     runner = WorkerRunner(handle_sigterm=runner_args.handle_sigterm)
     status = "error"

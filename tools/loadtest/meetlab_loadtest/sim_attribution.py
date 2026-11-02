@@ -8,6 +8,7 @@ Three participants, three different sentences in three different voices, started
 0.15 s apart so they overlap. Then the stored turns are read back and judged.
 
     SPEAKERS=abc (default) all three; SPEAKERS=a one speaker alone, the control run
+    OFFSET_S=0.15 (default) seconds between one speaker's start and the next's
     GROUP_LINK=1 no fixed room: a group start link matches them (make sim-group); also
                  checks all got the same room and one session ran in it
 """
@@ -135,7 +136,7 @@ async def main() -> int:
 
     async def say(i, speaker, room):
         signal, sr = audio.load_wav_float(str(FIXTURES / fixture_name(LINES[speaker])))
-        await asyncio.sleep(0.15 * i)
+        await asyncio.sleep(float(os.environ.get("OFFSET_S", "0.15")) * i)
         await stream_float(room, signal, sr, speaker)
 
     await asyncio.gather(*(say(i, s, r) for i, (s, r) in enumerate(rooms)))

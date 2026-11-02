@@ -928,7 +928,17 @@ async def _bot(runner_args: LiveKitRunnerArguments):
         )
 
         ts = _iso_to_unix(message.timestamp)
-        utt_id = _new_id()
+        # Labels as SpeakerLabelInjector writes them: everyone talking over each other in this
+        # window is in one turn (F11), and each is stored as their own utterance.
+        labels = {identity.split("__")[0]: identity, _sid_to_name.get(speaker_sid): identity}
+        for _sid, _ident in _sid_to_identity.items():
+            labels[_sid_to_name.get(_sid) or _ident.split("__")[0]] = _ident
+        pieces = split_turn(message.content, labels, identity)
+        if not pieces:
+            return
+        if len(pieces) > 1:
+            logger.info(f"user turn held {len(pieces)} speakers' words: stored as one utterance each")
+        utt_id = None
         async with AsyncSessionLocal() as db:
             async with db.begin():
                 for _sid, (_ident, _name) in _learned.items():
@@ -941,18 +951,21 @@ async def _bot(runner_args: LiveKitRunnerArguments):
                         .values(id=_ident, meta=speaker_meta(_name, getattr(_p, "metadata", "")))
                         .on_conflict_do_nothing(index_elements=["id"])
                     )
-                db.add(
-                    Utterance(
-                        id=utt_id,
-                        speaker_id=identity,
-                        conv_id=runner_args.session_id,
-                        reply_to=_last_bot_utt_id[0],
-                        ts=ts,
-                        text=_spoken_text(message.content, {_sid_to_name.get(speaker_sid), identity.split("__")[0]}),
-                        meta={"source": "chat" if _chat_turns_pending[0] else "speech"},  # typed or said
+                for i, (who, words) in enumerate(pieces):
+                    utt_id = _new_id()
+                    db.add(
+                        Utterance(
+                            id=utt_id,
+                            speaker_id=who,
+                            conv_id=runner_args.session_id,
+                            reply_to=_last_bot_utt_id[0],
+                            # Spoken order kept apart in the transcript: 1 ms each, same turn start.
+                            ts=None if ts is None else ts + i / 1000,
+                            text=words,
+                            meta={"source": "chat" if _chat_turns_pending[0] else "speech"},  # typed or said
+                        )
                     )
-                )
-                await _set_root_utterance_if_needed(db, runner_args.session_id, utt_id)
+                    await _set_root_utterance_if_needed(db, runner_args.session_id, utt_id)
         _last_user_utt_id[0] = utt_id
         _chat_turns_pending[0] = max(0, _chat_turns_pending[0] - 1)
         # IDs only, never the words: participants' speech stays out of logs. Live
@@ -1301,12 +1314,26 @@ def _build_llm(api_key: str, bot_config) -> OpenAILLMService:
         settings=OpenAILLMService.Settings(model=bot_config.llm_model, system_instruction=bot_config.system_prompt))
 
 
-def _spoken_text(content: str, names) -> str:
-    """A person's words without the "Name: " label SpeakerLabelInjector adds for the LLM, at
-    the start of every fragment a turn merged. The speaker is stored in its own column."""
-    for name in filter(None, names):
-        content = re.sub(rf"(^|\s){re.escape(name)}: ", r"\1", content)
-    return content.strip()
+def split_turn(content: str, labels: dict, default: str) -> list[tuple[str, str]]:
+    """A committed user turn as (identity, words) per speaker, without the "Name: " labels
+    SpeakerLabelInjector adds for the LLM. Pipecat's single user aggregator joins every
+    transcript that lands inside one end-of-turn window, so people talking over each other share
+    a turn (F11); each piece goes to the label before it, text before any label to `default`,
+    and one person's consecutive fragments stay one piece. labels: display label -> identity.
+    ponytail: a label is matched as text; someone saying "Alice: " aloud would split there."""
+    names = sorted(filter(None, labels), key=len, reverse=True)
+    parts = re.split(r"(?:^|\s)(" + "|".join(map(re.escape, names)) + r"): ", content) if names else [content]
+    pieces = [(default, parts[0])] + [(labels[n], w) for n, w in zip(parts[1::2], parts[2::2])]
+    out: list[tuple[str, str]] = []
+    for who, words in pieces:
+        words = words.strip()
+        if not words:
+            continue
+        if out and out[-1][0] == who:
+            out[-1] = (who, f"{out[-1][1]} {words}")
+        else:
+            out.append((who, words))
+    return out
 
 
 # A bot whose LLM can no longer work ends its session (recorded, visible in the console)

@@ -350,27 +350,41 @@ class TestBuildLLM(unittest.TestCase):
         self.assertEqual((llm._settings.model, llm._settings.system_instruction), ("gpt-4o-mini", "Facilitate."))
 
 
-class TestSpokenText(unittest.TestCase):
-    """What a person said is stored without the speaker label the LLM sees (SpeakerLabelInjector):
-    the speaker is its own column, and the label turned up in researchers' transcripts and in
-    the load test's hearing score as words nobody said (2026-10-03)."""
+class TestSplitTurn(unittest.TestCase):
+    """A stored turn is one person's words, without the speaker label the LLM sees
+    (SpeakerLabelInjector). Pipecat's one user aggregator joins everyone's transcripts that land
+    within one end-of-turn window, so a turn can hold several people: each is stored as their own
+    utterance, under their own name. Before, the whole turn went to the last speaker with only
+    their label removed: sim_attribution stored b's and c's sentences as one turn of c's (F11,
+    2026-11-02)."""
+
+    def split(self, content, labels, default="x"):
+        from meetlab_bot.bot import split_turn
+        return split_turn(content, labels, default)
+
+    def test_overlapping_speakers_are_stored_apart(self):
+        # The stored text of sim-attr-6318d5 (one turn under sim_c_21a5), as the aggregator gave it.
+        content = ("sim_b_3bdc: Are we seeing higher latency on the transcription service since Tuesday? "
+                   "sim_c_21a5: Can you explain what a retrieval augmented generation system does?")
+        labels = {"sim_b_3bdc": "sim_b_3bdc", "sim_c_21a5": "sim_c_21a5"}
+        self.assertEqual(self.split(content, labels, "sim_c_21a5"), [
+            ("sim_b_3bdc", "Are we seeing higher latency on the transcription service since Tuesday?"),
+            ("sim_c_21a5", "Can you explain what a retrieval augmented generation system does?")])
 
     def test_the_label_is_removed(self):
-        from meetlab_bot.bot import _spoken_text
-        self.assertEqual(_spoken_text("load_000: Why does that matter?", {"load_000"}), "Why does that matter?")
+        self.assertEqual(self.split("load_000: Why does that matter?", {"load_000": "load_000"}),
+                         [("load_000", "Why does that matter?")])
 
-    def test_every_fragment_of_a_merged_turn_loses_its_label(self):
-        from meetlab_bot.bot import _spoken_text
-        self.assertEqual(_spoken_text("Alice: Candidate A is strong. Alice: But B is popular.", {"Alice", "alice_x"}),
-                         "Candidate A is strong. But B is popular.")
+    def test_one_persons_fragments_stay_one_utterance(self):
+        self.assertEqual(self.split("Alice: Candidate A is strong. Alice: But B is popular.", {"Alice": "alice_x"}),
+                         [("alice_x", "Candidate A is strong. But B is popular.")])
 
-    def test_text_without_a_label_is_unchanged(self):
-        from meetlab_bot.bot import _spoken_text
-        self.assertEqual(_spoken_text("What should we prioritise?", {"Alice"}), "What should we prioritise?")
+    def test_text_without_a_label_goes_to_the_default_speaker(self):
+        self.assertEqual(self.split("What should we prioritise?", {"Alice": "alice_x"}, "bob_y"),
+                         [("bob_y", "What should we prioritise?")])
 
     def test_a_name_is_matched_literally(self):
-        from meetlab_bot.bot import _spoken_text
-        self.assertEqual(_spoken_text("Dr. A+B: Hello.", {"Dr. A+B", None}), "Hello.")
+        self.assertEqual(self.split("Dr. A+B: Hello.", {"Dr. A+B": "dr"}), [("dr", "Hello.")])
 
 
 class TestSmartTurnChain(unittest.TestCase):

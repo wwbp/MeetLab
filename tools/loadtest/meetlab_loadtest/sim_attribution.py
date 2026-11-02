@@ -32,14 +32,6 @@ def _words(text: str) -> set[str]:
     return set(re.findall(r"[a-z]+", text.lower()))
 
 
-def heard_as(speaker: str, text: str, who: dict[str, str]) -> list[tuple[str, str]]:
-    """A stored turn as the LLM reads it: each "identity: words" piece, by its label."""
-    parts = re.split(r"(?:^|\s)(" + "|".join(map(re.escape, who)) + r"): ", text) if who else [text]
-    if len(parts) == 1:
-        return [(speaker, text)]
-    return [(who[label], words.strip()) for label, words in zip(parts[1::2], parts[2::2])]
-
-
 def verdict(lines: dict[str, str], stored: list[tuple[str, str]]) -> list[str]:
     """Problems with stored (speaker, text) turns against what each speaker said."""
     def held(text):
@@ -158,7 +150,7 @@ async def main() -> int:
         await room.disconnect()
     if link:
         request("PATCH", f"/links/{link}", {"active": False})
-    stored = [piece for sid, text in rows for piece in heard_as(who.get(sid, sid), text, who)]
+    stored = [(who.get(sid, sid), text) for sid, text in rows]  # one person's words a row (bot.py)
     for speaker, text in stored:
         print(f"  stored  {speaker}: {text}")
     problems += verdict(lines, stored)

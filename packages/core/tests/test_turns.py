@@ -37,7 +37,7 @@ class TurnInTest(unittest.TestCase):
         self.assertEqual(parse_turns(turn_json(Turn("ana__1a2b", "Ana", "  "))), [])
 
     def test_text_that_is_not_a_turn_is_refused(self):
-        for bad in ("Ana: hello", '{"speaker_id": "a"}', "[]", '{"speaker_id": 1, "name": "A", "text": "x", "source": "speech"}'):
+        for bad in ("Ana: hello", '{"speaker_id": "a"}', '[{"speaker_id": "a"}]', '{"speaker_id": 1, "name": "A", "text": "x", "source": "speech"}'):
             with self.subTest(bad):
                 with self.assertRaises(ValueError):
                     parse_turns(bad)
@@ -46,6 +46,11 @@ class TurnInTest(unittest.TestCase):
         message = user_message([BEN, ANA])
         self.assertEqual(message["role"], "user")
         self.assertEqual([Turn(**t) for t in json.loads(message["content"])], [BEN, ANA])
+
+    def test_the_message_the_model_read_gives_back_its_turns(self):
+        # The live context holds user_message's form (bot.py), so a committed turn is parsed from it.
+        self.assertEqual(parse_turns(user_message([BEN, ANA])["content"]), [BEN, ANA])
+        self.assertEqual(parse_turns(user_message([BEN])["content"] + " " + user_message([ANA])["content"]), [BEN, ANA])
 
 
 class ReplyOutTest(unittest.TestCase):

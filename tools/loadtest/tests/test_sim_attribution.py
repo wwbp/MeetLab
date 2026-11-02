@@ -2,7 +2,7 @@
 import asyncio
 import unittest
 
-from meetlab_loadtest.sim_attribution import drive_ticket, heard_as, verdict
+from meetlab_loadtest.sim_attribution import drive_ticket, verdict
 
 LINES = {
     "a": "What should we prioritise for the leadership role this quarter?",
@@ -29,19 +29,6 @@ class VerdictTests(unittest.TestCase):
     def test_a_speaker_whose_words_never_arrived(self):
         stored = [("a", LINES["a"]), ("b", LINES["b"])]
         self.assertIn("c: never transcribed", verdict(LINES, stored))
-
-
-class HeardAsTests(unittest.TestCase):
-    """What the LLM is told: each labelled piece of a stored turn, by its label."""
-
-    def test_splits_a_turn_at_each_speaker_label(self):
-        who = {"sim_a_8fbb": "a", "sim_b_1153": "b"}
-        text = "sim_a_8fbb: Seeing higher latency since Tuesday. sim_b_1153: Service since Tuesday."
-        self.assertEqual(heard_as("b", text, who),
-                         [("a", "Seeing higher latency since Tuesday."), ("b", "Service since Tuesday.")])
-
-    def test_an_unlabelled_turn_belongs_to_its_speaker(self):
-        self.assertEqual(heard_as("c", "plain words", {}), [("c", "plain words")])
 
 
 def _reply(kind, **view):

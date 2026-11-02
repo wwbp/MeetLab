@@ -39,7 +39,7 @@ from pipecat.processors.aggregators.llm_response_universal import (
     LLMContextAggregatorPair,
     LLMUserAggregatorParams,
 )
-from pipecat.utils.context.llm_context_summarization import LLMAutoContextSummarizationConfig
+from pipecat.utils.context.llm_context_summarization import LLMAutoContextSummarizationConfig, LLMContextSummaryConfig
 from pipecat.services.elevenlabs.tts import ElevenLabsTTSService
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.services.tts_service import TextAggregationMode
@@ -633,7 +633,7 @@ async def _bot(runner_args: LiveKitRunnerArguments):
     context_aggregator = LLMContextAggregatorPair(
         context,
         user_params=build_user_aggregator_params(bot_config),
-        assistant_params=_assistant_params(),
+        assistant_params=_assistant_params(_build_llm(openai_api_key, bot_config, structured=False)),
     )
     _write_turns_as_user_message(context_aggregator.user())
 
@@ -1299,19 +1299,20 @@ def build_audio_track_sink(
     return audio_tracks.AudioTrackSink(on_flush)
 
 
-def _build_llm(api_key: str, bot_config) -> OpenAILLMService:
+def _build_llm(api_key: str, bot_config, structured: bool = True) -> OpenAILLMService:
     """Model and system prompt as settings (Pipecat 1.9+; a "system" context message is removed in 2.0).
     The researchers' prompt, then how the conversation reaches the model and how it answers
     (FORMAT_INSTRUCTIONS), the answer held to the BotReply schema (RESPONSE_FORMAT; Pipecat
     merges settings.extra into each request). OpenAI's models here and vLLM both take a
     json_schema response_format; a model that ignores it is still spoken (parse_reply).
-    The model our vLLM serves (SELFHOSTED_LLM_MODEL) goes to our server; any other to OpenAI."""
+    The model our vLLM serves (SELFHOSTED_LLM_MODEL) goes to our server; any other to OpenAI.
+    structured=False: the same model with no schema, for the context summariser (plain text)."""
     ours = bot_config.llm_model == os.environ.get("SELFHOSTED_LLM_MODEL")
     return OpenAILLMService(
         api_key=api_key, base_url=os.environ["SELFHOSTED_LLM_URL"] if ours else None,
         settings=OpenAILLMService.Settings(
-            model=bot_config.llm_model, system_instruction=f"{bot_config.system_prompt}\n\n{FORMAT_INSTRUCTIONS}",
-            extra={"response_format": RESPONSE_FORMAT}))
+            model=bot_config.llm_model, system_instruction=bot_config.system_prompt + "\n\n" + FORMAT_INSTRUCTIONS,
+            extra={"response_format": RESPONSE_FORMAT} if structured else {}))
 
 
 def _write_turns_as_user_message(user_aggregator) -> None:
@@ -1344,14 +1345,16 @@ def _reply_in_context(context, said: str, addressed_to: list[str]) -> None:
 UNUSABLE_POLICY = ProcessorUnusablePolicy.END
 
 
-def _assistant_params() -> LLMAssistantAggregatorParams:
+def _assistant_params(summary_llm) -> LLMAssistantAggregatorParams:
     """Older turns are summarised once the context nears 6,000 tokens, keeping the last 20
     messages: a conversation outlives the model's context (Qwen on vLLM: 8,192; L6 run, rooms
-    ~40 min old went silent on vLLM's 400). Pipecat's own summariser, using the same LLM."""
+    ~40 min old went silent on vLLM's 400). Pipecat's own summariser, on summary_llm: the bot's
+    model without the reply schema, so a summary is plain text."""
     return LLMAssistantAggregatorParams(
         enable_auto_context_summarization=True,
         auto_context_summarization_config=LLMAutoContextSummarizationConfig(
-            max_context_tokens=6000, max_unsummarized_messages=20))
+            max_context_tokens=6000, max_unsummarized_messages=20,
+            summary_config=LLMContextSummaryConfig(llm=summary_llm)))
 
 
 def _ttfb_stage(processor: str) -> str | None:

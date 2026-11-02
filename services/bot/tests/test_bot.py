@@ -439,10 +439,21 @@ class TestLongConversations(unittest.TestCase):
 
     def test_old_turns_are_summarised_well_before_the_models_limit(self):
         from meetlab_bot.bot import _assistant_params
-        p = _assistant_params()
+        p = _assistant_params(None)
         self.assertTrue(p.enable_auto_context_summarization)
         # room for the system prompt's growth and a reply under vLLM's --max-model-len 8192
         self.assertLessEqual(p.auto_context_summarization_config.max_context_tokens, 6000)
+
+    def test_summaries_are_plain_text_not_held_to_the_reply_schema(self):
+        """settings.extra goes into every request of an LLM service, the summariser's too: a
+        summary would come back as {"reply": ...}. It gets its own model, same settings, no schema."""
+        from types import SimpleNamespace
+        from meetlab_bot.bot import _assistant_params, _build_llm
+        cfg = SimpleNamespace(llm_model="gpt-4o-mini", system_prompt="Facilitate.")
+        summary_llm = _assistant_params(_build_llm("sk-test", cfg, structured=False)) \
+            .auto_context_summarization_config.summary_config.llm
+        self.assertEqual(summary_llm._settings.model, "gpt-4o-mini")
+        self.assertNotIn("response_format", summary_llm.build_chat_completion_params({"messages": []}))
 
     def test_a_bot_whose_llm_can_no_longer_work_ends_its_session_instead_of_sitting_silent(self):
         from pipecat.pipeline.worker import ProcessorUnusablePolicy

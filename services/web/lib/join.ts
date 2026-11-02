@@ -52,6 +52,6 @@ export function mediaErrorMessage(error: Error): string {
 export function botNotice(identities: string[], botSeenBefore: boolean): string | null {
   if (identities.some((id) => id.startsWith('bot_'))) return null;
   return botSeenBefore
-    ? 'Your conversation partner is reconnecting…'
-    : 'Your conversation partner is joining. This can take up to 3 minutes. Please stay on this page.';
+    ? 'The assistant is reconnecting…'
+    : 'The assistant is joining. This can take up to 3 minutes. Please stay on this page.';
 }

@@ -54,7 +54,7 @@ from meetlab_core.config import load_config, require
 from meetlab_core.db.config_loader import load_bot_config
 from meetlab_core.heartbeat import beat_forever
 from meetlab_bot.livekit_input import LiveKitTransport  # one resampler per participant (F11)
-from meetlab_bot.presence import wait_until_empty
+from meetlab_bot.presence import humans, wait_until_empty
 from meetlab_core.sessions import end
 from meetlab_core.db.engine import AsyncSessionLocal
 from meetlab_core.db.models import Conversation, MediaFile, Speaker, Utterance
@@ -462,6 +462,28 @@ def _require_stt_backend(bot_config) -> None:
     every utterance to a bare /v1/audio/transcriptions and the bot never replies."""
     if bot_config.stt_model.startswith("parakeet-") and not os.environ.get("NEMOTRON_STT_URL"):
         raise ValueError(f"stt_model={bot_config.stt_model} needs NEMOTRON_STT_URL (a Parakeet NIM)")
+
+
+# A group room's greeting waits for the whole group, but no longer than this after the
+# first person joined (R18): someone who never arrives must not keep the others waiting.
+_GREETING_WAIT_S = 60
+
+
+def greeting_due(humans_present: int, expected: int | None, first_join_s: float, now_s: float) -> bool:
+    return humans_present >= (expected or 1) or now_s - first_join_s >= _GREETING_WAIT_S
+
+
+async def first_join(*, start_close, greet, humans_present, expected, now=time.monotonic, sleep=asyncio.sleep):
+    """The first human is here: start the closing timer now, so it matches the browser's
+    (anchored at the first join), then greet once the group is (greet=None: a resumed bot)."""
+    joined = now()
+    start_close(joined)
+    if greet is None:
+        return
+    await sleep(1)
+    while not greeting_due(humans_present(), expected, joined, now()):
+        await sleep(1)
+    await greet()
 
 
 async def bot(runner_args: LiveKitRunnerArguments):
@@ -906,7 +928,17 @@ async def _bot(runner_args: LiveKitRunnerArguments):
         )
 
         ts = _iso_to_unix(message.timestamp)
-        utt_id = _new_id()
+        # Labels as SpeakerLabelInjector writes them: everyone talking over each other in this
+        # window is in one turn (F11), and each is stored as their own utterance.
+        labels = {identity.split("__")[0]: identity, _sid_to_name.get(speaker_sid): identity}
+        for _sid, _ident in _sid_to_identity.items():
+            labels[_sid_to_name.get(_sid) or _ident.split("__")[0]] = _ident
+        pieces = split_turn(message.content, labels, identity)
+        if not pieces:
+            return
+        if len(pieces) > 1:
+            logger.info(f"user turn held {len(pieces)} speakers' words: stored as one utterance each")
+        utt_id = None
         async with AsyncSessionLocal() as db:
             async with db.begin():
                 for _sid, (_ident, _name) in _learned.items():
@@ -919,18 +951,21 @@ async def _bot(runner_args: LiveKitRunnerArguments):
                         .values(id=_ident, meta=speaker_meta(_name, getattr(_p, "metadata", "")))
                         .on_conflict_do_nothing(index_elements=["id"])
                     )
-                db.add(
-                    Utterance(
-                        id=utt_id,
-                        speaker_id=identity,
-                        conv_id=runner_args.session_id,
-                        reply_to=_last_bot_utt_id[0],
-                        ts=ts,
-                        text=_spoken_text(message.content, {_sid_to_name.get(speaker_sid), identity.split("__")[0]}),
-                        meta={"source": "chat" if _chat_turns_pending[0] else "speech"},  # typed or said
+                for i, (who, words) in enumerate(pieces):
+                    utt_id = _new_id()
+                    db.add(
+                        Utterance(
+                            id=utt_id,
+                            speaker_id=who,
+                            conv_id=runner_args.session_id,
+                            reply_to=_last_bot_utt_id[0],
+                            # Spoken order kept apart in the transcript: 1 ms each, same turn start.
+                            ts=None if ts is None else ts + i / 1000,
+                            text=words,
+                            meta={"source": "chat" if _chat_turns_pending[0] else "speech"},  # typed or said
+                        )
                     )
-                )
-                await _set_root_utterance_if_needed(db, runner_args.session_id, utt_id)
+                    await _set_root_utterance_if_needed(db, runner_args.session_id, utt_id)
         _last_user_utt_id[0] = utt_id
         _chat_turns_pending[0] = max(0, _chat_turns_pending[0] - 1)
         # IDs only, never the words: participants' speech stays out of logs. Live
@@ -1138,14 +1173,21 @@ async def _bot(runner_args: LiveKitRunnerArguments):
     @transport.event_handler("on_first_participant_joined")
     async def on_first_participant_joined(transport, participant_id):
         logger.info(f"First participant joined: {participant_id}")
-        await asyncio.sleep(1)
-        if not resume:  # a resumed bot carries on: the room already heard its greeting
-            await say(bot_config.greeting)
-        if bot_config.session_limit_minutes > 0:
-            # The session clock started with the conversation, not with this bot.
-            close_task = asyncio.create_task(_announce_close(time.monotonic() - (resume or {}).get("elapsed_s", 0)))
-            _bg_tasks.add(close_task)
-            close_task.add_done_callback(_bg_tasks.discard)
+
+        def start_close(joined_at: float) -> None:
+            if bot_config.session_limit_minutes > 0:
+                # The session clock started with the conversation, not with this bot.
+                close_task = asyncio.create_task(_announce_close(joined_at - (resume or {}).get("elapsed_s", 0)))
+                _bg_tasks.add(close_task)
+                close_task.add_done_callback(_bg_tasks.discard)
+
+        await first_join(
+            start_close=start_close,
+            # A resumed bot carries on: the room already heard its greeting.
+            greet=None if resume else lambda: say(bot_config.greeting),
+            humans_present=lambda: humans(transport._client.room.remote_participants.keys()),
+            expected=(runner_args.body or {}).get("expected_humans"),
+        )
 
     runner = WorkerRunner(handle_sigterm=runner_args.handle_sigterm)
     status = "error"
@@ -1272,12 +1314,26 @@ def _build_llm(api_key: str, bot_config) -> OpenAILLMService:
         settings=OpenAILLMService.Settings(model=bot_config.llm_model, system_instruction=bot_config.system_prompt))
 
 
-def _spoken_text(content: str, names) -> str:
-    """A person's words without the "Name: " label SpeakerLabelInjector adds for the LLM, at
-    the start of every fragment a turn merged. The speaker is stored in its own column."""
-    for name in filter(None, names):
-        content = re.sub(rf"(^|\s){re.escape(name)}: ", r"\1", content)
-    return content.strip()
+def split_turn(content: str, labels: dict, default: str) -> list[tuple[str, str]]:
+    """A committed user turn as (identity, words) per speaker, without the "Name: " labels
+    SpeakerLabelInjector adds for the LLM. Pipecat's single user aggregator joins every
+    transcript that lands inside one end-of-turn window, so people talking over each other share
+    a turn (F11); each piece goes to the label before it, text before any label to `default`,
+    and one person's consecutive fragments stay one piece. labels: display label -> identity.
+    ponytail: a label is matched as text; someone saying "Alice: " aloud would split there."""
+    names = sorted(filter(None, labels), key=len, reverse=True)
+    parts = re.split(r"(?:^|\s)(" + "|".join(map(re.escape, names)) + r"): ", content) if names else [content]
+    pieces = [(default, parts[0])] + [(labels[n], w) for n, w in zip(parts[1::2], parts[2::2])]
+    out: list[tuple[str, str]] = []
+    for who, words in pieces:
+        words = words.strip()
+        if not words:
+            continue
+        if out and out[-1][0] == who:
+            out[-1] = (who, f"{out[-1][1]} {words}")
+        else:
+            out.append((who, words))
+    return out
 
 
 # A bot whose LLM can no longer work ends its session (recorded, visible in the console)

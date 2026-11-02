@@ -1,0 +1,89 @@
+import { renderToStaticMarkup } from 'react-dom/server';
+import { describe, expect, it } from 'vitest';
+import { waitingView } from '@/lib/waiting';
+import { StartClient, WaitingPanel, firstScreen } from './StartClient';
+
+const T0 = 1_000_000;
+const panel = (view: Parameters<typeof waitingView>[0]) =>
+  renderToStaticMarkup(
+    <WaitingPanel w={waitingView(view, T0, T0)} lost={false} onAction={() => {}} />,
+  );
+
+describe('first screen', () => {
+  it('a ticket stored in this tab resumes, even on a stopped link (R25)', () => {
+    expect(firstScreen('6f1c2b3a-4d5e-4f60-8a7b-9c0d1e2f3a4b', false)).toBe('resume');
+    expect(firstScreen(null, false)).toBe('closed');
+    expect(firstScreen(null, true)).toBe('form');
+  });
+});
+
+describe('WaitingPanel (R39)', () => {
+  it('one polite region holds heading and message; the ready-check message is an alert', () => {
+    const html = panel({ kind: 'ready_check', deadline_in_ms: 20_000, pressed: false });
+    expect(html).toMatch(
+      /<div aria-live="polite"[^>]*><h1[^>]*>Your group is ready<\/h1><p role="alert"[^>]*>Press the button within 20 seconds.<\/p>/,
+    );
+    expect(html).toContain('>I&#x27;m ready</button>');
+  });
+
+  it('countdown digits are hidden from screen readers, which hear "Starting in N seconds"', () => {
+    const html = panel({ kind: 'starting', room: 'link-a', starts_in_ms: 8_000 });
+    expect(html).toContain('<span aria-hidden="true"');
+    expect(html).toContain('0:08</span>');
+    expect(html).toContain('<span class="sr-only">Starting in 8 seconds</span>');
+  });
+
+  it('expired shows the code and a Copy button', () => {
+    const html = panel({ kind: 'expired', code: 'ABCD2345' });
+    expect(html).toContain('ABCD2345');
+    expect(html).toContain('>Copy</button>');
+  });
+
+  it('missed offers Join again; lost connection is an alert', () => {
+    const html = renderToStaticMarkup(
+      <WaitingPanel w={waitingView({ kind: 'missed' }, T0, T0)} lost onAction={() => {}} />,
+    );
+    expect(html).toContain('>Join again</button>');
+    expect(html).toContain(
+      '<p role="alert" class="text-signal text-sm">Connection lost. Trying again…</p>',
+    );
+  });
+});
+
+describe('StartClient form', () => {
+  it('a group link asks for the Prolific ID and a labelled password', () => {
+    const html = renderToStaticMarkup(
+      <StartClient token="t" linkId="Qm9vdHN0cmFwTGlua0lEMQ" size={3} needsPassword active />,
+    );
+    expect(html).toContain('Join the group meeting');
+    expect(html).toMatch(/<label for="prolific-id"[^>]*>Prolific ID<\/label>/);
+    expect(html).toMatch(/<label for="password"[^>]*>Meeting password<\/label>/);
+    expect(html).toMatch(
+      /<input[^>]*id="password"[^>]*type="password"|<input[^>]*type="password"[^>]*id="password"/,
+    );
+  });
+
+  it("a size-1 link is today's page: no ID, no password", () => {
+    const html = renderToStaticMarkup(
+      <StartClient
+        token="t"
+        linkId="x3Jd8kq0VbN2mT5wYc7HfA"
+        size={1}
+        needsPassword={false}
+        active
+      />,
+    );
+    expect(html).toContain('Join the meeting');
+    expect(html).not.toContain('prolific-id');
+    expect(html).not.toContain('password');
+  });
+
+  it('a size-1 link with a password asks for it, still no ID (R27)', () => {
+    const html = renderToStaticMarkup(
+      <StartClient token="t" linkId="x3Jd8kq0VbN2mT5wYc7HfA" size={1} needsPassword active />,
+    );
+    expect(html).toContain('Join the meeting');
+    expect(html).not.toContain('prolific-id');
+    expect(html).toMatch(/<label for="password"[^>]*>Meeting password<\/label>/);
+  });
+});

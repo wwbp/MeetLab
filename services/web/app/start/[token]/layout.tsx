@@ -2,7 +2,6 @@ import { inter } from '@/lib/fonts';
 import { cn } from '@/lib/utils';
 import '@/styles/theme.css';
 
-
 export default function StartLinkLayout({ children }: { children: React.ReactNode }) {
   return (
     <>

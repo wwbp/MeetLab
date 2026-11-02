@@ -51,7 +51,8 @@ export async function POST(request: Request) {
   if (!link.legacyPool) {
     const info = await publicLink(link.linkId);
     if (info.status === 404) return error('Invalid start link', 400);
-    if (info.status !== 200 || !('size' in info.body)) return error('Could not reach the study', 502);
+    if (info.status !== 200 || !('size' in info.body))
+      return error('Could not reach the study', 502);
     size = info.body.size;
   }
 
@@ -99,7 +100,10 @@ export async function POST(request: Request) {
       roomName: view.room,
       payload: { via: 'start-link', linkId: link.linkId },
     });
-    return NextResponse.json({ url: `/rooms/${encodeURIComponent(view.room)}`, roomName: view.room });
+    return NextResponse.json({
+      url: `/rooms/${encodeURIComponent(view.room)}`,
+      roomName: view.room,
+    });
   }
   return NextResponse.json(res.body);
 }

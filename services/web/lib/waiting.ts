@@ -7,7 +7,9 @@ import { carryQuery } from './join';
 import { formatClock } from './session-limit';
 
 /** A ticket view as meet hands it to the browser: an expired one carries its wait code. */
-export type ShownView = Exclude<TicketView, { kind: 'expired' }> | { kind: 'expired'; code?: string };
+export type ShownView =
+  | Exclude<TicketView, { kind: 'expired' }>
+  | { kind: 'expired'; code?: string };
 
 /** The runner's ready-check window (matchmaker.READY_CHECK_S). */
 const READY_CHECK_S = 20;

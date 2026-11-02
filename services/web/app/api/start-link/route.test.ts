@@ -68,7 +68,10 @@ describe('POST /api/start-link', () => {
   });
 
   it('size 1 with a start delay gets a ticket to wait on', async () => {
-    mm.publicLink.mockResolvedValue({ status: 200, body: { active: true, needs_password: false, size: 1 } });
+    mm.publicLink.mockResolvedValue({
+      status: 200,
+      body: { active: true, needs_password: false, size: 1 },
+    });
     const delayed = reply('tickets_create_size1');
     delayed.body.view = { kind: 'starting', room: 'link-x', starts_in_ms: 30_000 };
     mm.createTicket.mockResolvedValue(delayed);
@@ -85,14 +88,21 @@ describe('POST /api/start-link', () => {
     expect(mm.createTicket).not.toHaveBeenCalled();
 
     mm.createTicket.mockResolvedValue(reply('tickets_create_group'));
-    const res = await start({ token: LINK, participant_id: ` ${PID.toUpperCase()} `, password: 'blue-river' });
+    const res = await start({
+      token: LINK,
+      participant_id: ` ${PID.toUpperCase()} `,
+      password: 'blue-river',
+    });
     expect(res.status).toBe(200);
     expect(mm.createTicket).toHaveBeenCalledWith({
       link_id: LINK,
       participant_id: PID,
       password: 'blue-river',
     });
-    expect(await res.json()).toMatchObject({ ticket: '6f1c2b3a-4d5e-4f60-8a7b-9c0d1e2f3a4b', view: { kind: 'searching' } });
+    expect(await res.json()).toMatchObject({
+      ticket: '6f1c2b3a-4d5e-4f60-8a7b-9c0d1e2f3a4b',
+      view: { kind: 'searching' },
+    });
   });
 
   it('a garbage link, or an ID the runner does not know: 400', async () => {
@@ -105,7 +115,9 @@ describe('POST /api/start-link', () => {
   it('a stopped link: 410', async () => {
     mm.publicLink.mockResolvedValue(group());
     mm.createTicket.mockResolvedValue(reply('tickets_create_closed'));
-    expect((await start({ token: LINK, participant_id: PID, password: 'blue-river' })).status).toBe(410);
+    expect((await start({ token: LINK, participant_id: PID, password: 'blue-river' })).status).toBe(
+      410,
+    );
   });
 
   it('5 wrong passwords in a minute lock that IP out of that link for a minute (R29)', async () => {
@@ -130,7 +142,9 @@ describe('POST /api/start-link', () => {
 
     vi.setSystemTime(Date.UTC(2026, 10, 2, 12, 1, 1));
     mm.createTicket.mockResolvedValue(reply('tickets_create_group'));
-    expect((await start({ token: LINK, participant_id: PID, password: 'blue-river' }, ip)).status).toBe(200);
+    expect(
+      (await start({ token: LINK, participant_id: PID, password: 'blue-river' }, ip)).status,
+    ).toBe(200);
   });
 
   it('8 people behind one IP can all join a size-8 link; 5 × size per minute (R37)', async () => {
@@ -138,12 +152,14 @@ describe('POST /api/start-link', () => {
     mm.createTicket.mockResolvedValue(reply('tickets_create_group'));
     const ip = freshIp();
     for (let i = 0; i < 40; i++) {
-      expect((await start({ token: LINK, participant_id: PID, password: 'x' }, ip)).status).toBe(200);
+      expect((await start({ token: LINK, participant_id: PID, password: 'x' }, ip)).status).toBe(
+        200,
+      );
     }
     expect((await start({ token: LINK, participant_id: PID, password: 'x' }, ip)).status).toBe(429);
   });
 
-  it('size 1 keeps today\'s 5 starts per minute per IP', async () => {
+  it("size 1 keeps today's 5 starts per minute per IP", async () => {
     const token = await signStartLink(['global']);
     mm.createTicket.mockResolvedValue(reply('tickets_create_size1'));
     const ip = freshIp();

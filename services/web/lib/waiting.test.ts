@@ -26,7 +26,9 @@ describe('waitingView', () => {
       T0,
       T0,
     );
-    expect(v.note).toBe('Someone did not confirm in time. You are back in line with your place kept.');
+    expect(v.note).toBe(
+      'Someone did not confirm in time. You are back in line with your place kept.',
+    );
   });
 
   it('ready check: a Ready button, then waiting for the others', () => {
@@ -36,7 +38,11 @@ describe('waitingView', () => {
       message: 'Press the button within 20 seconds.',
       action: 'ready',
     });
-    const pressed = waitingView({ kind: 'ready_check', deadline_in_ms: 9_000, pressed: true }, T0, T0);
+    const pressed = waitingView(
+      { kind: 'ready_check', deadline_in_ms: 9_000, pressed: true },
+      T0,
+      T0,
+    );
     expect(pressed.message).toBe('Waiting for the others to confirm.');
     expect(pressed.action).toBeUndefined();
   });
@@ -73,7 +79,8 @@ describe('waitingView', () => {
     const v = waitingView({ kind: 'missed' }, T0, T0);
     expect(v).toMatchObject({
       heading: 'You missed the start',
-      message: "Your group was ready, but we didn't hear from you in time. You can join the line again.",
+      message:
+        "Your group was ready, but we didn't hear from you in time. You can join the line again.",
       action: 'join_again',
     });
   });
@@ -85,9 +92,9 @@ describe('waitingView', () => {
 
 describe('roomUrl', () => {
   it("carries the start page's query but the ticket's Prolific ID wins", () => {
-    expect(
-      roomUrl('link-a', '5f8e2a1b3c4d5e6f7a8b9c0d', '?PROLIFIC_PID=typo&STUDY_ID=s1'),
-    ).toBe('/rooms/link-a?PROLIFIC_PID=5f8e2a1b3c4d5e6f7a8b9c0d&STUDY_ID=s1');
+    expect(roomUrl('link-a', '5f8e2a1b3c4d5e6f7a8b9c0d', '?PROLIFIC_PID=typo&STUDY_ID=s1')).toBe(
+      '/rooms/link-a?PROLIFIC_PID=5f8e2a1b3c4d5e6f7a8b9c0d&STUDY_ID=s1',
+    );
   });
 
   it('size 1 (no ticket ID) keeps the query as it was', () => {

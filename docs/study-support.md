@@ -213,7 +213,8 @@ study so late arrivals don't wait for a group that will never form.
 If a bot setting a link uses is **deleted** (in Bot settings or the Database page), the link
 **stops by itself** within a few seconds, and the Events page shows a `link_stopped` warning
 naming the missing setting. Otherwise its rooms would quietly run on the global settings.
-Save the setting again under the same name, then press **Start**.
+Save the setting again under the same name, then press **Start**. Until you do, **Start**
+is refused and names the missing setting.
 
 The password is checked on every join. After too many wrong tries the page asks the
 participant to wait 1 minute.

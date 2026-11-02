@@ -54,6 +54,7 @@ describe('console auth matcher', () => {
       '/api/console/config',
       '/api/console/configs',
       '/api/console/start-link',
+      '/api/console/start-link/Qm9vdHN0cmFwTGlua0lEMQ',
       '/api/console/logout',
       '/api/db',
       '/api/db/anything',
@@ -65,11 +66,14 @@ describe('console auth matcher', () => {
   it('protects every console API route but login, by enumeration', () => {
     // A hand-written list missed DELETE /api/console/test-data when it was added (2026-10-14):
     // derive the console's admin routes from the directory instead.
+    // Recursive, so a nested route (start-link/[id]) is checked too; `[x]` becomes a sample value.
     const dir = path.join(__dirname, 'app', 'api', 'console');
-    const routes = fs
-      .readdirSync(dir, { withFileTypes: true })
-      .filter((entry) => entry.isDirectory() && entry.name !== 'login')
-      .map((entry) => `/api/console/${entry.name}`);
+    const routes = (fs.readdirSync(dir, { recursive: true }) as string[])
+      .filter((file) => path.basename(file) === 'route.ts' && !file.startsWith('login'))
+      .map((file) => {
+        const segments = path.dirname(file).split(path.sep);
+        return `/api/console/${segments.map((s) => (/^\[.+\]$/.test(s) ? 'sample' : s)).join('/')}`;
+      });
     expect(routes.length).toBeGreaterThan(3);
     for (const route of routes) {
       expect(isProtected(route), `${route} is not behind auth`).toBe(true);

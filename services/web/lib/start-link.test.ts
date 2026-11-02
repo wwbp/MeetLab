@@ -1,8 +1,10 @@
 import { beforeAll, describe, expect, it } from 'vitest';
+import { createHash } from 'node:crypto';
 import { SignJWT } from 'jose';
 import {
   generateStartRoomName,
   pickUniform,
+  resolveLinkParam,
   signStartLink,
   verifyStartLink,
 } from './start-link';
@@ -82,5 +84,43 @@ describe('generateStartRoomName', () => {
       names.add(name);
     }
     expect(names.size).toBe(200);
+  });
+});
+
+describe('resolveLinkParam', () => {
+  const legacyId = (token: string) =>
+    createHash('sha256').update(token).digest('base64url').slice(0, 22);
+
+  it('takes a stored link ID as it is', async () => {
+    expect(await resolveLinkParam('Qm9vdHN0cmFwTGlua0lEMQ')).toEqual({
+      linkId: 'Qm9vdHN0cmFwTGlua0lEMQ',
+    });
+  });
+
+  it('gives an old JWT link an ID of the same shape, and its pool', async () => {
+    const token = await signStartLink(['friendly', 'strict']);
+    const resolved = await resolveLinkParam(token);
+    expect(resolved).toEqual({ linkId: legacyId(token), legacyPool: ['friendly', 'strict'] });
+    expect(resolved?.linkId).toMatch(/^[A-Za-z0-9_-]{22}$/);
+  });
+
+  it('hashes the URL-decoded token: an encoded and a decoded link are one link', async () => {
+    const token = await signStartLink(['friendly']);
+    const encoded = encodeURIComponent(token).replace(/\./g, '%2E');
+    expect(encoded).not.toBe(token);
+    expect(await resolveLinkParam(encoded)).toEqual(await resolveLinkParam(token));
+  });
+
+  it('refuses anything else', async () => {
+    for (const bad of [
+      '',
+      'not-a-jwt',
+      'Qm9vdHN0cmFwTGlua0lEM',
+      'Qm9vdHN0cmFwTGlua0lEMQ=',
+      '%E0%A4%A',
+      'a'.repeat(23),
+    ]) {
+      expect(await resolveLinkParam(bad), bad).toBeNull();
+    }
   });
 });

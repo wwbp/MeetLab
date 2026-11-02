@@ -1,4 +1,4 @@
-import { randomInt, randomUUID } from 'node:crypto';
+import { createHash, randomInt, randomUUID } from 'node:crypto';
 import { SignJWT, jwtVerify } from 'jose';
 
 /**
@@ -45,6 +45,30 @@ export async function verifyStartLink(token: string): Promise<string[] | null> {
   } catch {
     return null;
   }
+}
+
+/** A stored link's ID: 22 base64url characters (16 random bytes, made by the runner). */
+const LINK_ID = /^[A-Za-z0-9_-]{22}$/;
+
+/**
+ * The /start/<param> of either kind of link: a stored link's ID, or an old JWT link, whose
+ * ID is the hash of its URL-decoded token (same shape, so one link however it was pasted).
+ * Null for anything else.
+ */
+export async function resolveLinkParam(
+  param: string,
+): Promise<{ linkId: string; legacyPool?: string[] } | null> {
+  let decoded: string;
+  try {
+    decoded = decodeURIComponent(param);
+  } catch {
+    return null;
+  }
+  if (LINK_ID.test(decoded)) return { linkId: decoded };
+  const pool = await verifyStartLink(decoded);
+  if (!pool) return null;
+  const linkId = createHash('sha256').update(decoded).digest('base64url').slice(0, 22);
+  return { linkId, legacyPool: pool };
 }
 
 /** Unbiased uniform pick (crypto.randomInt, not Math.random). */

@@ -176,6 +176,8 @@ services:
       - BOT_RUNNER_SECRET=${BOT_RUNNER_SECRET:-changeme}
     volumes:
       - ../services/web:/app:cached
+      # The runner contract lib/matchmaking-client.test.ts reads (same relative path as on the host).
+      - ../tests/fixtures:/tests/fixtures:ro
       # Anonymous, so `make up` (--renew-anon-volumes) reseeds it from the image: a named
       # volume kept the first install forever and dev ran other packages than CI.
       - /app/node_modules

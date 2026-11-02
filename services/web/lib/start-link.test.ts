@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { SignJWT } from 'jose';
 import {
   generateStartRoomName,
+  linkSettings,
   pickUniform,
   resolveLinkParam,
   signStartLink,
@@ -122,5 +123,52 @@ describe('resolveLinkParam', () => {
     ]) {
       expect(await resolveLinkParam(bad), bad).toBeNull();
     }
+  });
+});
+
+describe('linkSettings', () => {
+  const base = { name: 'Pilot 3', pool: ['friendly'] };
+
+  it('fills the defaults: size 1, min size = size, no delay, 5 min max wait, no password', () => {
+    expect(linkSettings(base)).toEqual({
+      link: { name: 'Pilot 3', pool: ['friendly'], size: 1, min_size: 1, delay_s: 0, max_wait_s: 300 },
+    });
+    expect(linkSettings({ ...base, size: 3 })).toMatchObject({ link: { size: 3, min_size: 3 } });
+  });
+
+  it('keeps every value given, and the password when there is one', () => {
+    const link = { ...base, size: 3, min_size: 2, delay_s: 10, max_wait_s: 600, password: 'blue-river' };
+    expect(linkSettings(link)).toEqual({ link });
+    expect(linkSettings({ ...base, password: '' })).toEqual(linkSettings(base));
+  });
+
+  it('trims the name, and names an unnamed request (older callers send only the pool)', () => {
+    expect(linkSettings({ ...base, name: '  Pilot 3 ' })).toMatchObject({ link: { name: 'Pilot 3' } });
+    expect(linkSettings({ pool: ['friendly'] })).toMatchObject({ link: { name: 'Untitled link' } });
+  });
+
+  it('refuses values out of range', () => {
+    for (const bad of [
+      { name: '  ' },
+      { pool: [] },
+      { pool: [''] },
+      { size: 0 },
+      { size: 9 },
+      { size: 2.5 },
+      { size: '3' },
+      { size: 3, min_size: 4 },
+      { min_size: 0 },
+      { delay_s: -1 },
+      { delay_s: 301 },
+      { max_wait_s: 59 },
+      { max_wait_s: 1801 },
+      { password: 42 },
+    ]) {
+      expect(linkSettings({ ...base, ...bad }), JSON.stringify(bad)).toHaveProperty('error');
+    }
+  });
+
+  it('refuses a body that is not an object', () => {
+    for (const bad of [null, 'x', 3, []]) expect(linkSettings(bad)).toHaveProperty('error');
   });
 });

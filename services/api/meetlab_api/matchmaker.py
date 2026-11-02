@@ -4,10 +4,21 @@ step() and ticket_view() are pure (no DB, no clock, no randomness); the endpoint
 them in one locked transaction per link. The router is mounted by runner.py behind the
 runner's secret. Request/reply shapes: tests/fixtures/matchmaking/*.json.
 """
+import random
+import secrets
+import uuid
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
+from fastapi.responses import JSONResponse
+from loguru import logger
+from sqlalchemy import exists, func, or_, select
+
+from meetlab_api.links import ensure_legacy_link, verify_password
+from meetlab_core.db.engine import AsyncSessionLocal
+from meetlab_core.db.models import Conversation, Match, StartLink, Ticket
+from meetlab_core.event_log import record_event
 
 TICKET_LIVE_S = 90   # a searching ticket polled within this is live (matchable)
 READY_CHECK_S = 20   # a group's ready-check window (Q15)
@@ -179,3 +190,205 @@ def pick_setting(pool: list[str], counts: dict[str, int], choice) -> str:
     """Balanced assignment (R42): the pool's least-used setting on this link; choice breaks ties."""
     least = min(counts.get(scope, 0) for scope in pool)
     return choice([scope for scope in pool if counts.get(scope, 0) == least])
+
+
+# ── I/O: one transaction under the link's row lock around step() ──────────────────
+
+NON_TERMINAL = ("searching", "found", "ready", "placed")
+
+
+def _error(status: int, error: str) -> JSONResponse:
+    return JSONResponse({"error": error}, status_code=status)
+
+
+def _base36(n: int) -> str:
+    digits = ""
+    while n:
+        n, d = divmod(n, 36)
+        digits = "0123456789abcdefghijklmnopqrstuvwxyz"[d] + digits
+    return digits or "0"
+
+
+async def _step(db, link: StartLink, now: datetime) -> list:
+    """step() on the link's non-terminal tickets and open matches, its changes applied (the
+    caller holds the link's lock). Returns what runs after commit: StopRoom, Event."""
+    tickets = {t.id: t for t in await db.scalars(
+        select(Ticket).where(Ticket.link_id == link.link_id, Ticket.state.in_(NON_TERMINAL)))}
+    running = exists().where(Conversation.room_name == Match.room_name, Conversation.status == "running")
+    ended = select(func.max(Conversation.ended_at)).where(Conversation.room_name == Match.room_name).scalar_subquery()
+    matches, states = {}, []
+    for m, is_running, ended_at in await db.execute(
+            select(Match, running, ended).where(Match.link_id == link.link_id, Match.closed_at.is_(None))):
+        matches[m.room_name] = m
+        states.append(MatchState(m.room_name, m.ready_deadline, m.starts_at, m.session_id,
+                                 None if m.session_id is None or is_running else ended_at))
+    # Balanced assignment counts the link's matches, except those a failed ready check closed (R42).
+    counts = dict((await db.execute(
+        select(Match.bot_config_scope, func.count())
+        .where(Match.link_id == link.link_id, or_(Match.closed_at.is_(None), Match.starts_at.is_not(None)))
+        .group_by(Match.bot_config_scope))).all())
+
+    def new_match():
+        scope = pick_setting(link.pool, counts, random.choice)
+        counts[scope] = counts.get(scope, 0) + 1
+        return f"link-{_base36(int(now.timestamp() * 1000))}-{secrets.token_hex(4)}", scope
+
+    after = []
+    for c in step(link, [TicketState(t.id, t.state, t.queued_at, t.last_seen, t.room_name, t.ready_at,
+                                     t.requeued_at, t.placed_at) for t in tickets.values()],
+                  states, now, new_match):
+        if isinstance(c, UpdateTicket):
+            for k, v in c.fields.items():
+                setattr(tickets[c.id], k, v)
+        elif isinstance(c, UpdateMatch):
+            for k, v in c.fields.items():
+                setattr(matches[c.room_name], k, v)
+        elif isinstance(c, CreateMatch):
+            db.add(Match(room_name=c.room_name, link_id=link.link_id, bot_config_scope=c.bot_config_scope,
+                         size=c.size, created_at=now, ready_deadline=c.ready_deadline, starts_at=c.starts_at))
+            await db.flush()  # before its members point at it
+        else:
+            after.append(c)
+    await db.flush()
+    return after
+
+
+async def _locked(sessions, link_id: str, act):
+    """One transaction under the link's row lock: step, act(db, link, now) -> its Ticket or an
+    error reply, step again. Returns (reply, after-commit changes, rooms waiting for setup)."""
+    async with sessions() as db, db.begin():
+        link = await db.scalar(select(StartLink).where(StartLink.link_id == link_id).with_for_update())
+        if link is None:
+            return _error(404, "not_found"), [], []
+        now = await db.scalar(select(func.clock_timestamp()))  # after the lock: one clock for every process
+        after = await _step(db, link, now)
+        t = await act(db, link, now)
+        if isinstance(t, JSONResponse):
+            return t, after, []
+        after += await _step(db, link, now)
+        match = await db.get(Match, t.room_name) if t.room_name else None
+        live = await db.scalar(select(func.count()).select_from(Ticket).where(
+            Ticket.link_id == link_id, Ticket.state == "searching",
+            Ticket.last_seen >= now - _s(TICKET_LIVE_S)))
+        pending = (await db.scalars(select(Match.room_name).where(
+            Match.link_id == link_id, Match.closed_at.is_(None), Match.session_id.is_(None)))).all()
+        return ({"ticket": t.id, "link_id": link_id, "participant_id": t.participant_id,
+                 "view": ticket_view(t, match, live, link, now)}, after, pending)
+
+
+async def _after(hooks, changes: list) -> None:
+    for c in changes:
+        if isinstance(c, StopRoom):
+            try:
+                await hooks.stop_room(c.room_name)
+            except Exception as e:
+                logger.error(f"stopping room {c.room_name} after a failed ready check failed: {e}")
+        else:
+            await record_event(c.name, room_name=c.payload.get("room"), payload=c.payload)
+
+
+async def _run(hooks, sessions, link_id: str, act):
+    """_locked, then what runs after commit. Rooms waiting for setup are set up here (the claim
+    makes that safe from every request); then one more locked step places their members."""
+    reply, after, pending = await _locked(sessions, link_id, act)
+    await _after(hooks, after)
+    if pending and isinstance(reply, dict):
+        for room in pending:
+            await hooks.setup_match(room)
+        ticket_id = reply["ticket"]
+
+        async def same(db, link, now):
+            return await db.get(Ticket, ticket_id)
+        reply, after, _ = await _locked(sessions, link_id, same)
+        await _after(hooks, after)
+    return reply
+
+
+async def create_ticket(hooks, body, sessions=AsyncSessionLocal):
+    """POST /tickets: the participant's live ticket on the link, else a new one.
+    Order: unknown link 404, wrong password 403, existing ticket, stopped link 410, new."""
+    if not (isinstance(body, dict) and isinstance(body.get("link_id"), str)
+            and isinstance(body.get("participant_id"), (str, type(None)))):
+        return _error(400, "bad_request")
+    pid = body.get("participant_id") or None
+    legacy = body.get("legacy")
+    if legacy is not None:
+        pool = legacy.get("pool") if isinstance(legacy, dict) else None
+        if not (isinstance(pool, list) and pool and all(isinstance(p, str) for p in pool)):
+            return _error(400, "bad_request")
+        async with sessions() as db, db.begin():
+            await ensure_legacy_link(db, body["link_id"], pool)
+
+    async def act(db, link, now):
+        if link.password_hash and not verify_password(str(body.get("password") or ""), link.password_hash):
+            return _error(403, "wrong_password")
+        t = pid and await db.scalar(select(Ticket).where(
+            Ticket.link_id == link.link_id, Ticket.participant_id == pid, Ticket.state.in_(NON_TERMINAL)))
+        if t:
+            t.last_seen = now
+            return t
+        if not link.active:
+            return _error(410, "closed")
+        t = Ticket(id=str(uuid.uuid4()), link_id=link.link_id, participant_id=pid, state="searching",
+                   queued_at=now, last_seen=now)
+        db.add(t)
+        await db.flush()
+        return t
+    return await _run(hooks, sessions, body["link_id"], act)
+
+
+async def _ticket_link(sessions, ticket_id: str) -> str | None:
+    try:
+        uuid.UUID(ticket_id)
+    except ValueError:
+        return None
+    async with sessions() as db:
+        return await db.scalar(select(Ticket.link_id).where(Ticket.id == ticket_id))
+
+
+async def poll_ticket(hooks, ticket_id: str, sessions=AsyncSessionLocal):
+    """POST /tickets/{id}/poll: the waiting page is still open (the ticket is live); its view."""
+    link_id = await _ticket_link(sessions, ticket_id)
+    if link_id is None:
+        return _error(404, "not_found")
+
+    async def act(db, link, now):
+        t = await db.get(Ticket, ticket_id)
+        t.last_seen = now
+        return t
+    return await _run(hooks, sessions, link_id, act)
+
+
+async def ready_ticket(hooks, ticket_id: str, sessions=AsyncSessionLocal):
+    """POST /tickets/{id}/ready: Ready pressed; counts only in `found` during the ready check."""
+    link_id = await _ticket_link(sessions, ticket_id)
+    if link_id is None:
+        return _error(404, "not_found")
+
+    async def act(db, link, now):
+        t = await db.get(Ticket, ticket_id)
+        t.last_seen = now
+        m = await db.get(Match, t.room_name) if t.room_name else None
+        if t.state == "found" and m and m.starts_at is None and m.ready_deadline and m.ready_deadline > now:
+            t.state, t.ready_at = "ready", now
+        return t
+    return await _run(hooks, sessions, link_id, act)
+
+
+@router.post("/tickets")
+async def post_ticket(request: Request):
+    try:
+        body = await request.json()
+    except ValueError:
+        return _error(400, "bad_request")
+    return await create_ticket(request.app.state, body)
+
+
+@router.post("/tickets/{ticket_id}/poll")
+async def post_poll(ticket_id: str, request: Request):
+    return await poll_ticket(request.app.state, ticket_id)
+
+
+@router.post("/tickets/{ticket_id}/ready")
+async def post_ready(ticket_id: str, request: Request):
+    return await ready_ticket(request.app.state, ticket_id)

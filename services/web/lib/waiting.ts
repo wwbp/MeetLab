@@ -6,13 +6,6 @@ import type { TicketView } from './matchmaking-client';
 import { carryQuery } from './join';
 import { formatClock } from './session-limit';
 
-/** A ticket view as meet hands it to the browser: an expired one carries its wait code. */
-export type ShownView =
-  | Exclude<TicketView, { kind: 'expired' }>
-  | { kind: 'expired'; code?: string };
-
-/** The runner's ready-check window (matchmaker.READY_CHECK_S). */
-const READY_CHECK_S = 20;
 const PAGE_TITLE = 'Join meeting | MeetLab';
 
 export const COPY = {
@@ -36,15 +29,14 @@ export type Waiting = {
   /** Digits only, shown aria-hidden; `announce` is what a screen reader hears, once. */
   countdown?: string;
   announce?: string;
-  code?: string;
-  action?: 'ready' | 'copy' | 'join_again';
+  action?: 'ready' | 'join_again';
 };
 
 /** Time left on a reply's countdown, measured from when the reply arrived (not the browser clock). */
 export const remainingMs = (inMs: number, arrivedAtMs: number, nowMs: number) =>
   Math.max(0, inMs - (nowMs - arrivedAtMs));
 
-export function waitingView(view: ShownView, arrivedAtMs: number, nowMs: number): Waiting {
+export function waitingView(view: TicketView, arrivedAtMs: number, nowMs: number): Waiting {
   switch (view.kind) {
     case 'searching': {
       const by = new Date(arrivedAtMs + view.expires_in_ms).toLocaleTimeString([], {
@@ -53,7 +45,7 @@ export function waitingView(view: ShownView, arrivedAtMs: number, nowMs: number)
       });
       return {
         heading: `Finding your group: ${view.found} of ${view.size} here`,
-        message: `Keep this page open. If no group forms by ${by}, you will get a code so you can still be paid.`,
+        message: `Keep this page open. We will look for a group until ${by}.`,
         note: view.requeued
           ? 'Someone did not confirm in time. You are back in line with your place kept.'
           : undefined,
@@ -64,7 +56,7 @@ export function waitingView(view: ShownView, arrivedAtMs: number, nowMs: number)
         ? { heading: 'Your group is ready', message: 'Waiting for the others to confirm.' }
         : {
             heading: 'Your group is ready',
-            message: `Press the button within ${READY_CHECK_S} seconds.`,
+            message: `Press the button within ${Math.ceil(remainingMs(view.deadline_in_ms, arrivedAtMs, nowMs) / 1000)} seconds.`,
             action: 'ready',
           };
     case 'starting': {
@@ -80,9 +72,7 @@ export function waitingView(view: ShownView, arrivedAtMs: number, nowMs: number)
     case 'expired':
       return {
         heading: 'We could not form a group in time',
-        message: 'Paste it into the survey to be paid. You can close this page.',
-        code: view.code,
-        action: 'copy',
+        message: 'Go back to the survey and follow its instructions. You can close this page.',
       };
     case 'missed':
       return {
@@ -104,12 +94,12 @@ export function roomUrl(room: string, participantId: string | null, search: stri
 
 /** What to do on a change of view kind: the tab title, a tone, where focus goes (R39). */
 export function attention(
-  prev: ShownView['kind'] | null,
-  next: ShownView['kind'],
-): { title: string; tone: boolean; focus: 'ready' | 'copy' | null } | null {
+  prev: TicketView['kind'] | null,
+  next: TicketView['kind'],
+): { title: string; tone: boolean; focus: 'ready' | null } | null {
   if (prev === next) return null;
   if (next === 'ready_check') {
     return { title: '(!) Your group is ready - MeetLab', tone: true, focus: 'ready' };
   }
-  return { title: PAGE_TITLE, tone: false, focus: next === 'expired' ? 'copy' : null };
+  return { title: PAGE_TITLE, tone: false, focus: null };
 }

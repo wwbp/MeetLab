@@ -33,10 +33,10 @@ describe('WaitingPanel (R39)', () => {
     expect(html).toContain('<span class="sr-only">Starting in 8 seconds</span>');
   });
 
-  it('expired shows the code and a Copy button', () => {
-    const html = panel({ kind: 'expired', code: 'ABCD2345' });
-    expect(html).toContain('ABCD2345');
-    expect(html).toContain('>Copy</button>');
+  it('expired sends them back to the survey: no code, no button', () => {
+    const html = panel({ kind: 'expired' });
+    expect(html).toContain('Go back to the survey');
+    expect(html).not.toContain('</button>');
   });
 
   it('missed offers Join again; lost connection is an alert', () => {

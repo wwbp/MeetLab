@@ -1,23 +1,16 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { buttonClass, inputClass, secondaryButtonClass } from '@/components/console/swiss';
+import { buttonClass, inputClass } from '@/components/console/swiss';
 import { carryQuery } from '@/lib/join';
+import type { TicketView } from '@/lib/matchmaking-client';
 import { normalizeProlificId, prolificIdFromParams } from '@/lib/study';
-import {
-  COPY,
-  type ShownView,
-  type Waiting,
-  attention,
-  remainingMs,
-  roomUrl,
-  waitingView,
-} from '@/lib/waiting';
+import { COPY, type Waiting, attention, remainingMs, roomUrl, waitingView } from '@/lib/waiting';
 
 const POLL_MS = 2_000;
 const BAD_ID = 'A Prolific ID is 24 letters and numbers: please check it.';
 
-type Reply = { ticket: string; participant_id: string | null; view: ShownView; at: number };
+type Reply = { ticket: string; participant_id: string | null; view: TicketView; at: number };
 type Action = NonNullable<Waiting['action']>;
 
 /** A ticket this tab already holds resumes (reload), even once the link is stopped. */
@@ -61,15 +54,13 @@ export function WaitingPanel({
   lost,
   onAction,
   actionRef,
-  copied = false,
 }: {
   w: Waiting;
   lost: boolean;
   onAction: (action: Action) => void;
   actionRef?: React.Ref<HTMLButtonElement>;
-  copied?: boolean;
 }) {
-  const label = { ready: "I'm ready", copy: copied ? 'Copied' : 'Copy', join_again: 'Join again' };
+  const label = { ready: "I'm ready", join_again: 'Join again' };
   return (
     <>
       <div aria-live="polite" className="space-y-3">
@@ -88,17 +79,8 @@ export function WaitingPanel({
           {w.countdown}
         </span>
       )}
-      {w.code && (
-        <p className="text-base">
-          Your code: <strong className="font-mono text-2xl tracking-widest">{w.code}</strong>
-        </p>
-      )}
       {w.action && (
-        <button
-          ref={actionRef}
-          onClick={() => onAction(w.action!)}
-          className={w.action === 'copy' ? secondaryButtonClass : buttonClass}
-        >
+        <button ref={actionRef} onClick={() => onAction(w.action!)} className={buttonClass}>
           {label[w.action]}
         </button>
       )}
@@ -139,10 +121,9 @@ export function StartClient({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [failures, setFailures] = useState(0);
-  const [copied, setCopied] = useState(false);
   const audio = useRef<AudioContext | null>(null);
   const actionRef = useRef<HTMLButtonElement>(null);
-  const prevKind = useRef<ShownView['kind'] | null>(null);
+  const prevKind = useRef<TicketView['kind'] | null>(null);
 
   const apply = useCallback((data: Omit<Reply, 'at'>) => {
     const at = Date.now();
@@ -277,9 +258,6 @@ export function StartClient({
       );
       if (res?.ok) apply(data);
       else void poll(reply.ticket);
-    } else if (reply.view.kind === 'expired' && reply.view.code) {
-      await navigator.clipboard?.writeText(reply.view.code).catch(() => {});
-      setCopied(true);
     }
   }
 
@@ -301,7 +279,6 @@ export function StartClient({
           lost={failures >= 2}
           onAction={(a) => void onAction(a)}
           actionRef={actionRef}
-          copied={copied}
         />
       </Page>
     );

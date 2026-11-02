@@ -44,6 +44,7 @@ describe('POST /api/console/start-link', () => {
       min_size: 3,
       delay_s: 0,
       max_wait_s: 300,
+      ready_check_s: 60,
       password: 'blue-river',
     });
   });

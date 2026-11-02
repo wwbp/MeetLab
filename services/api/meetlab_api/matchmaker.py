@@ -15,13 +15,12 @@ from fastapi.responses import JSONResponse
 from loguru import logger
 from sqlalchemy import exists, func, or_, select
 
-from meetlab_api.links import ensure_legacy_link, verify_password
+from meetlab_api.links import ensure_legacy_link, stop_if_missing_settings, verify_password
 from meetlab_core.db.engine import AsyncSessionLocal
 from meetlab_core.db.models import Conversation, Match, StartLink, Ticket
 from meetlab_core.event_log import record_event
 
 TICKET_LIVE_S = 90   # a searching ticket polled within this is live (matchable)
-READY_CHECK_S = 20   # a group's ready-check window (Q15)
 DONE_AFTER_S = 120   # a placed ticket is done once its room has had no running session this long
 SETUP_CLAIM_S = 30   # a setup claim older than this may be retried (runner.setup_match)
 
@@ -59,11 +58,13 @@ class StopRoom:
 
 @dataclass(frozen=True)
 class Event:
-    name: str  # match_formed | ready_failed | ticket_expired (record_event)
+    name: str  # match_formed | ready_failed | ticket_expired | link_stopped (record_event)
     payload: dict = field(default_factory=dict)
+    severity: str = "info"  # warning: a sign a study is stuck (the Events page)
 
 
-# step()'s inputs. The link is any object with size, min_size, delay_s, max_wait_s (a StartLink).
+# step()'s inputs. The link is any object with size, min_size, delay_s, max_wait_s, ready_check_s
+# (a StartLink).
 
 @dataclass(frozen=True)
 class TicketState:
@@ -121,7 +122,7 @@ def step(link, tickets: list[TicketState], matches: list[MatchState], now: datet
                 update(t, state="removed")
             out += [UpdateMatch(m.room_name, {"closed_at": now}), StopRoom(m.room_name),
                     Event("ready_failed", {"room": m.room_name, "removed": [t.id for t in missed],
-                                           "requeued": [t.id for t in ready]})]
+                                           "requeued": [t.id for t in ready]}, "warning")]
             continue
         # 2. Everyone ready: the countdown starts.
         starts_at = m.starts_at
@@ -151,7 +152,7 @@ def step(link, tickets: list[TicketState], matches: list[MatchState], now: datet
     for group in groups:
         room, scope = new_match()
         out.append(CreateMatch(room, scope, len(group),
-                               now + _s(READY_CHECK_S) if link.size > 1 else None,
+                               now + _s(link.ready_check_s) if link.size > 1 else None,
                                now + _s(link.delay_s) if link.size == 1 else None,
                                tuple(t.id for t in group)))
         for t in group:
@@ -163,7 +164,7 @@ def step(link, tickets: list[TicketState], matches: list[MatchState], now: datet
     for t in _fifo(ts.values()):
         if t.state == "searching" and t.queued_at <= now - _s(link.max_wait_s):
             update(t, state="expired")
-            out.append(Event("ticket_expired", {"ticket": t.id}))
+            out.append(Event("ticket_expired", {"ticket": t.id}, "warning"))
     return out
 
 
@@ -261,7 +262,9 @@ async def _locked(sessions, link_id: str, act):
         if link is None:
             return _error(404, "not_found"), [], []
         now = await db.scalar(select(func.clock_timestamp()))  # after the lock: one clock for every process
-        after = await _step(db, link, now)
+        missing = await stop_if_missing_settings(db, link, now)
+        after = [Event("link_stopped", {"link_id": link_id, "missing": missing}, "warning")] if missing else []
+        after += await _step(db, link, now)
         t = await act(db, link, now)
         if isinstance(t, JSONResponse):
             return t, after, []
@@ -284,7 +287,7 @@ async def _after(hooks, changes: list) -> None:
             except Exception as e:
                 logger.error(f"stopping room {c.room_name} after a failed ready check failed: {e}")
         else:
-            await record_event(c.name, room_name=c.payload.get("room"), payload=c.payload)
+            await record_event(c.name, severity=c.severity, room_name=c.payload.get("room"), payload=c.payload)
 
 
 async def _run(hooks, sessions, link_id: str, act):

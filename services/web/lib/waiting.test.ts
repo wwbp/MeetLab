@@ -6,7 +6,7 @@ const clock = (ms: number) =>
   new Date(ms).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
 
 describe('waitingView', () => {
-  it('searching: how many are here, and the time a code comes if no group forms', () => {
+  it('searching: how many are here, and until when we look', () => {
     const v = waitingView(
       { kind: 'searching', found: 2, size: 3, expires_in_ms: 225_000, requeued: false },
       T0,
@@ -14,7 +14,7 @@ describe('waitingView', () => {
     );
     expect(v.heading).toBe('Finding your group: 2 of 3 here');
     expect(v.message).toBe(
-      `Keep this page open. If no group forms by ${clock(T0 + 225_000)}, you will get a code so you can still be paid.`,
+      `Keep this page open. We will look for a group until ${clock(T0 + 225_000)}.`,
     );
     expect(v.note).toBeUndefined();
     expect(v.action).toBeUndefined();
@@ -31,11 +31,15 @@ describe('waitingView', () => {
     );
   });
 
-  it('ready check: a Ready button, then waiting for the others', () => {
-    const v = waitingView({ kind: 'ready_check', deadline_in_ms: 20_000, pressed: false }, T0, T0);
+  it("ready check: a Ready button with the link's time left, then waiting for the others", () => {
+    const v = waitingView(
+      { kind: 'ready_check', deadline_in_ms: 60_000, pressed: false },
+      T0,
+      T0 + 5_000,
+    );
     expect(v).toMatchObject({
       heading: 'Your group is ready',
-      message: 'Press the button within 20 seconds.',
+      message: 'Press the button within 55 seconds.',
       action: 'ready',
     });
     const pressed = waitingView(
@@ -65,13 +69,11 @@ describe('waitingView', () => {
     expect(v.countdown).toBeUndefined();
   });
 
-  it('expired: the wait code to copy', () => {
-    const v = waitingView({ kind: 'expired', code: 'ABCD2345' }, T0, T0);
-    expect(v).toMatchObject({
+  it('expired: back to the survey, no code (Q1: waiting is not paid)', () => {
+    const v = waitingView({ kind: 'expired' }, T0, T0);
+    expect(v).toEqual({
       heading: 'We could not form a group in time',
-      code: 'ABCD2345',
-      message: 'Paste it into the survey to be paid. You can close this page.',
-      action: 'copy',
+      message: 'Go back to the survey and follow its instructions. You can close this page.',
     });
   });
 
@@ -111,11 +113,11 @@ describe('attention', () => {
     });
   });
 
-  it('expired moves focus to Copy; other changes restore the title', () => {
+  it('other changes restore the title', () => {
     expect(attention('searching', 'expired')).toEqual({
       title: 'Join meeting | MeetLab',
       tone: false,
-      focus: 'copy',
+      focus: null,
     });
     expect(attention('ready_check', 'starting')?.title).toBe('Join meeting | MeetLab');
   });

@@ -15,7 +15,8 @@ from sqlalchemy import func, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from meetlab_core.db.engine import AsyncSessionLocal
-from meetlab_core.db.models import TICKET_STATES, StartLink, Ticket
+from meetlab_core.db.models import TICKET_STATES, BotConfig, StartLink, Ticket
+from meetlab_core.event_log import record_event
 
 router = APIRouter()
 
@@ -77,8 +78,39 @@ def link_fields(body: dict) -> dict | str:
     max_wait_s = _whole(body, "max_wait_s", 60, 1800, 300)
     if max_wait_s is None:
         return "max_wait_s must be a whole number from 60 to 1800"
+    ready_check_s = _whole(body, "ready_check_s", 10, 300, 60)  # Q15: 60 s, for background tabs
+    if ready_check_s is None:
+        return "ready_check_s must be a whole number from 10 to 300"
     return {"name": name.strip(), "pool": [s.strip() for s in pool], "size": size, "min_size": min_size,
-            "delay_s": delay_s, "max_wait_s": max_wait_s}
+            "delay_s": delay_s, "max_wait_s": max_wait_s, "ready_check_s": ready_check_s}
+
+
+async def missing_settings(db, pool: list[str]) -> list[str]:
+    """The pool's bot settings with no bot_config row. 'global' needs none (the defaults)."""
+    named = [s for s in pool if s != "global"]
+    found = set(await db.scalars(select(BotConfig.scope).where(BotConfig.scope.in_(named))))
+    return [s for s in named if s not in found]
+
+
+async def stop_if_missing_settings(db, link: StartLink, now) -> list[str]:
+    """Stop an active link whose pool names a deleted bot setting: a group would otherwise
+    run with the global settings. Returns what is missing (the event's payload)."""
+    missing = link.active and await missing_settings(db, link.pool)
+    if missing:
+        link.active, link.stopped_at = False, now
+    return missing or []
+
+
+async def stop_links_missing_settings(sessions=AsyncSessionLocal) -> None:
+    """The background loop's pass (reconcile_tick): settings can be deleted anywhere (SQLAdmin)."""
+    stopped = []
+    async with sessions() as db, db.begin():
+        now = datetime.now(timezone.utc)
+        for link in await db.scalars(select(StartLink).where(StartLink.active).with_for_update(skip_locked=True)):
+            if missing := await stop_if_missing_settings(db, link, now):
+                stopped.append({"link_id": link.link_id, "missing": missing})
+    for payload in stopped:
+        await record_event("link_stopped", severity="warning", payload=payload)
 
 
 def _error(message: str, status: int) -> JSONResponse:
@@ -106,6 +138,8 @@ async def create_link(request: Request):
         return _error("password must be a string", 400)
     link_id = base64.urlsafe_b64encode(os.urandom(16)).decode().rstrip("=")  # 22 chars (R4)
     async with AsyncSessionLocal() as db, db.begin():
+        if missing := await missing_settings(db, fields["pool"]):
+            return _error(f"unknown bot settings: {', '.join(missing)}", 400)
         db.add(StartLink(link_id=link_id, password_hash=hash_password(password) if password else None, **fields))
     return {"link_id": link_id}
 
@@ -122,7 +156,8 @@ async def list_links():
         counts.setdefault(link_id, {})[state] = n
     return {"links": [{
         "link_id": r.link_id, "name": r.name, "pool": r.pool, "size": r.size, "min_size": r.min_size,
-        "delay_s": r.delay_s, "max_wait_s": r.max_wait_s, "has_password": r.password_hash is not None,
+        "delay_s": r.delay_s, "max_wait_s": r.max_wait_s, "ready_check_s": r.ready_check_s,
+        "has_password": r.password_hash is not None,
         "active": r.active, "legacy": r.legacy, "created_at": r.created_at.isoformat(),
         "stopped_at": r.stopped_at and r.stopped_at.isoformat(),
         "counts": {s: counts.get(r.link_id, {}).get(s, 0) for s in TICKET_STATES},

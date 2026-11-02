@@ -17,6 +17,7 @@ export default function StartLinksPage() {
   const [minSize, setMinSize] = useState(1);
   const [delay, setDelay] = useState(0);
   const [maxWaitMin, setMaxWaitMin] = useState(5);
+  const [readyCheck, setReadyCheck] = useState(60);
   const [password, setPassword] = useState('');
   const [links, setLinks] = useState<LinkRow[]>([]);
   const [link, setLink] = useState('');
@@ -81,6 +82,7 @@ export default function StartLinksPage() {
           min_size: group ? minSize : size,
           delay_s: delay,
           max_wait_s: maxWaitMin * 60,
+          ready_check_s: readyCheck,
           password,
         }),
       });
@@ -190,16 +192,18 @@ export default function StartLinksPage() {
               <Label>Max wait (minutes)</Label>
               <input type="number" min={1} max={30} value={shownNumber(maxWaitMin)} onChange={number(setMaxWaitMin)} className={inputClass} />
             </label>
+            {group && (
+              <label className="space-y-1">
+                <Label>Time to confirm (seconds)</Label>
+                <input type="number" min={10} max={300} value={shownNumber(readyCheck)} onChange={number(setReadyCheck)} className={inputClass} />
+                <span className="text-muted-foreground block text-xs">When a group forms, each person must press Ready within this time. Anyone who doesn’t is taken out of the line; the others keep their place.</span>
+              </label>
+            )}
             <label className="space-y-1 sm:col-span-2">
               <Label>Password</Label>
               <input type="password" autoComplete="new-password" value={password} onChange={(e) => setPassword(e.target.value)} className={inputClass} />
               <span className="text-muted-foreground block text-xs">Optional. You cannot see it again after you create the link: put it in your survey now.</span>
             </label>
-            {group && (
-              <p className="text-muted-foreground text-sm sm:col-span-3">
-                When a group forms, each person must press Ready within 20 seconds. Anyone who doesn’t is taken out of the line; the others keep their place.
-              </p>
-            )}
             <div className="sm:col-span-3">
               <button onClick={handleGenerate} disabled={selected.length === 0 || !name.trim() || !!minSizeError || generating} className={buttonClass}>
                 {generating ? 'Creating…' : 'Create link'}

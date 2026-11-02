@@ -19,9 +19,9 @@ def s(n):
     return timedelta(seconds=n)
 
 
-def link(size=3, min_size=None, delay_s=10, max_wait_s=300):
+def link(size=3, min_size=None, delay_s=10, max_wait_s=300, ready_check_s=60):
     return SimpleNamespace(size=size, min_size=size if min_size is None else min_size,
-                           delay_s=delay_s, max_wait_s=max_wait_s)
+                           delay_s=delay_s, max_wait_s=max_wait_s, ready_check_s=ready_check_s)
 
 
 def ticket(id, state="searching", queued=T0, seen=None, room=None, ready_at=None, requeued_at=None):
@@ -67,11 +67,16 @@ class MatchRuleTest(unittest.TestCase):
         tickets = [ticket(i, queued=T0 + s(n)) for n, i in enumerate("abcd")]
         changes = run(link(3, delay_s=10), tickets, now=T0 + s(5))
         [m] = of(changes, CreateMatch)
-        self.assertEqual(m, CreateMatch("r-1", "friendly", 3, T0 + s(5 + 20), None, ("a", "b", "c")))
+        self.assertEqual(m, CreateMatch("r-1", "friendly", 3, T0 + s(5 + 60), None, ("a", "b", "c")))
         self.assertEqual(ticket_updates(changes),
                          {i: {"state": "found", "room_name": "r-1"} for i in "abc"})
         self.assertEqual(of(changes, Event), [Event("match_formed", {"room": "r-1", "size": 3, "scope": "friendly",
                                                                      "tickets": ["a", "b", "c"]})])
+
+    def test_the_ready_check_window_is_the_links(self):
+        tickets = [ticket(i) for i in "ab"]
+        [m] = of(run(link(2, ready_check_s=45), tickets, now=T0 + s(5)), CreateMatch)
+        self.assertEqual(m.ready_deadline, T0 + s(5 + 45))
 
     def test_never_more_than_size_and_several_at_once(self):
         tickets = [ticket(f"t{n:02}", queued=T0 + s(n)) for n in range(7)]
@@ -147,8 +152,8 @@ class ExpireRuleTest(unittest.TestCase):
         tickets = [ticket("a", seen=T0 + s(300)), ticket("b"), ticket("c", queued=T0 + s(1), seen=T0 + s(300))]
         changes = run(lnk, tickets, now=T0 + s(300))
         self.assertEqual(ticket_updates(changes), {"a": {"state": "expired"}, "b": {"state": "expired"}})
-        self.assertEqual(of(changes, Event), [Event("ticket_expired", {"ticket": "a"}),
-                                              Event("ticket_expired", {"ticket": "b"})])
+        self.assertEqual(of(changes, Event), [Event("ticket_expired", {"ticket": "a"}, "warning"),
+                                              Event("ticket_expired", {"ticket": "b"}, "warning")])
 
     def test_not_before_max_wait(self):
         self.assertEqual(run(link(3, max_wait_s=300), [ticket("a", seen=T0 + s(299))], now=T0 + s(299)), [])
@@ -166,7 +171,7 @@ class ReadyCheckRuleTest(unittest.TestCase):
         self.assertEqual(ticket_updates(changes), {"a": requeue, "b": {"state": "removed"}, "c": requeue})
         self.assertIn(UpdateMatch("r0", {"closed_at": deadline}), changes)
         self.assertIn(StopRoom("r0"), changes)
-        self.assertIn(Event("ready_failed", {"room": "r0", "removed": ["b"], "requeued": ["a", "c"]}), changes)
+        self.assertIn(Event("ready_failed", {"room": "r0", "removed": ["b"], "requeued": ["a", "c"]}, "warning"), changes)
 
     def test_requeued_members_keep_their_queue_time_and_are_matched_again(self):
         deadline = T0 + s(20)

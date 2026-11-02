@@ -129,7 +129,7 @@ describe('resolveLinkParam', () => {
 describe('linkSettings', () => {
   const base = { name: 'Pilot 3', pool: ['friendly'] };
 
-  it('fills the defaults: size 1, min size = size, no delay, 5 min max wait, no password', () => {
+  it('fills the defaults: size 1, min size = size, no delay, 5 min max wait, 60 s to confirm, no password', () => {
     expect(linkSettings(base)).toEqual({
       link: {
         name: 'Pilot 3',
@@ -138,6 +138,7 @@ describe('linkSettings', () => {
         min_size: 1,
         delay_s: 0,
         max_wait_s: 300,
+        ready_check_s: 60,
       },
     });
     expect(linkSettings({ ...base, size: 3 })).toMatchObject({ link: { size: 3, min_size: 3 } });
@@ -150,6 +151,7 @@ describe('linkSettings', () => {
       min_size: 2,
       delay_s: 10,
       max_wait_s: 600,
+      ready_check_s: 45,
       password: 'blue-river',
     };
     expect(linkSettings(link)).toEqual({ link });
@@ -178,6 +180,8 @@ describe('linkSettings', () => {
       { delay_s: 301 },
       { max_wait_s: 59 },
       { max_wait_s: 1801 },
+      { ready_check_s: 9 },
+      { ready_check_s: 301 },
       { password: 42 },
     ]) {
       expect(linkSettings({ ...base, ...bad }), JSON.stringify(bad)).toHaveProperty('error');

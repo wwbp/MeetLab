@@ -32,7 +32,8 @@
             "done": 6,
             "expired": 1,
             "removed": 1
-          }
+          },
+          "ready_check_s": 60
         },
         {
           "link_id": "x3Jd8kq0VbN2mT5wYc7HfA",
@@ -57,7 +58,8 @@
             "done": 4,
             "expired": 0,
             "removed": 0
-          }
+          },
+          "ready_check_s": 60
         }
       ]
     }

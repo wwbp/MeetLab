@@ -34,6 +34,7 @@ def upgrade() -> None:
         sa.Column('min_size', sa.Integer(), nullable=False, server_default='1'),
         sa.Column('delay_s', sa.Integer(), nullable=False, server_default='0'),
         sa.Column('max_wait_s', sa.Integer(), nullable=False, server_default='300'),
+        sa.Column('ready_check_s', sa.Integer(), nullable=False, server_default='60'),
         sa.Column('password_hash', sa.Text()),
         sa.Column('active', sa.Boolean(), nullable=False, server_default='true'),
         sa.Column('legacy', sa.Boolean(), nullable=False, server_default='false'),

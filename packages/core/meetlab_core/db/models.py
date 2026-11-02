@@ -266,6 +266,7 @@ class StartLink(Base):
     min_size: Mapped[int] = mapped_column(Integer, nullable=False, server_default="1")
     delay_s: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
     max_wait_s: Mapped[int] = mapped_column(Integer, nullable=False, server_default="300")
+    ready_check_s: Mapped[int] = mapped_column(Integer, nullable=False, server_default="60")
     # scrypt$<salt b64>$<hash b64> (links.hash_password); null = no password.
     password_hash: Mapped[str | None] = mapped_column(Text)
     active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="true")

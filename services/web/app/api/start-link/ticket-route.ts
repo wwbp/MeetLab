@@ -1,5 +1,4 @@
 import { NextResponse } from 'next/server';
-import { completionCode } from '@/lib/completion-code';
 import type { RunnerReply, TicketReply } from '@/lib/matchmaking-client';
 import { checkRateLimit } from '@/lib/rate-limit';
 
@@ -10,8 +9,7 @@ const PER_TICKET_PER_MINUTE = 60;
 
 /**
  * The status and Ready routes: a ticket token in a POST body → the runner → its view.
- * An expired ticket gets its wait code here (R36): the completion code's HMAC over
- * 'waited:<link>', so it is stable, recomputable by a researcher and never a room's code.
+ * An expired ticket gets no code: waiting without a group is not paid (Q1).
  */
 export async function ticketRoute(
   request: Request,
@@ -31,12 +29,5 @@ export async function ticketRoute(
     );
   }
   const { status, body: reply } = await call(ticket);
-  if (status !== 200 || !('view' in reply)) return NextResponse.json(reply, { status });
-  if (reply.view.kind !== 'expired' || !reply.participant_id) return NextResponse.json(reply);
-  const code = completionCode(
-    `waited:${reply.link_id}`,
-    reply.participant_id,
-    process.env.LIVEKIT_API_SECRET ?? '',
-  );
-  return NextResponse.json({ ...reply, view: { kind: 'expired', code } });
+  return NextResponse.json(reply, { status });
 }

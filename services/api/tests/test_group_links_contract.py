@@ -41,8 +41,8 @@ def _env():
 class ConstantsTest(unittest.TestCase):
     def test_constants(self):
         from meetlab_api import matchmaker
-        self.assertEqual((matchmaker.TICKET_LIVE_S, matchmaker.READY_CHECK_S, matchmaker.DONE_AFTER_S,
-                          matchmaker.SETUP_CLAIM_S), (90, 20, 120, 30))
+        self.assertEqual((matchmaker.TICKET_LIVE_S, matchmaker.DONE_AFTER_S, matchmaker.SETUP_CLAIM_S),
+                         (90, 120, 30))  # the ready-check window is a link's (ready_check_s)
 
     def test_change_types(self):
         from meetlab_api.matchmaker import CreateMatch, Event, StopRoom, UpdateMatch, UpdateTicket

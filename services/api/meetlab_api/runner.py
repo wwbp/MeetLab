@@ -1432,6 +1432,7 @@ async def reconcile_tick() -> None:
     await fail_silent_sessions(AsyncSessionLocal, stop=_stop_bot)
     await rejoin_dead_sessions()
     await sync_pending_recordings()
+    await links.stop_links_missing_settings()
 
 
 @app.on_event("startup")

@@ -25,7 +25,8 @@ _env()
 from meetlab_api import matchmaker  # noqa: E402
 from meetlab_api.dispatch import DispatchError  # noqa: E402
 from meetlab_api.links import hash_password  # noqa: E402
-from meetlab_core.db.models import Conversation, Match, StartLink, Ticket  # noqa: E402
+from sqlalchemy.dialects.postgresql import insert as pg_insert  # noqa: E402
+from meetlab_core.db.models import BotConfig, Conversation, Match, StartLink, Ticket  # noqa: E402
 
 
 def _pid():
@@ -78,6 +79,7 @@ class _DbCase(unittest.TestCase):
         link_id = uuid.uuid4().hex[:22]
 
         async def add(db):
+            await db.execute(pg_insert(BotConfig).values([{"scope": p} for p in pool]).on_conflict_do_nothing())
             db.add(StartLink(link_id=link_id, name="test", pool=list(pool), size=size, min_size=size,
                              delay_s=delay_s, max_wait_s=max_wait_s, active=active,
                              password_hash=password and hash_password(password)))
@@ -236,6 +238,31 @@ class MatchmakerDbTest(_DbCase):
         self.assertEqual(self._create(link_id, pid)["ticket"], first["ticket"])
         closed = self._create(link_id, _pid())
         self.assertEqual((closed.status_code, json.loads(closed.body)), (410, {"error": "closed"}))
+
+    def test_a_deleted_pool_setting_stops_the_link(self):
+        """A bot setting deleted after the link was made (SQLAdmin, the API): the link stops
+        and says why, so no group runs with the wrong bot (it would fall back to global)."""
+        scope = f"gone-{uuid.uuid4().hex[:8]}"
+        link_id = self._link(size=2, pool=("global", scope))
+        self._sql("DELETE FROM bot_config WHERE scope = :s", s=scope)
+        closed = self._create(link_id, _pid())
+        self.assertEqual((closed.status_code, json.loads(closed.body)), (410, {"error": "closed"}))
+        link = self._db(lambda db: db.get(StartLink, link_id))
+        self.assertEqual((link.active, link.stopped_at is not None), (False, True))
+        [(severity, payload)] = self._sql("SELECT severity, payload FROM events WHERE type = 'link_stopped'"
+                                          " AND payload->>'link_id' = :l", l=link_id).all()
+        self.assertEqual((severity, payload["missing"]), ("warning", [scope]))
+
+    def test_the_background_loop_stops_links_whose_setting_was_deleted(self):
+        """reconcile_tick runs this, so the Start links list shows it within a tick."""
+        scope = f"gone-{uuid.uuid4().hex[:8]}"
+        gone, kept = self._link(pool=(scope,)), self._link()
+        self._sql("DELETE FROM bot_config WHERE scope = :s", s=scope)
+        from meetlab_api.links import stop_links_missing_settings
+        self._call(stop_links_missing_settings)
+        active = dict(self._sql("SELECT link_id, active FROM start_links WHERE link_id IN (:a, :b)",
+                                a=gone, b=kept).all())
+        self.assertEqual(active, {gone: False, kept: True})
 
     def test_the_assignment_record_joins_ticket_match_session_and_config(self):
         """R43: who was in which room with which bot setting, from one SQL join."""

@@ -44,6 +44,7 @@ export type LinkRow = {
   min_size: number;
   delay_s: number;
   max_wait_s: number;
+  ready_check_s: number;
   has_password: boolean;
   active: boolean;
   legacy: boolean;
@@ -60,6 +61,7 @@ export type NewLink = {
   min_size: number;
   delay_s: number;
   max_wait_s: number;
+  ready_check_s: number;
   password?: string;
 };
 

@@ -37,7 +37,7 @@ class LinkFieldsTest(unittest.TestCase):
         from meetlab_api.links import link_fields
         self.assertEqual(link_fields({"name": " Pilot ", "pool": ["global"]}),
                          {"name": "Pilot", "pool": ["global"], "size": 1, "min_size": 1, "delay_s": 0,
-                          "max_wait_s": 300})
+                          "max_wait_s": 300, "ready_check_s": 60})
 
     def test_min_size_defaults_to_size(self):
         from meetlab_api.links import link_fields
@@ -60,10 +60,12 @@ class LinkFieldsTest(unittest.TestCase):
         for bad in ({"name": "  "}, {"name": 3}, {"pool": []}, {"pool": "a"}, {"pool": ["a", ""]},
                     {"size": 0}, {"size": 9}, {"size": True}, {"size": "3"}, {"size": 2.5},
                     {"min_size": 0}, {"min_size": 4}, {"delay_s": -1}, {"delay_s": 301},
-                    {"max_wait_s": 59}, {"max_wait_s": 1801}):
+                    {"max_wait_s": 59}, {"max_wait_s": 1801},
+                    {"ready_check_s": 9}, {"ready_check_s": 301}):
             with self.subTest(bad):
                 self.assertIsInstance(link_fields({**ok, **bad}), str)
-        self.assertIsInstance(link_fields({**ok, "size": 8, "min_size": 1, "delay_s": 300, "max_wait_s": 1800}),
+        self.assertIsInstance(link_fields({**ok, "size": 8, "min_size": 1, "delay_s": 300, "max_wait_s": 1800,
+                                              "ready_check_s": 300}),
                               dict)
 
 
@@ -80,6 +82,17 @@ class LinksApiTest(unittest.TestCase):
         runner.engine.sync_engine.dispose(close=False)  # connections an earlier class's loop left
         cls._client = TestClient(runner.app)
         cls.client = cls._client.__enter__()
+        cls._settings("friendly", "neutral")  # the fixtures' pool
+
+    @classmethod
+    def _settings(cls, *scopes):
+        from sqlalchemy.dialects.postgresql import insert
+        from meetlab_core.db.models import BotConfig
+
+        async def go():
+            async with cls.runner.AsyncSessionLocal() as db, db.begin():
+                await db.execute(insert(BotConfig).values([{"scope": s} for s in scopes]).on_conflict_do_nothing())
+        cls.client.portal.call(go)
 
     @classmethod
     def tearDownClass(cls):
@@ -143,6 +156,10 @@ class LinksApiTest(unittest.TestCase):
         self.assertEqual(len(ids), 2)
         for link_id in ids:
             self.assertRegex(link_id, r"^[A-Za-z0-9_-]{22}$")
+
+    def test_a_pool_setting_that_does_not_exist_is_400(self):
+        r = self.client.post("/links", headers=AUTH, json={"name": "t", "pool": ["global", "no-such-setting"]})
+        self.assertEqual((r.status_code, r.json()), (400, {"error": "unknown bot settings: no-such-setting"}))
 
     def test_invalid_body_is_400(self):
         f = _fixture("links_create_invalid")

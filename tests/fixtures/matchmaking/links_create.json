@@ -13,7 +13,8 @@
       "min_size": 2,
       "delay_s": 10,
       "max_wait_s": 300,
-      "password": "blue-river"
+      "password": "blue-river",
+      "ready_check_s": 60
     }
   },
   "response": {

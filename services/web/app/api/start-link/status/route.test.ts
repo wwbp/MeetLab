@@ -47,14 +47,9 @@ describe('POST /api/start-link/status', () => {
     expect(body.ticket).toBe(TICKET);
   });
 
-  it('gives an expired ticket its wait code: stable, never a room code (R36)', async () => {
+  it('an expired ticket gets no code (Q1: waiting is not paid)', async () => {
     mockPoll.mockResolvedValue(reply('tickets_poll_expired'));
-    const first = (await (await status(TICKET)).json()).view;
-    const again = (await (await status(TICKET)).json()).view;
-    expect(first.kind).toBe('expired');
-    expect(first.code).toBe(completionCode(`waited:${LINK}`, PID, 'secret'));
-    expect(again.code).toBe(first.code);
-    expect(first.code).not.toBe(completionCode(LINK, PID, 'secret'));
+    expect((await (await status(TICKET)).json()).view).toEqual({ kind: 'expired' });
   });
 
   it('unknown ticket: 404', async () => {

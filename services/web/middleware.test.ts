@@ -1,7 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
-import { config } from './middleware';
+import { NextRequest } from 'next/server';
+import { config, middleware } from './middleware';
 
 /**
  * The console's auth is a path allow-list, which means a new console page or a new
@@ -78,6 +79,14 @@ describe('console auth matcher', () => {
     for (const route of routes) {
       expect(isProtected(route), `${route} is not behind auth`).toBe(true);
     }
+  });
+
+  it('refuses stopping or starting a link without a console session', async () => {
+    const req = new NextRequest('http://meet.test/api/console/start-link/Qm9vdHN0cmFwTGlua0lEMQ', {
+      method: 'PATCH',
+      body: JSON.stringify({ active: false }),
+    });
+    expect((await middleware(req)).status).toBe(401);
   });
 
   it('leaves the genuinely public surface open', () => {

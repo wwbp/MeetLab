@@ -1,39 +1,27 @@
 import { NextResponse } from 'next/server';
-import { signStartLink } from '@/lib/start-link';
+import { createLink, listLinks } from '@/lib/matchmaking-client';
+import { linkSettings } from '@/lib/start-link';
 
 export const dynamic = 'force-dynamic';
 
-function trimTrailingSlash(value: string): string {
-  return value.endsWith('/') ? value.slice(0, -1) : value;
-}
-
 function inferMeetBaseUrl(request: Request): string {
-  const configured = process.env.MEET_BASE_URL;
-  if (configured) {
-    return trimTrailingSlash(configured);
-  }
-  // Same app — use the request's own origin.
-  return new URL(request.url).origin;
+  // Same app unless configured: use the request's own origin.
+  return (process.env.MEET_BASE_URL || new URL(request.url).origin).replace(/\/$/, '');
 }
 
-/** Generate a shareable meeting start link for a pool of bot-config scopes.
+/** Create a stored start link (the runner keeps it; the URL holds only its ID).
  *  Console-session guarded via middleware. */
 export async function POST(request: Request) {
-  const body = await request.json().catch(() => ({}));
-  const pool: unknown = body?.pool;
+  const settings = linkSettings(await request.json().catch(() => null));
+  if ('error' in settings) return NextResponse.json(settings, { status: 400 });
+  const { status, body } = await createLink(settings.link);
+  if (!('link_id' in body)) return NextResponse.json(body, { status });
+  const url = `${inferMeetBaseUrl(request)}/start/${body.link_id}`;
+  return NextResponse.json({ token: body.link_id, url });
+}
 
-  if (
-    !Array.isArray(pool) ||
-    pool.length === 0 ||
-    !pool.every((s) => typeof s === 'string' && s.trim().length > 0)
-  ) {
-    return NextResponse.json(
-      { error: 'pool must be a non-empty array of config scope names' },
-      { status: 400 }
-    );
-  }
-
-  const token = await signStartLink(pool);
-  const url = `${inferMeetBaseUrl(request)}/start/${encodeURIComponent(token)}`;
-  return NextResponse.json({ token, url });
+/** Every link, with counts of its tickets by state. */
+export async function GET() {
+  const { status, body } = await listLinks();
+  return NextResponse.json(body, { status });
 }

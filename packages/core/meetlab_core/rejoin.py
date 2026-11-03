@@ -7,6 +7,8 @@ context instead of greeting again. The sessions of one conversation form a chain
 """
 from datetime import timedelta
 
+from meetlab_core.turns import BotReply, Turn, assistant_message, user_message
+
 DEATHS = ("silent", "crashed")    # sessions.ENDS events where the bot died, not ended
 WINDOW = timedelta(minutes=2)     # a death older than this is history, not an outage
 MAX_REJOINS = 3                   # a bot that keeps dying stops being restarted
@@ -29,10 +31,13 @@ def chain(rows: dict, sid: str) -> list[str]:
 
 
 def context_messages(turns, names: dict) -> list[dict]:
-    """Stored turns as the LLM saw them live: people as "Name: text" (SpeakerLabelInjector's
-    form, the identity before "__" when no name was stored), the bot's lines as its own."""
-    return [{"role": "assistant", "content": t.text} if t.speaker_id.startswith("bot_")
-            else {"role": "user", "content": f"{names.get(t.speaker_id) or t.speaker_id.split('__')[0]}: {t.text}"}
+    """Stored turns as the LLM saw them live (meetlab_core.turns): a person's as a user_message
+    turn (the name the identity before "__" when none was stored, as SpeakerLabelInjector), the
+    bot's as its answer, what it said and to whom (meta.addressed_to)."""
+    return [assistant_message(BotReply(t.text, (t.meta or {}).get("addressed_to", [])))
+            if t.speaker_id.startswith("bot_")
+            else user_message([Turn(t.speaker_id, names.get(t.speaker_id) or t.speaker_id.split("__")[0], t.text,
+                                    (t.meta or {}).get("source", "speech"))])
             for t in turns]
 
 

@@ -15,7 +15,7 @@ the starts further apart; `SPEAKERS=a` is the one-speaker control.
 | Each person publishes their own microphone track | LiveKit | yes |
 | The transport hands the bot one audio stream per participant (`user_id` = identity) | Pipecat LiveKit transport | yes |
 | Each person gets their own VAD and speech-to-text chain | `services/bot/meetlab_bot/multi_speaker_stt.py` (`MultiSpeakerSTT._ensure_stt`) | yes |
-| Each transcript is labelled "name: words" for the LLM | `SpeakerLabelInjector`, same file | yes |
+| Each transcript becomes a *turn*: who (identity and name), the words, speech or typed chat | `SpeakerLabelInjector`, same file | yes |
 | **One** user aggregator collects transcripts into a user turn | Pipecat `LLMUserAggregator` (`bot.py`, `context_aggregator.user()`) | **no** |
 | The turn is stored | `on_user_turn_stopped` in `services/bot/meetlab_bot/bot.py` | yes, since F11's fix |
 
@@ -25,7 +25,7 @@ Recognition was always right per person; the merge happened afterwards. Pipecat 
 user aggregator per pipeline, and every transcript that arrives before its end-of-turn wait
 (`user_speech_timeout_ms`, 50 ms by default) runs out joins the same turn. The turn was then
 stored as one utterance under whoever was transcribed **last** (`_current_speaker_sid`), with
-only that person's label taken out. Before the fix the database held, for room `sim-attr-6318d5`:
+only that person's label taken out (the LLM then read people as "Name: words" text). Before the fix the database held, for room `sim-attr-6318d5`:
 
 ```
 sim_c_21a5 | sim_b_3bdc: Are we seeing higher latency on the transcription service since Tuesday? Can you explain what a retrieval augmented generation system does?
@@ -36,12 +36,40 @@ because the transcripts arrive together: the three people's segments go to the s
 server at about the same time and come back in the same millisecond (bot log of the
 2026-11-02 run: VAD stops at 44.0, 45.4 and 45.5 s; all three transcripts at 48.162 s).
 
-## The fix
+## The fix: who said what is data, in and out
 
-`split_turn` (`bot.py`) cuts the committed turn back into pieces at the labels the injector put
-in, and each piece is stored as its own utterance under its own speaker. The LLM still reads
-the turn as one message, with every piece labelled, so it knows who asked what. Test:
-`TestSplitTurn` in `services/bot/tests/test_bot.py`, which feeds the stored text above.
+Since November 2026 the model's input and output are both structured (`packages/core/meetlab_core/turns.py`),
+so nothing is parsed out of the words.
+
+**In.** Each transcript is a `Turn`: `speaker_id` (the participant's identity), `name`,
+`text`, `source` (`speech`, or `chat` when typed). A committed user turn reaches the model as
+one JSON list of turns, one per person in it:
+
+```json
+[{"speaker_id": "sim_b_3bdc", "name": "sim_b_3bdc", "text": "We are seeing higher latency ...", "source": "speech"},
+ {"speaker_id": "sim_c_21a5", "name": "sim_c_21a5", "text": "Can you explain ...", "source": "speech"}]
+```
+
+`on_user_turn_stopped` (`bot.py`) reads the turns back (`parse_turns`) and stores each as its
+own utterance under its own `speaker_id`, `meta.source` from the turn. The words are never
+split or searched for a name, so a colon, quotes or a name said aloud change nothing.
+
+**Out.** The model answers under a strict JSON schema (OpenAI's `response_format`, also
+accepted by our vLLM): `{"reply": what to say, "addressed_to": [speaker_id, ...]}` (empty for
+everyone). A short paragraph appended to the researchers' Bot settings prompt
+(`FORMAT_INSTRUCTIONS`) tells the model both shapes. Only `reply` is spoken, as it streams
+(`ReplyStreamer`, `reply_stream.py`); the bot's stored utterance is what was said, and
+`meta.addressed_to` whom it answered. A model that ignores the schema is still spoken, to
+no one in particular.
+
+**History.** The model's past answers stay in its context in the shape it answers in
+(`{"reply", "addressed_to"}`, with the reply cut where an interruption stopped it), and a
+bot that rejoins a meeting after dying rebuilds the same messages from the stored rows
+(`rejoin.context_messages`).
+
+Tests: `packages/core/tests/test_turns.py` (the schema, the stored text above as turns),
+`TestStructuredTurns` in `services/bot/tests/test_bot.py`, `TestSpeakerLabelInjector` in
+`services/bot/tests/test_multi_speaker_stt.py`, `TestContext` in `packages/core/tests/test_rejoin.py`.
 
 After the fix the same simulation passes: one turn held all three people's words, logged as
 `user turn held 3 speakers' words: stored as one utterance each`, and stored as three rows.
@@ -55,12 +83,10 @@ on when people speak.
   started.** In the run above the turn read c, a, b although a started first. The pieces get
   the turn's start time plus 1 ms each, so a transcript of an overlap may list speakers in an
   order they did not speak in.
-- **Everyone in a merged turn gets one reply.** The bot answers all of them at once; it
-  cannot yet answer one person and hold the other's question.
-- **Two people with the same display name** cannot be told apart in a merged turn: the label
-  is the display name, so both pieces go to one of them.
-- **A person who says "Alice: " out loud**, with the colon recognised, would split their own
-  sentence there. Speech recognisers rarely write that colon.
+- **Everyone in a merged turn gets one reply.** The bot answers all of them at once and says
+  whom it answered (`addressed_to`); it cannot yet answer one person and hold the other's question.
+- **Two people with the same display name** are told apart by `speaker_id`, but the model
+  sees the same name for both, so its reply may confuse them.
 - **One microphone, two people** (a shared laptop) is one LiveKit track: they are one speaker
   to MeetLab. Telling them apart needs diarisation, which MeetLab does not do.
 
@@ -73,4 +99,5 @@ on when people speak.
    which turn to answer. This is the larger change the per-participant worker design
    aimed at (`participant_workers.py`); Pipecat 1.12's aggregator has one turn at a time.
 3. **Upstream in Pipecat:** let `LLMUserAggregator` keep `user_id` per aggregated part so the
-   `on_user_turn_stopped` message carries who said each piece, instead of re-parsing labels.
+   `on_user_turn_stopped` message carries who said each piece, instead of each transcript
+   carrying its turn as JSON text.

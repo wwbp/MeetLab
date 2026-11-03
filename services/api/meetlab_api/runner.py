@@ -1442,6 +1442,7 @@ async def reconcile_tick() -> None:
     await rejoin_dead_sessions()
     await sync_pending_recordings()
     await links.stop_links_missing_settings()
+    await matchmaker.step_open_links(app.state)
 
 
 @app.on_event("startup")

@@ -548,3 +548,28 @@ class TestTurnOwnerIsTheTranscriptsSpeaker(unittest.TestCase):
         import inspect
         from meetlab_bot import bot
         self.assertNotIn('"on_active_speaker_changed"', inspect.getsource(bot))
+
+
+class TestSpokenLineStoredOnce(unittest.TestCase):
+    """A fixed line (greeting, closing message) is stored by say() when it is queued. Its words
+    also reach on_assistant_turn_stopped once spoken (Pipecat 1.12), which stored it a second
+    time 20 ms later: every session had two greetings (local test call, 2026-11-03)."""
+
+    def test_the_spoken_turn_of_a_line_say_stored_is_not_stored_again(self):
+        from meetlab_bot.bot import claim_spoken_line
+        pending = ["Hello! How are you doing today?"]
+        self.assertTrue(claim_spoken_line(pending, "Hello! How are you doing today?"))
+        self.assertEqual(pending, [])
+
+    def test_a_model_reply_is_stored(self):
+        from meetlab_bot.bot import claim_spoken_line
+        pending = ["Hello! How are you doing today?"]
+        self.assertFalse(claim_spoken_line(pending, "Hi Holly, great to meet you!"))
+        self.assertEqual(pending, ["Hello! How are you doing today?"])
+
+    def test_spacing_from_tts_does_not_matter_and_each_line_is_claimed_once(self):
+        from meetlab_bot.bot import claim_spoken_line
+        pending = ["Hello!  How are you?", "Our time is up."]
+        self.assertTrue(claim_spoken_line(pending, " Hello! How are you? "))
+        self.assertFalse(claim_spoken_line(pending, "Hello! How are you?"))  # said once, stored once
+        self.assertTrue(claim_spoken_line(pending, "Our time is up."))

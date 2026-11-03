@@ -981,6 +981,8 @@ async def _bot(runner_args: LiveKitRunnerArguments):
             return
         # message.content is what was said: the reply only (ReplyStreamer), cut short if interrupted.
         _reply_in_context(context, message.content, addressed_to or [])
+        if addressed_to is None and claim_spoken_line(_spoken_lines, message.content):
+            return  # say() stored this line when it was queued
         ts = _iso_to_unix(message.timestamp)
         utt_id = _new_id()
         meta: dict = {} if addressed_to is None else {"addressed_to": addressed_to}
@@ -1129,6 +1131,8 @@ async def _bot(runner_args: LiveKitRunnerArguments):
         logger.info("Bot disconnected from the room — ending the session")
         await task.cancel()
 
+    _spoken_lines: list[str] = []  # lines say() stored, until their spoken turn arrives
+
     async def say(text: str) -> None:
         """Speak a fixed line and store it as the bot's turn. Its words reach Pipecat only
         with the audio, after Pipecat has closed the turn, so it would be missing from the
@@ -1140,6 +1144,7 @@ async def _bot(runner_args: LiveKitRunnerArguments):
                 db.add(Utterance(id=utt_id, speaker_id=runner_args.bot_identity, conv_id=runner_args.session_id,
                                  reply_to=_last_user_utt_id[0], ts=time.time(), text=text))
                 await _set_root_utterance_if_needed(db, runner_args.session_id, utt_id)
+            _spoken_lines.append(text)  # its spoken turn is not stored again
             _last_bot_utt_id[0] = utt_id
             logger.info(f"bot line {utt_id} stored for session {runner_args.session_id}")
         except Exception as e:
@@ -1278,6 +1283,17 @@ def build_audio_track_sink(
         persist=_persist,
     )
     return audio_tracks.AudioTrackSink(on_flush)
+
+
+def claim_spoken_line(pending: list[str], content: str) -> bool:
+    """True if this assistant turn is a fixed line say() already stored (the greeting, the
+    closing message), which is then claimed: Pipecat delivers its words as a turn too."""
+    said = " ".join(content.split())
+    for i, line in enumerate(pending):
+        if " ".join(line.split()) == said:
+            del pending[i]
+            return True
+    return False
 
 
 def _build_llm(api_key: str, bot_config, structured: bool = True) -> OpenAILLMService:

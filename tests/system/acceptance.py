@@ -570,6 +570,11 @@ async def scenario_auto_record():
         await _until(lambda: any("bot line" in l for l in _log_lines(f"{LOGS}/bot", m.session, m.started)),
                      60, "the greeting stored as the bot's line")
         await asyncio.sleep(10)
+        # Nobody speaks here, so the bot's one line is its greeting, stored once (it was
+        # stored twice, by say() and by its spoken turn, until 2026-11-03).
+        said = [u["text"] for u in _meeting_get(m.session, "utterances") if u["bot"]]
+        if len(said) != 1:
+            raise Fail(f"the greeting should be stored once, got {len(said)} bot lines: {said}")
         _web.open(urllib.request.Request(f"{MEET}/api/record/stop?roomName={room}"), timeout=30)
         ecs.stop_task(cluster=CLUSTER, task=m.task, reason="acceptance: auto_record")  # flushes the audio
         await _until(lambda: _describe(m.task)["lastStatus"] == "STOPPED", 150, "task stopped")
@@ -579,7 +584,7 @@ async def scenario_auto_record():
                     if room in o["Key"]]
             return any(k.endswith("-recording.mp4") for k in keys) and any(f"-audio-{m.bot_identity}" in k for k in keys)
         await _until(recorded, 180, "the room's video and the bot's own audio in the media bucket")
-        return "video, the bot's own audio and its greeting line, with no Record press"
+        return "video, the bot's own audio and its greeting line (stored once), with no Record press"
 
 
 async def scenario_record_auth():

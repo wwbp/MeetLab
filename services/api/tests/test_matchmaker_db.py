@@ -264,6 +264,20 @@ class MatchmakerDbTest(_DbCase):
                                 a=gone, b=kept).all())
         self.assertEqual(active, {gone: False, kept: True})
 
+    def test_the_background_loop_places_a_group_nobody_polls_any_more(self):
+        """Members go to the room at starts_at and their pages stop polling: reconcile_tick
+        steps every link with an open group, so tickets read placed on time (local test call,
+        2026-11-03: two tickets stayed 'ready' until the link's next participant)."""
+        link_id, room, [a, b] = self._formed_match(delay_s=60)  # nobody is placed during the polls
+        self._ready(a)
+        self._ready(b)
+        self._poll(a)  # sets the room up: a session in the room
+        self._sql("UPDATE matches SET starts_at = now() - interval '5 seconds' WHERE room_name = :r", r=room)
+        self._call(matchmaker.step_open_links, self.hooks)
+        rows = {t.id: t for t in self._tickets(link_id)}
+        starts_at = self._db(lambda db: db.get(Match, room)).starts_at
+        self.assertEqual({(t.state, t.placed_at) for t in rows.values()}, {("placed", starts_at)})
+
     def test_the_assignment_record_joins_ticket_match_session_and_config(self):
         """R43: who was in which room with which bot setting, from one SQL join."""
         link_id, room, [a, b] = self._formed_match()

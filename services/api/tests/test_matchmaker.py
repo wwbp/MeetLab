@@ -220,6 +220,12 @@ class PlacedRuleTest(unittest.TestCase):
         changes = run(link(2), tickets, [match("r0", starts_at=T0 + s(30), session_id="s1")], now=T0 + s(30))
         self.assertEqual(ticket_updates(changes), {i: {"state": "placed", "placed_at": T0 + s(30)} for i in "ab"})
 
+    def test_placed_at_is_when_the_group_was_sent_not_when_a_step_noticed(self):
+        # Members leave for the room at starts_at and stop polling: a later step records starts_at.
+        tickets = [ticket("a", "ready", room="r0")]
+        changes = run(link(1), tickets, [match("r0", starts_at=T0 + s(30), session_id="s1")], now=T0 + s(95))
+        self.assertEqual(ticket_updates(changes), {"a": {"state": "placed", "placed_at": T0 + s(30)}})
+
     def test_not_without_a_session(self):
         tickets = [ticket("a", "ready", room="r0")]
         self.assertEqual(run(link(1), tickets, [match("r0", starts_at=T0)], now=T0 + s(5)), [])

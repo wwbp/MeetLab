@@ -39,7 +39,7 @@ from pipecat.processors.aggregators.llm_response_universal import (
     LLMContextAggregatorPair,
     LLMUserAggregatorParams,
 )
-from pipecat.utils.context.llm_context_summarization import LLMAutoContextSummarizationConfig
+from pipecat.utils.context.llm_context_summarization import LLMAutoContextSummarizationConfig, LLMContextSummaryConfig
 from pipecat.services.elevenlabs.tts import ElevenLabsTTSService
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.services.tts_service import TextAggregationMode
@@ -53,10 +53,13 @@ from meetlab_bot import audio_tracks
 from meetlab_core.config import load_config, require
 from meetlab_core.db.config_loader import load_bot_config
 from meetlab_core.heartbeat import beat_forever
-from meetlab_bot.presence import wait_until_empty
+from meetlab_bot.presence import humans, wait_until_empty
 from meetlab_core.sessions import end
 from meetlab_core.db.engine import AsyncSessionLocal
 from meetlab_core.db.models import Conversation, MediaFile, Speaker, Utterance
+from meetlab_core.turns import (
+    FORMAT_INSTRUCTIONS, RESPONSE_FORMAT, BotReply, assistant_message, parse_turns, user_message,
+)
 from meetlab_bot.interruption import InterruptionTracker
 from meetlab_bot.study_support import closing_due, speaker_meta
 from meetlab_bot.multi_speaker_stt import MultiSpeakerSTT, SpeakerLabelInjector
@@ -130,15 +133,7 @@ _WORD_RE = re.compile(r"[a-z0-9]+")
 
 
 def _normalize_words(text: str) -> list[str]:
-    """Lowercase word tokens, stripping punctuation and any 'Name:' speaker prefix."""
-    # SpeakerLabelInjector prepends "DisplayName: " to user transcripts; drop the
-    # prefix so the name itself doesn't dilute the bot-echo comparison. Only treat
-    # it as a prefix when the part before ": " is short (a name, ≤3 words), so a
-    # colon deeper in real content (e.g. "...a strange ratio: forty two") is kept.
-    if text and ": " in text:
-        head, body = text.split(": ", 1)
-        if len(head.split()) <= 3:
-            text = body
+    """Lowercase word tokens, stripping punctuation."""
     return _WORD_RE.findall((text or "").lower())
 
 
@@ -463,6 +458,28 @@ def _require_stt_backend(bot_config) -> None:
         raise ValueError(f"stt_model={bot_config.stt_model} needs NEMOTRON_STT_URL (a Parakeet NIM)")
 
 
+# A group room's greeting waits for the whole group, but no longer than this after the
+# first person joined (R18): someone who never arrives must not keep the others waiting.
+_GREETING_WAIT_S = 60
+
+
+def greeting_due(humans_present: int, expected: int | None, first_join_s: float, now_s: float) -> bool:
+    return humans_present >= (expected or 1) or now_s - first_join_s >= _GREETING_WAIT_S
+
+
+async def first_join(*, start_close, greet, humans_present, expected, now=time.monotonic, sleep=asyncio.sleep):
+    """The first human is here: start the closing timer now, so it matches the browser's
+    (anchored at the first join), then greet once the group is (greet=None: a resumed bot)."""
+    joined = now()
+    start_close(joined)
+    if greet is None:
+        return
+    await sleep(1)
+    while not greeting_due(humans_present(), expected, joined, now()):
+        await sleep(1)
+    await greet()
+
+
 async def bot(runner_args: LiveKitRunnerArguments):
     """Run one bot session; whatever happens, the session ends with a recorded status.
 
@@ -491,10 +508,9 @@ async def _bot(runner_args: LiveKitRunnerArguments):
     # Set in on_data_received before queueing frames so on_user_turn_stopped
     # can fall back to it when _sid_to_identity is not yet populated.
     _last_data_sender: list[str | None] = [None]
-    # Chat turns queued and not yet stored: the next stored user turn was typed (meta.source).
-    # ponytail: a spoken turn finishing between a chat's queueing and its storing would take
-    # the mark; a per-turn tag on the frame would close that if it ever matters.
-    _chat_turns_pending: list[int] = [0]
+    # Whom the model addressed in the reply being spoken (ReplyStreamer's on_reply, at the LLM's
+    # end), until on_assistant_turn_stopped stores that reply, after its audio.
+    _addressed_to: list[list[str] | None] = [None]
     # last utterance ids for reply_to chaining
     _last_user_utt_id: list[str | None] = [None]
     _last_bot_utt_id: list[str | None] = [None]
@@ -616,8 +632,9 @@ async def _bot(runner_args: LiveKitRunnerArguments):
     context_aggregator = LLMContextAggregatorPair(
         context,
         user_params=build_user_aggregator_params(bot_config),
-        assistant_params=_assistant_params(),
+        assistant_params=_assistant_params(_build_llm(openai_api_key, bot_config, structured=False)),
     )
+    _write_turns_as_user_message(context_aggregator.user())
 
     # Per-turn timing — stt_done/tts_first anchors for E2E (stt_done → tts_first).
     # Per-stage breakdown (llm_ttft_ms, sentence_agg_ms, tts_ttfb_ms) comes from
@@ -752,6 +769,10 @@ async def _bot(runner_args: LiveKitRunnerArguments):
                 _turn_timing.setdefault("tts_first", time.monotonic())
             await self.push_frame(frame, direction)
 
+    async def _on_reply(reply: BotReply) -> None:
+        _addressed_to[0] = reply.addressed_to
+
+    from meetlab_bot.reply_stream import ReplyStreamer  # speaks only the reply of the model's JSON
     pipeline = Pipeline(
         [
             transport.input(),
@@ -762,6 +783,7 @@ async def _bot(runner_args: LiveKitRunnerArguments):
             SpeakerLabelInjector(_sid_to_identity, _sid_to_name),
             context_aggregator.user(),
             llm,
+            ReplyStreamer(_on_reply),
             tts,
             bot_audio_recorder,
             _TTSFirstTimer(),
@@ -793,15 +815,9 @@ async def _bot(runner_args: LiveKitRunnerArguments):
                             .on_conflict_do_nothing(index_elements=["id"])
                         )
         _last_data_sender[0] = participant_id
-        _chat_turns_pending[0] += 1
-        await task.queue_frames(
-            [
-                InterruptionFrame(),
-                UserStartedSpeakingFrame(),
-                TranscriptionFrame(user_id=participant_id, timestamp=datetime.now(timezone.utc).isoformat(), text=text),
-                UserStoppedSpeakingFrame(),
-            ],
-        )
+        typed = TranscriptionFrame(user_id=participant_id, timestamp=datetime.now(timezone.utc).isoformat(), text=text)
+        typed.metadata["source"] = "chat"  # SpeakerLabelInjector writes it as a Turn of source chat
+        await task.queue_frames([InterruptionFrame(), UserStartedSpeakingFrame(), typed, UserStoppedSpeakingFrame()])
 
     from meetlab_bot.rtvi import OBSERVER_PARAMS, RoomRTVIProcessor
     task = PipelineWorker(
@@ -858,18 +874,22 @@ async def _bot(runner_args: LiveKitRunnerArguments):
                 stt_ms, bot_config.stt_model, _ep, multi_stt.qsize(),
                 (message.content or "")[:80],
             )
-        if not message.content:
+        # Everyone who talked in this end-of-turn window, as the context holds them (user_message)
+        # (F11: people talking over each other share one turn; each is stored apart).
+        turns = parse_turns(message.content or "")
+        if not turns:
             # VAD/STT fired but produced no transcript.
             logger.debug("Phantom segment: user turn committed with empty content")
             return
         # Self-echo heuristic: does this user transcript echo recent bot TTS?
+        _heard = " ".join(t.text for t in turns)
         for _bot_text in _recent_bot_texts:
-            sim = _text_similarity(message.content, _bot_text)
+            sim = _text_similarity(_heard, _bot_text)
             if sim >= _SELF_ECHO_SIMILARITY:
                 _turn_timing["diag_self_echo"] = True
                 logger.warning(
                     "Possible bot self-echo (sim={:.2f}): user={!r} ~ bot={!r}",
-                    sim, message.content[:80], _bot_text[:80],
+                    sim, _heard[:80], _bot_text[:80],
                 )
                 break
         # Resolution order for speaker identity:
@@ -904,7 +924,9 @@ async def _bot(runner_args: LiveKitRunnerArguments):
         )
 
         ts = _iso_to_unix(message.timestamp)
-        utt_id = _new_id()
+        if len(turns) > 1:
+            logger.info(f"user turn held {len(turns)} speakers' words: stored as one utterance each")
+        utt_id = None
         async with AsyncSessionLocal() as db:
             async with db.begin():
                 for _sid, (_ident, _name) in _learned.items():
@@ -917,20 +939,22 @@ async def _bot(runner_args: LiveKitRunnerArguments):
                         .values(id=_ident, meta=speaker_meta(_name, getattr(_p, "metadata", "")))
                         .on_conflict_do_nothing(index_elements=["id"])
                     )
-                db.add(
-                    Utterance(
-                        id=utt_id,
-                        speaker_id=identity,
-                        conv_id=runner_args.session_id,
-                        reply_to=_last_bot_utt_id[0],
-                        ts=ts,
-                        text=_spoken_text(message.content, {_sid_to_name.get(speaker_sid), identity.split("__")[0]}),
-                        meta={"source": "chat" if _chat_turns_pending[0] else "speech"},  # typed or said
+                for i, t in enumerate(turns):
+                    utt_id = _new_id()
+                    db.add(
+                        Utterance(
+                            id=utt_id,
+                            speaker_id=_speaker_of(t.speaker_id, _sid_to_identity, identity),
+                            conv_id=runner_args.session_id,
+                            reply_to=_last_bot_utt_id[0],
+                            # Spoken order kept apart in the transcript: 1 ms each, same turn start.
+                            ts=None if ts is None else ts + i / 1000,
+                            text=t.text,
+                            meta={"source": t.source},  # typed or said
+                        )
                     )
-                )
-                await _set_root_utterance_if_needed(db, runner_args.session_id, utt_id)
+                    await _set_root_utterance_if_needed(db, runner_args.session_id, utt_id)
         _last_user_utt_id[0] = utt_id
-        _chat_turns_pending[0] = max(0, _chat_turns_pending[0] - 1)
         # IDs only, never the words: participants' speech stays out of logs. Live
         # acceptance (transcript) waits for this line.
         logger.info(f"user utterance {utt_id} stored for session {runner_args.session_id}")
@@ -942,6 +966,9 @@ async def _bot(runner_args: LiveKitRunnerArguments):
         # inter-sentence gap was ignored (BOT_VAD_STOP_SECS), so interruption
         # worked only intermittently. See interruption.py.
         interruptions.assistant_turn_stopped(time.monotonic())
+        # This turn's addressees, taken even when nothing is stored so a later spoken line
+        # (the closing message) can't inherit them. None: no model reply (a spoken line).
+        addressed_to, _addressed_to[0] = _addressed_to[0], None
         # Remember recent bot speech so on_user_turn_stopped can flag self-echo.
         if message.content:
             _recent_bot_texts.append(message.content)
@@ -952,9 +979,11 @@ async def _bot(runner_args: LiveKitRunnerArguments):
             # audio, after Pipecat has closed its turn (1.12; 1.4 kept only the first
             # word). Don't store an empty bot turn or spend the reply's timing on it.
             return
+        # message.content is what was said: the reply only (ReplyStreamer), cut short if interrupted.
+        _reply_in_context(context, message.content, addressed_to or [])
         ts = _iso_to_unix(message.timestamp)
         utt_id = _new_id()
-        meta: dict = {}
+        meta: dict = {} if addressed_to is None else {"addressed_to": addressed_to}
         t = _turn_timing.copy()
         _turn_timing.clear()
         m = _metrics_data.copy()
@@ -1119,14 +1148,21 @@ async def _bot(runner_args: LiveKitRunnerArguments):
     @transport.event_handler("on_first_participant_joined")
     async def on_first_participant_joined(transport, participant_id):
         logger.info(f"First participant joined: {participant_id}")
-        await asyncio.sleep(1)
-        if not resume:  # a resumed bot carries on: the room already heard its greeting
-            await say(bot_config.greeting)
-        if bot_config.session_limit_minutes > 0:
-            # The session clock started with the conversation, not with this bot.
-            close_task = asyncio.create_task(_announce_close(time.monotonic() - (resume or {}).get("elapsed_s", 0)))
-            _bg_tasks.add(close_task)
-            close_task.add_done_callback(_bg_tasks.discard)
+
+        def start_close(joined_at: float) -> None:
+            if bot_config.session_limit_minutes > 0:
+                # The session clock started with the conversation, not with this bot.
+                close_task = asyncio.create_task(_announce_close(joined_at - (resume or {}).get("elapsed_s", 0)))
+                _bg_tasks.add(close_task)
+                close_task.add_done_callback(_bg_tasks.discard)
+
+        await first_join(
+            start_close=start_close,
+            # A resumed bot carries on: the room already heard its greeting.
+            greet=None if resume else lambda: say(bot_config.greeting),
+            humans_present=lambda: humans(transport._client.room.remote_participants.keys()),
+            expected=(runner_args.body or {}).get("expected_humans"),
+        )
 
     runner = WorkerRunner(handle_sigterm=runner_args.handle_sigterm)
     status = "error"
@@ -1244,21 +1280,45 @@ def build_audio_track_sink(
     return audio_tracks.AudioTrackSink(on_flush)
 
 
-def _build_llm(api_key: str, bot_config) -> OpenAILLMService:
+def _build_llm(api_key: str, bot_config, structured: bool = True) -> OpenAILLMService:
     """Model and system prompt as settings (Pipecat 1.9+; a "system" context message is removed in 2.0).
-    The model our vLLM serves (SELFHOSTED_LLM_MODEL) goes to our server; any other to OpenAI."""
+    The researchers' prompt, then how the conversation reaches the model and how it answers
+    (FORMAT_INSTRUCTIONS), the answer held to the BotReply schema (RESPONSE_FORMAT; Pipecat
+    merges settings.extra into each request). OpenAI's models here and vLLM both take a
+    json_schema response_format; a model that ignores it is still spoken (parse_reply).
+    The model our vLLM serves (SELFHOSTED_LLM_MODEL) goes to our server; any other to OpenAI.
+    structured=False: the same model with no schema, for the context summariser (plain text)."""
     ours = bot_config.llm_model == os.environ.get("SELFHOSTED_LLM_MODEL")
     return OpenAILLMService(
         api_key=api_key, base_url=os.environ["SELFHOSTED_LLM_URL"] if ours else None,
-        settings=OpenAILLMService.Settings(model=bot_config.llm_model, system_instruction=bot_config.system_prompt))
+        settings=OpenAILLMService.Settings(
+            model=bot_config.llm_model, system_instruction=bot_config.system_prompt + "\n\n" + FORMAT_INSTRUCTIONS,
+            extra={"response_format": RESPONSE_FORMAT} if structured else {}))
 
 
-def _spoken_text(content: str, names) -> str:
-    """A person's words without the "Name: " label SpeakerLabelInjector adds for the LLM, at
-    the start of every fragment a turn merged. The speaker is stored in its own column."""
-    for name in filter(None, names):
-        content = re.sub(rf"(^|\s){re.escape(name)}: ", r"\1", content)
-    return content.strip()
+def _write_turns_as_user_message(user_aggregator) -> None:
+    """The user aggregator writes a committed turn to the context as user_message (one JSON list
+    of turns, as FORMAT_INSTRUCTIONS describes and rejoin rebuilds), not Pipecat's space-joined
+    turn objects."""
+    joined = user_aggregator.aggregation_string
+    user_aggregator.aggregation_string = lambda: user_message(parse_turns(joined()))["content"]
+
+
+def _speaker_of(speaker_id: str, sid_to_identity: dict, default: str) -> str:
+    """Whom a turn is stored under: the participant it names, or, for a sid SpeakerLabelInjector
+    didn't know yet, that sid's participant if now known, else the turn's resolved speaker."""
+    return speaker_id if speaker_id in sid_to_identity.values() else sid_to_identity.get(speaker_id) or default
+
+
+def _reply_in_context(context, said: str, addressed_to: list[str]) -> None:
+    """The bot's last turn in the context in the shape the model answers in (assistant_message),
+    so its history matches what it is asked to produce; the reply is what was said (Pipecat's
+    assistant aggregator writes the spoken text). Rejoin rebuilds the same from the stored row."""
+    for m in reversed(context.messages):
+        if isinstance(m, dict) and m.get("role") == "assistant":
+            if m.get("content") == said:
+                m.update(assistant_message(BotReply(said, addressed_to)))
+            return
 
 
 # A bot whose LLM can no longer work ends its session (recorded, visible in the console)
@@ -1266,14 +1326,16 @@ def _spoken_text(content: str, names) -> str:
 UNUSABLE_POLICY = ProcessorUnusablePolicy.END
 
 
-def _assistant_params() -> LLMAssistantAggregatorParams:
+def _assistant_params(summary_llm) -> LLMAssistantAggregatorParams:
     """Older turns are summarised once the context nears 6,000 tokens, keeping the last 20
     messages: a conversation outlives the model's context (Qwen on vLLM: 8,192; L6 run, rooms
-    ~40 min old went silent on vLLM's 400). Pipecat's own summariser, using the same LLM."""
+    ~40 min old went silent on vLLM's 400). Pipecat's own summariser, on summary_llm: the bot's
+    model without the reply schema, so a summary is plain text."""
     return LLMAssistantAggregatorParams(
         enable_auto_context_summarization=True,
         auto_context_summarization_config=LLMAutoContextSummarizationConfig(
-            max_context_tokens=6000, max_unsummarized_messages=20))
+            max_context_tokens=6000, max_unsummarized_messages=20,
+            summary_config=LLMContextSummaryConfig(llm=summary_llm)))
 
 
 def _ttfb_stage(processor: str) -> str | None:

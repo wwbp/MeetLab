@@ -1,4 +1,5 @@
 import asyncio
+import dataclasses
 import hmac
 import io
 import os
@@ -27,7 +28,7 @@ from sqlalchemy import func, select, text, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import selectinload
 
-from meetlab_api import capacity
+from meetlab_api import capacity, links, matchmaker
 from meetlab_core import sessions
 from meetlab_core import storage
 from meetlab_api import transcript as transcript_mod
@@ -35,7 +36,9 @@ from meetlab_core.config import load_config, require
 from meetlab_core.db.config_loader import load_bot_config
 from meetlab_core.event_log import EVENT_SEVERITIES, install_error_event_sink, record_event
 from meetlab_core.db.engine import AsyncSessionLocal, engine
-from meetlab_core.db.models import BotConfig, Conversation, Event, MediaFile, Speaker, Utterance
+from meetlab_core.db.models import (
+    BotConfig, Conversation, Event, Match, MediaFile, Speaker, StartLink, Ticket, Utterance,
+)
 from meetlab_api.dispatch import (
     DispatchError,
     DockerApi,
@@ -269,11 +272,45 @@ class BotConfigAdmin(ModelView, model=BotConfig):
     name_plural = "Bot Configs"
 
 
+# Group start links (R20): the built-in CSV export is the per-link record.
+class StartLinkAdmin(ModelView, model=StartLink):
+    column_exclude_list = column_details_exclude_list = [StartLink.password_hash]
+    form_excluded_columns = [StartLink.password_hash]
+    column_default_sort = [(StartLink.created_at, True)]
+    can_create = can_edit = can_delete = False  # links are made and stopped on the Start links page
+    name = "Start link"
+    name_plural = "Start links"
+
+
+class TicketAdmin(ModelView, model=Ticket):
+    column_list = [Ticket.id, Ticket.link_id, Ticket.participant_id, Ticket.state, Ticket.queued_at,
+                   Ticket.ready_at, Ticket.room_name, Ticket.placed_at, Ticket.requeued_at]
+    column_searchable_list = [Ticket.link_id, Ticket.participant_id, Ticket.room_name]
+    column_sortable_list = [Ticket.queued_at, Ticket.state]
+    column_default_sort = [(Ticket.queued_at, True)]
+    can_create = can_edit = can_delete = False
+    name = "Ticket"
+    name_plural = "Tickets"
+
+
+class MatchAdmin(ModelView, model=Match):
+    column_list = [Match.room_name, Match.link_id, Match.bot_config_scope, Match.size, Match.created_at,
+                   Match.starts_at, Match.closed_at, Match.session_id]
+    column_searchable_list = [Match.link_id, Match.room_name]
+    column_default_sort = [(Match.created_at, True)]
+    can_create = can_edit = can_delete = False
+    name = "Match"
+    name_plural = "Matches"
+
+
 admin.add_view(SpeakerAdmin)
 admin.add_view(ConversationAdmin)
 admin.add_view(UtteranceAdmin)
 admin.add_view(EventAdmin)
 admin.add_view(BotConfigAdmin)
+admin.add_view(StartLinkAdmin)
+admin.add_view(TicketAdmin)
+admin.add_view(MatchAdmin)
 
 
 def _room_slug(room_name: str) -> str:
@@ -438,17 +475,23 @@ async def stop_bot(request: Request, _=Depends(verify_api_key)):
     room_name = (body.get("room_name") or "").strip() if isinstance(body, dict) else ""
     if not room_name:
         return JSONResponse({"error": "room_name is required"}, status_code=400)
+    return {"stopped": await stop_room(room_name)}
+
+
+async def stop_room(room_name: str) -> str | None:
+    """Stop the room's running bot and end its session (POST /stop, a failed ready check).
+    Returns the stopped session's id, None if nothing ran."""
     async with AsyncSessionLocal() as session:
         running = (await session.execute(
             select(Conversation).where(Conversation.room_name == room_name, Conversation.status == "running")
         )).scalar_one_or_none()
     if running is None:
-        return {"stopped": None}
+        return None
     await asyncio.to_thread(_stop_bot, running.id)
     async with AsyncSessionLocal() as session, session.begin():
         await sessions.end(session, [running.id], "stopped")
     logger.info(f"Stopped bot session {running.id} in room {room_name}")
-    return {"stopped": running.id}
+    return running.id
 
 
 # Production's live tests leave nothing behind (user, 2026-10-14). A test room is exactly the
@@ -458,10 +501,15 @@ TEST_ROOMS = r"^accept-[0-9a-f]{6}$"
 
 async def purge_test_data() -> dict:
     """Delete everything of the live tests' rooms: sessions, turns, events, recording rows and
-    their files, per-room settings, and the speakers only they had. Nothing else."""
-    from sqlalchemy import delete, or_
-    test = Conversation.room_name.op("~")(TEST_ROOMS)
+    their files, per-room settings, and the speakers only they had. Nothing else. A test group
+    link is one whose pool names a test scope; its rooms (link-…) are test rooms too."""
+    from sqlalchemy import delete, or_, text
+    test_link = text("EXISTS (SELECT 1 FROM jsonb_array_elements_text(start_links.pool) AS p(scope)"
+                     " WHERE p.scope ~ :pattern)").bindparams(pattern=TEST_ROOMS)
     async with AsyncSessionLocal() as db, db.begin():
+        links = (await db.scalars(select(StartLink.link_id).where(test_link))).all()
+        rooms = (await db.scalars(select(Match.room_name).where(Match.link_id.in_(links)))).all()
+        test = or_(Conversation.room_name.op("~")(TEST_ROOMS), Conversation.room_name.in_(rooms))
         convs = select(Conversation.id).where(test)
         files = (await db.execute(select(MediaFile.path).where(MediaFile.conv_id.in_(convs)))).scalars().all()
         only_theirs = select(Utterance.speaker_id).where(Utterance.conv_id.in_(convs)).except_(
@@ -469,12 +517,16 @@ async def purge_test_data() -> dict:
         speakers = (await db.execute(only_theirs)).scalars().all()
         counts = {
             "events": (await db.execute(delete(Event).where(or_(
-                Event.conv_id.in_(convs), Event.room_name.op("~")(TEST_ROOMS))))).rowcount,
+                Event.conv_id.in_(convs), Event.room_name.op("~")(TEST_ROOMS), Event.room_name.in_(rooms))))).rowcount,
             "media_files": (await db.execute(delete(MediaFile).where(MediaFile.conv_id.in_(convs)))).rowcount,
             "utterances": (await db.execute(delete(Utterance).where(Utterance.conv_id.in_(convs)))).rowcount,
+            "tickets": (await db.execute(delete(Ticket).where(Ticket.link_id.in_(links)))).rowcount,
             "conversations": (await db.execute(delete(Conversation).where(test))).rowcount,
+            "matches": (await db.execute(delete(Match).where(Match.link_id.in_(links)))).rowcount,
+            "links": (await db.execute(delete(StartLink).where(StartLink.link_id.in_(links)))).rowcount,
             "speakers": (await db.execute(delete(Speaker).where(Speaker.id.in_(speakers)))).rowcount,
-            "settings": (await db.execute(delete(BotConfig).where(BotConfig.scope.op("~")(TEST_ROOMS)))).rowcount,
+            "settings": (await db.execute(delete(BotConfig).where(or_(
+                BotConfig.scope.op("~")(TEST_ROOMS), BotConfig.scope.in_(rooms))))).rowcount,
         }
     for path in files:  # after the rows are gone: a file left over is harmless, a row without its file is not
         if path:
@@ -846,18 +898,7 @@ async def update_config(request: Request, _=Depends(verify_api_key)):
             return JSONResponse({"error": "closing_message must be a string"}, status_code=400)
         fields["closing_message"] = body["closing_message"]
 
-    async with AsyncSessionLocal() as session:
-        async with session.begin():
-            result = await session.execute(select(BotConfig).where(BotConfig.scope == scope))
-            row = result.scalar_one_or_none()
-            if row is None:
-                row = BotConfig(scope=scope, **fields)
-                session.add(row)
-            else:
-                for k, v in fields.items():
-                    setattr(row, k, v)
-                row.updated_at = datetime.now(timezone.utc)
-
+    await _save_config(scope, fields)
     cfg = await load_bot_config(scope if scope != "global" else None)
     return {
         "scope": scope,
@@ -877,6 +918,21 @@ async def update_config(request: Request, _=Depends(verify_api_key)):
         "session_limit_minutes": cfg.session_limit_minutes,
         "closing_message": cfg.closing_message,
     }
+
+
+async def _save_config(scope: str, fields: Dict[str, Any]) -> None:
+    """Upsert one bot_config scope: PUT /config's write, and a match's room copy."""
+    async with AsyncSessionLocal() as session:
+        async with session.begin():
+            result = await session.execute(select(BotConfig).where(BotConfig.scope == scope))
+            row = result.scalar_one_or_none()
+            if row is None:
+                row = BotConfig(scope=scope, **fields)
+                session.add(row)
+            else:
+                for k, v in fields.items():
+                    setattr(row, k, v)
+                row.updated_at = datetime.now(timezone.utc)
 
 
 # ── helpers ──────────────────────────────────────────────────────────────────
@@ -1241,6 +1297,46 @@ async def _start_session(room_name: str, bot_identity: str, conv_meta: dict, dis
     }
 
 
+async def _create_livekit_room(room_name: str) -> None:
+    async with api.LiveKitAPI(url=_lk_http_url(), api_key=LIVEKIT_API_KEY, api_secret=LIVEKIT_API_SECRET) as lk:
+        await lk.room.create_room(api.CreateRoomRequest(name=room_name))
+
+
+async def setup_match(room_name: str) -> None:
+    """Set up a group start link's match exactly once: its bot setting copied to the room,
+    the LiveKit room, the session and its bot. Safe to call from every request: a conditional
+    UPDATE claims it; a failed setup's claim expires after SETUP_CLAIM_S, and the next request
+    retries it with the same setting (R11, R33)."""
+    async with AsyncSessionLocal() as session, session.begin():
+        claimed = (await session.execute(text(
+            "UPDATE matches SET setup_claimed_at = now() WHERE room_name = :r AND session_id IS NULL"
+            " AND closed_at IS NULL AND (setup_claimed_at IS NULL"
+            " OR setup_claimed_at < now() - make_interval(secs => :claim))"
+            " RETURNING bot_config_scope, size, link_id"),
+            {"r": room_name, "claim": matchmaker.SETUP_CLAIM_S})).one_or_none()
+    if claimed is None:
+        return
+    scope, size, link_id = claimed
+    try:
+        await _save_config(room_name, dataclasses.asdict(await load_bot_config(scope)))
+        await _create_livekit_room(room_name)
+        started = await _start_session(
+            room_name, f"bot_{_room_slug(room_name)}_{uuid.uuid4().hex[:10]}",
+            {"requested_by": "start-link", "bot_config_scope": scope, "link_id": link_id,
+             "expected_humans": size},
+            os.environ.get("BOT_DISPATCHER"))
+        if isinstance(started, Response):  # dispatch refused: its session is already ended
+            raise RuntimeError(f"bot dispatch failed: {started.body!r}")
+        async with AsyncSessionLocal() as session, session.begin():
+            closed = (await session.execute(
+                update(Match).where(Match.room_name == room_name)
+                .values(session_id=started["session_id"]).returning(Match.closed_at))).scalar_one()
+        if closed is not None:  # the ready check failed while the room was set up (R32)
+            await stop_room(room_name)
+    except Exception as e:
+        logger.error(f"setup of match {room_name} failed; the next request retries it: {e}")
+
+
 async def _humans_in_room(room_name: str) -> int:
     """People (not bots: identity "bot_…") in the room now, by LiveKit's roster."""
     from livekit.protocol.room import ListParticipantsRequest
@@ -1320,6 +1416,14 @@ async def reconcile_stale_conversations(min_age_seconds: int = 60) -> int:
     return len(closed)
 
 
+# Group start links: every route needs the runner's secret. The routers reach these hooks
+# through request.app.state, so they never import runner.
+for _router in (links.router, matchmaker.router):
+    app.include_router(_router, dependencies=[Depends(verify_api_key)])
+app.state.setup_match = setup_match
+app.state.stop_room = stop_room
+
+
 @app.on_event("startup")
 async def _install_event_log_sink() -> None:
     """Mirror WARNING+ logs from the runner and every bot into the event log."""
@@ -1337,6 +1441,8 @@ async def reconcile_tick() -> None:
     await fail_silent_sessions(AsyncSessionLocal, stop=_stop_bot)
     await rejoin_dead_sessions()
     await sync_pending_recordings()
+    await links.stop_links_missing_settings()
+    await matchmaker.step_open_links(app.state)
 
 
 @app.on_event("startup")

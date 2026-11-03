@@ -21,9 +21,17 @@ from meetlab_bot.bot import (
     _text_similarity,
     _OpenAIRealtimeSTT,
 )
+from meetlab_core.turns import (
+    FORMAT_INSTRUCTIONS, RESPONSE_FORMAT, BotReply, Turn, assistant_message, parse_reply, parse_turns,
+    turn_json, user_message,
+)
 from pipecat.processors.audio.vad_processor import VADProcessor
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.openai.stt import OpenAIRealtimeSTTService
+
+
+ANA = Turn("ana__1a2b", "Ana", "What should we do first?")
+BEN = Turn("ben__3c4d", "Ben", "I'd start with the budget.")
 
 
 @dataclass
@@ -311,13 +319,6 @@ class TestSelfEchoHeuristic(unittest.TestCase):
         self.assertEqual(_text_similarity("", "anything at all"), 0.0)
         self.assertEqual(_text_similarity("anything at all", ""), 0.0)
 
-    def test_speaker_prefix_is_stripped_before_compare(self):
-        # SpeakerLabelInjector prepends "Alice: "; the bot text has no prefix.
-        # The name must not dilute the overlap, so this should read as a strong echo.
-        bot = "the boiling point of water is one hundred degrees"
-        user = "Alice: the boiling point of water is one hundred degrees"
-        self.assertGreaterEqual(_text_similarity(user, bot), 0.65)
-
     def test_partial_overlap_between_zero_and_one(self):
         sim = _text_similarity("the quick brown fox", "the quick red hound")
         self.assertGreater(sim, 0.0)
@@ -325,12 +326,6 @@ class TestSelfEchoHeuristic(unittest.TestCase):
 
     def test_normalize_drops_punctuation_and_case(self):
         self.assertEqual(_normalize_words("Hello, World!"), ["hello", "world"])
-
-    def test_normalize_strips_short_name_prefix_only(self):
-        # A colon early in the string is treated as a speaker prefix...
-        self.assertEqual(_normalize_words("Bob: hi"), ["hi"])
-        # ...but a colon deep in the text (no prefix) is not stripped.
-        self.assertIn("ratio", _normalize_words("the result was a strange ratio: forty two to one"))
 
 
 if __name__ == "__main__":
@@ -347,30 +342,69 @@ class TestBuildLLM(unittest.TestCase):
         from meetlab_bot.bot import _build_llm
 
         llm = _build_llm("sk-test", SimpleNamespace(llm_model="gpt-4o-mini", system_prompt="Facilitate."))
-        self.assertEqual((llm._settings.model, llm._settings.system_instruction), ("gpt-4o-mini", "Facilitate."))
+        self.assertEqual(llm._settings.model, "gpt-4o-mini")
+        # The researchers' prompt first, then how the conversation reaches the model.
+        self.assertEqual(llm._settings.system_instruction, f"Facilitate.\n\n{FORMAT_INSTRUCTIONS}")
+
+    def test_every_answer_is_held_to_the_reply_schema(self):
+        from types import SimpleNamespace
+
+        from meetlab_bot.bot import _build_llm
+
+        llm = _build_llm("sk-test", SimpleNamespace(llm_model="gpt-4o-mini", system_prompt="Facilitate."))
+        # What Pipecat sends on each streamed completion (base_llm.build_chat_completion_params).
+        self.assertIs(llm.build_chat_completion_params({"messages": []})["response_format"], RESPONSE_FORMAT)
 
 
-class TestSpokenText(unittest.TestCase):
-    """What a person said is stored without the speaker label the LLM sees (SpeakerLabelInjector):
-    the speaker is its own column, and the label turned up in researchers' transcripts and in
-    the load test's hearing score as words nobody said (2026-10-03)."""
+class TestStructuredTurns(unittest.TestCase):
+    """Who said what reaches the model, and comes back from it, as data (meetlab_core.turns):
+    no "Name: " label to parse back out. People talking over each other share one committed turn
+    (Pipecat's one user aggregator, F11); each is stored as their own utterance."""
 
-    def test_the_label_is_removed(self):
-        from meetlab_bot.bot import _spoken_text
-        self.assertEqual(_spoken_text("load_000: Why does that matter?", {"load_000"}), "Why does that matter?")
+    def test_a_committed_turn_is_written_to_the_context_as_one_list_of_turns(self):
+        from pipecat.processors.aggregators.llm_context import LLMContext
+        from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair
+        from pipecat.utils.string import TextPartForConcatenation
 
-    def test_every_fragment_of_a_merged_turn_loses_its_label(self):
-        from meetlab_bot.bot import _spoken_text
-        self.assertEqual(_spoken_text("Alice: Candidate A is strong. Alice: But B is popular.", {"Alice", "alice_x"}),
-                         "Candidate A is strong. But B is popular.")
+        from meetlab_bot.bot import _write_turns_as_user_message
 
-    def test_text_without_a_label_is_unchanged(self):
-        from meetlab_bot.bot import _spoken_text
-        self.assertEqual(_spoken_text("What should we prioritise?", {"Alice"}), "What should we prioritise?")
+        user = LLMContextAggregatorPair(LLMContext()).user()
+        _write_turns_as_user_message(user)
+        # As SpeakerLabelInjector writes each transcript, and the aggregator collects them.
+        for t in (BEN, ANA, Turn("ben__3c4d", "Ben", "And staffing.")):
+            user._aggregation.append(TextPartForConcatenation(turn_json(t), includes_inter_part_spaces=False))
+        content = user.aggregation_string()
+        self.assertEqual(content, user_message([BEN, ANA, Turn("ben__3c4d", "Ben", "And staffing.")])["content"])
+        self.assertEqual(len(parse_turns(content)), 3)  # on_user_turn_stopped stores one utterance each
 
-    def test_a_name_is_matched_literally(self):
-        from meetlab_bot.bot import _spoken_text
-        self.assertEqual(_spoken_text("Dr. A+B: Hello.", {"Dr. A+B", None}), "Hello.")
+    def test_a_turn_is_stored_under_the_participant_it_names(self):
+        from meetlab_bot.bot import _speaker_of
+
+        sids = {"PA_1": "ana__1a2b", "PA_2": "ben__3c4d"}
+        self.assertEqual(_speaker_of("ben__3c4d", sids, "ana__1a2b"), "ben__3c4d")
+        # A sid the injector didn't know yet: its participant once known, else the resolved speaker.
+        self.assertEqual(_speaker_of("PA_2", sids, "ana__1a2b"), "ben__3c4d")
+        self.assertEqual(_speaker_of("PA_9", sids, "ana__1a2b"), "ana__1a2b")
+
+    def test_the_bots_turn_in_the_context_is_its_answer_with_what_was_said(self):
+        from pipecat.processors.aggregators.llm_context import LLMContext
+
+        from meetlab_bot.bot import _reply_in_context
+
+        # Pipecat's assistant aggregator writes the spoken text (the reply only, via ReplyStreamer).
+        context = LLMContext(messages=[user_message([BEN]), {"role": "assistant", "content": "Start with the budget."}])
+        _reply_in_context(context, "Start with the budget.", ["ben__3c4d"])
+        self.assertEqual(context.messages[-1], assistant_message(BotReply("Start with the budget.", ["ben__3c4d"])))
+        self.assertEqual(parse_reply(context.messages[-1]["content"]).reply, "Start with the budget.")
+
+    def test_another_assistant_message_is_left_alone(self):
+        from pipecat.processors.aggregators.llm_context import LLMContext
+
+        from meetlab_bot.bot import _reply_in_context
+
+        context = LLMContext(messages=[{"role": "assistant", "content": "Something else."}])
+        _reply_in_context(context, "Start with the budget.", [])
+        self.assertEqual(context.messages, [{"role": "assistant", "content": "Something else."}])
 
 
 class TestSmartTurnChain(unittest.TestCase):
@@ -405,10 +439,21 @@ class TestLongConversations(unittest.TestCase):
 
     def test_old_turns_are_summarised_well_before_the_models_limit(self):
         from meetlab_bot.bot import _assistant_params
-        p = _assistant_params()
+        p = _assistant_params(None)
         self.assertTrue(p.enable_auto_context_summarization)
         # room for the system prompt's growth and a reply under vLLM's --max-model-len 8192
         self.assertLessEqual(p.auto_context_summarization_config.max_context_tokens, 6000)
+
+    def test_summaries_are_plain_text_not_held_to_the_reply_schema(self):
+        """settings.extra goes into every request of an LLM service, the summariser's too: a
+        summary would come back as {"reply": ...}. It gets its own model, same settings, no schema."""
+        from types import SimpleNamespace
+        from meetlab_bot.bot import _assistant_params, _build_llm
+        cfg = SimpleNamespace(llm_model="gpt-4o-mini", system_prompt="Facilitate.")
+        summary_llm = _assistant_params(_build_llm("sk-test", cfg, structured=False)) \
+            .auto_context_summarization_config.summary_config.llm
+        self.assertEqual(summary_llm._settings.model, "gpt-4o-mini")
+        self.assertNotIn("response_format", summary_llm.build_chat_completion_params({"messages": []}))
 
     def test_a_bot_whose_llm_can_no_longer_work_ends_its_session_instead_of_sitting_silent(self):
         from pipecat.pipeline.worker import ProcessorUnusablePolicy

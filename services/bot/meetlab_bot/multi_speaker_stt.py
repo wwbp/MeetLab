@@ -5,9 +5,9 @@ for each participant's individual audio track. MultiSpeakerSTT exploits this by
 routing each participant's frames to a dedicated STT instance, so TranscriptionFrames
 are emitted with the exact LiveKit SID in user_id — no last-write-wins race.
 
-SpeakerLabelInjector sits downstream and prepends "DisplayName: " to each
-TranscriptionFrame's text before it reaches the LLM context aggregator, giving
-the model group-conversation awareness ("Alice: what is X?").
+SpeakerLabelInjector sits downstream and turns each TranscriptionFrame's text into a
+Turn (meetlab_core.turns: speaker_id, name, text, source) before it reaches the LLM
+context aggregator, so the model knows who said what without a label to parse.
 Display names use the LiveKit token name field and strip the __randomPostfix
 added by connection-details for uniqueness.
 
@@ -55,6 +55,7 @@ from pipecat.frames.frames import (
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor, FrameProcessorSetup
 
 from meetlab_bot.participant_workers import route_audio, worker_name
+from meetlab_core.turns import Turn, turn_json
 
 
 class _FrameCollector(FrameProcessor):
@@ -339,13 +340,15 @@ def _stt_emits_vad_frames(stt: FrameProcessor) -> bool:
 
 
 class SpeakerLabelInjector(FrameProcessor):
-    """Prepends "DisplayName: " to TranscriptionFrame text before the LLM sees it.
+    """Writes each TranscriptionFrame's text as a Turn (turn_json) before the LLM sees it.
 
     Sits between MultiSpeakerSTT (or _SpeakerTracker) and context_aggregator.user()
-    so the LLM context accumulates group-conversation-aware messages:
-        [user] "Alice: what is the speed of light?"
-        [assistant] "..."
-        [user] "Bob: what is the boiling point of water?"
+    so the LLM context accumulates who said what (bot.py writes a turn as user_message):
+        [user] [{"speaker_id": "alice__1a", "name": "Alice", "text": "what is X?", "source": "speech"}]
+
+    Typed chat arrives marked frame.metadata["source"] = "chat" (bot.py's _chat_turn).
+    A sid not yet in the map is still a Turn, under the sid and no name; bot.py stores it
+    under the participant it resolves.
 
     Takes live references to the bot's _sid_to_identity and _sid_to_name dicts —
     no copy, so they always reflect the latest participant map.
@@ -363,16 +366,14 @@ class SpeakerLabelInjector(FrameProcessor):
     async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
         await super().process_frame(frame, direction)
         if direction == FrameDirection.DOWNSTREAM and isinstance(frame, TranscriptionFrame):
-            # user_id is the identity (Pipecat 1.8+): label even before the connect callback
-            # registers them, or their words merge unlabeled into another person's turn.
-            identity = self.sid_to_identity.get(frame.user_id) or frame.user_id
-            if identity and frame.text:
-                if self.sid_to_name is not None:
-                    display = self.sid_to_name.get(frame.user_id) or identity.split("__")[0]
-                else:
-                    display = identity.split("__")[0]
+            # user_id is the identity (Pipecat 1.8+): name a speaker even before the connect
+            # callback registers them (three people starting together, Pipecat 1.14).
+            identity = self.sid_to_identity.get(frame.user_id) or frame.user_id or ""
+            if frame.text:
+                display = (self.sid_to_name or {}).get(frame.user_id) or identity.split("__")[0]
+                turn = Turn(identity, display, frame.text, frame.metadata.get("source", "speech"))
                 frame = TranscriptionFrame(
-                    text=f"{display}: {frame.text}",
+                    text=turn_json(turn),
                     user_id=frame.user_id,
                     timestamp=frame.timestamp,
                     language=frame.language,

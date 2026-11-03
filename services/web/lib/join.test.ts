@@ -85,9 +85,9 @@ describe('PRE_JOIN_DEFAULTS', () => {
 });
 
 describe('botNotice', () => {
-  it('says the partner is joining while no bot has arrived yet', () => {
+  it('says the assistant is joining while no bot has arrived yet', () => {
     expect(botNotice([], false)).toBe(
-      'Your conversation partner is joining. This can take up to 3 minutes. Please stay on this page.',
+      'The assistant is joining. This can take up to 3 minutes. Please stay on this page.',
     );
     expect(botNotice(['ana'], false)).toMatch(/is joining/);
   });
@@ -97,8 +97,8 @@ describe('botNotice', () => {
     expect(botNotice(['bot_room1'], true)).toBeNull();
   });
 
-  it('says the partner is reconnecting when a bot that was here has left', () => {
-    expect(botNotice(['ana'], true)).toBe('Your conversation partner is reconnecting…');
+  it('says the assistant is reconnecting when a bot that was here has left', () => {
+    expect(botNotice(['ana'], true)).toBe('The assistant is reconnecting…');
   });
 
   it('only counts identities that start with bot_', () => {

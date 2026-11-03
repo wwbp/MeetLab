@@ -1,7 +1,8 @@
 """The verdict of the three-speaker attribution run (sim_attribution.py, diagnosis F11)."""
+import asyncio
 import unittest
 
-from meetlab_loadtest.sim_attribution import heard_as, verdict
+from meetlab_loadtest.sim_attribution import drive_ticket, verdict
 
 LINES = {
     "a": "What should we prioritise for the leadership role this quarter?",
@@ -30,17 +31,50 @@ class VerdictTests(unittest.TestCase):
         self.assertIn("c: never transcribed", verdict(LINES, stored))
 
 
-class HeardAsTests(unittest.TestCase):
-    """What the LLM is told: each labelled piece of a stored turn, by its label."""
+def _reply(kind, **view):
+    return {"ticket": "t1", "view": {"kind": kind, **view}}
 
-    def test_splits_a_turn_at_each_speaker_label(self):
-        who = {"sim_a_8fbb": "a", "sim_b_1153": "b"}
-        text = "sim_a_8fbb: Seeing higher latency since Tuesday. sim_b_1153: Service since Tuesday."
-        self.assertEqual(heard_as("b", text, who),
-                         [("a", "Seeing higher latency since Tuesday."), ("b", "Service since Tuesday.")])
 
-    def test_an_unlabelled_turn_belongs_to_its_speaker(self):
-        self.assertEqual(heard_as("c", "plain words", {}), [("c", "plain words")])
+class DriveTicketTests(unittest.TestCase):
+    """GROUP_LINK=1: one participant's ticket, from searching to the room it gives."""
+
+    def drive(self, polls, deadline_s=60):
+        replies, calls, now = iter(polls[1:]), [], [0.0]
+
+        async def poll(tid):
+            self.assertEqual(tid, "t1")  # the ticket from the join reply
+            calls.append("poll")
+            return next(replies)
+
+        async def ready(tid):
+            self.assertEqual(tid, "t1")
+            calls.append("ready")
+            return next(replies)
+
+        async def sleep(s):
+            now[0] += s
+        room = asyncio.run(drive_ticket(polls[0], poll, ready, lambda: now[0], sleep, deadline_s))
+        return room, calls
+
+    def test_searching_then_ready_check_presses_ready_once_and_returns_the_room(self):
+        room, calls = self.drive([
+            _reply("searching"), _reply("searching"),
+            _reply("ready_check", pressed=False),
+            _reply("ready_check", pressed=True),
+            _reply("starting", room=None),
+            _reply("starting", room="link-x"),
+        ])
+        self.assertEqual(room, "link-x")
+        self.assertEqual(calls, ["poll", "poll", "ready", "poll", "poll"])
+
+    def test_a_missed_or_expired_ticket_fails_loud(self):
+        for kind in ("missed", "expired", "done"):
+            with self.assertRaisesRegex(RuntimeError, kind):
+                self.drive([_reply("searching"), _reply(kind)])
+
+    def test_no_room_before_the_deadline_times_out(self):
+        with self.assertRaises(TimeoutError):
+            self.drive([_reply("searching")] * 1000, deadline_s=5)
 
 
 if __name__ == "__main__":

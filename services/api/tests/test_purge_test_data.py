@@ -126,3 +126,74 @@ class PurgeTestDataTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PurgeGroupLinkTestDataTest(unittest.TestCase):
+    """A live test's group link: its pool is a test scope (accept-…), its rooms are link-….
+    The link, its tickets, matches, rooms' sessions, events and settings go; a real link stays."""
+
+    def setUp(self):
+        from datetime import datetime, timezone
+        h = uuid.uuid4().hex
+        self.scope = f"accept-{h[:6]}"
+        self.test_link, self.real_link = f"tl-{h[:8]}", f"rl-{h[:8]}"
+        self.test_room, self.real_room = f"link-t{h[:8]}", f"link-r{h[:8]}"
+        self.test_conv, self.real_conv = str(uuid.uuid4()), str(uuid.uuid4())
+        now = datetime.now(timezone.utc)
+
+        async def add():
+            from meetlab_core.db.engine import AsyncSessionLocal
+            from meetlab_core.db.models import BotConfig, Conversation, Event, Match, StartLink, Ticket
+            async with AsyncSessionLocal() as db, db.begin():
+                db.add_all([BotConfig(scope=self.scope), BotConfig(scope=self.test_room), BotConfig(scope=self.real_room),
+                            StartLink(link_id=self.test_link, name="t", pool=[self.scope], size=2),
+                            StartLink(link_id=self.real_link, name="r", pool=["global"], size=2)])
+                await db.flush()
+                for link, room, scope, conv in ((self.test_link, self.test_room, self.scope, self.test_conv),
+                                                (self.real_link, self.real_room, "global", self.real_conv)):
+                    db.add(Match(room_name=room, link_id=link, bot_config_scope=scope, size=2, created_at=now))
+                    db.add(Conversation(id=conv, room_name=room, bot_identity="bot_x", status="ended", meta={}))
+                    await db.flush()
+                    db.add(Ticket(id=str(uuid.uuid4()), link_id=link, participant_id=None, state="done",
+                                  queued_at=now, last_seen=now, room_name=room))
+                    db.add(Event(conv_id=None, type="match_formed", severity="info", room_name=room, payload={}))
+        _run(add())
+
+    def tearDown(self):
+        async def drop():
+            from sqlalchemy import delete
+            from meetlab_core.db.engine import AsyncSessionLocal
+            from meetlab_core.db.models import BotConfig, Conversation, Event, Match, StartLink, Ticket
+            links, rooms = [self.test_link, self.real_link], [self.test_room, self.real_room]
+            async with AsyncSessionLocal() as db, db.begin():
+                await db.execute(delete(Event).where(Event.room_name.in_(rooms)))
+                await db.execute(delete(Ticket).where(Ticket.link_id.in_(links)))
+                await db.execute(delete(Conversation).where(Conversation.room_name.in_(rooms)))
+                await db.execute(delete(Match).where(Match.link_id.in_(links)))
+                await db.execute(delete(StartLink).where(StartLink.link_id.in_(links)))
+                await db.execute(delete(BotConfig).where(BotConfig.scope.in_([self.scope, *rooms])))
+        _run(drop())
+
+    def test_the_test_link_goes_and_the_real_one_stays(self):
+        _run(runner.purge_test_data())
+
+        async def left():
+            from sqlalchemy import select
+            from meetlab_core.db.engine import AsyncSessionLocal
+            from meetlab_core.db.models import BotConfig, Conversation, Event, Match, StartLink, Ticket
+            rooms = [self.test_room, self.real_room]
+            async with AsyncSessionLocal() as db:
+                return {
+                    "links": set(await db.scalars(select(StartLink.link_id).where(
+                        StartLink.link_id.in_([self.test_link, self.real_link])))),
+                    "tickets": set(await db.scalars(select(Ticket.room_name).where(Ticket.room_name.in_(rooms)))),
+                    "matches": set(await db.scalars(select(Match.room_name).where(Match.room_name.in_(rooms)))),
+                    "conversations": set(await db.scalars(select(Conversation.room_name).where(
+                        Conversation.room_name.in_(rooms)))),
+                    "events": set(await db.scalars(select(Event.room_name).where(Event.room_name.in_(rooms)))),
+                    "settings": set(await db.scalars(select(BotConfig.scope).where(
+                        BotConfig.scope.in_([self.scope, *rooms])))),
+                }
+        self.assertEqual(_run(left()), {"links": {self.real_link}, "tickets": {self.real_room},
+                                        "matches": {self.real_room}, "conversations": {self.real_room},
+                                        "events": {self.real_room}, "settings": {self.real_room}})

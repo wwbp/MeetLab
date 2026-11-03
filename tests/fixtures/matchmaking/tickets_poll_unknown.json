@@ -1,0 +1,13 @@
+{
+  "endpoint": "POST /tickets/{id}/poll",
+  "request": {
+    "method": "POST",
+    "path": "/tickets/00000000-0000-4000-8000-000000000000/poll"
+  },
+  "response": {
+    "status": 404,
+    "body": {
+      "error": "not_found"
+    }
+  }
+}

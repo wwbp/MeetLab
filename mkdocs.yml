@@ -22,6 +22,7 @@ nav:
       - Study support: study-support.md
       - Session limits: session-limits.md
       - Events and errors: event-log.md
+      - "Speaker attribution: people talking at once": speaker-attribution.md
   - Testing and operations:
       - "Testing: levels, types and pass criteria": testing.md
       - Load and quality testing: load-testing.md

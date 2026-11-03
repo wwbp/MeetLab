@@ -18,7 +18,7 @@ ALEMBIC = alembic -c packages/core/alembic.ini
 # cross-service integration and system tests from the repo root.
 UNIT_SUITES = packages/core services/api services/bot tools/loadtest
 
-.PHONY: test-static test-config-parity up down start stop logs migrate migration test test-unit test-integration test-infra test-stt-cpu test-image test-dead-code scan scan-agent-runner scan-meet sim-attribution
+.PHONY: test-static test-config-parity up down start stop logs migrate migration test test-unit test-integration test-infra test-stt-cpu test-image test-dead-code scan scan-agent-runner scan-meet sim-attribution sim-group
 
 up:
 	$(COMPOSE) build bot tests
@@ -157,3 +157,9 @@ scan-meet:
 sim-attribution:
 	$(COMPOSE) up -d --wait transport-server agent-runner
 	$(COMPOSE) run --rm --no-deps -T -e SPEAKERS=$(or $(SPEAKERS),abc) tests python -m meetlab_loadtest.sim_attribution
+
+# The same, the three matched through a group start link (size 3) instead of a fixed room;
+# also checks they all got one room and one session ran in it.
+sim-group:
+	$(COMPOSE) up -d --wait transport-server agent-runner
+	$(COMPOSE) run --rm --no-deps -T -e GROUP_LINK=1 tests python -m meetlab_loadtest.sim_attribution

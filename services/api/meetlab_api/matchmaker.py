@@ -130,11 +130,12 @@ def step(link, tickets: list[TicketState], matches: list[MatchState], now: datet
             starts_at = now + _s(link.delay_s)
             out.append(UpdateMatch(m.room_name, {"starts_at": starts_at}))
         started = starts_at is not None and starts_at <= now
-        # 3. Started and set up: members are in the room.
+        # 3. Started and set up: members are in the room, sent there at starts_at (a later
+        #    step, e.g. the background loop's, records when they went, not when it noticed).
         if started and m.session_id is not None:
             for t in group:
                 if t.state in ("found", "ready"):
-                    update(t, state="placed", placed_at=now)
+                    update(t, state="placed", placed_at=starts_at)
         # 4. No session in the room for DONE_AFTER_S (past a rejoin's gap): the match is over.
         if started and m.session_ended_at is not None and m.session_ended_at <= now - _s(DONE_AFTER_S):
             for t in members(m.room_name):
@@ -376,6 +377,20 @@ async def ready_ticket(hooks, ticket_id: str, sessions=AsyncSessionLocal):
             t.state, t.ready_at = "ready", now
         return t
     return await _run(hooks, sessions, link_id, act)
+
+
+async def step_open_links(hooks, sessions=AsyncSessionLocal) -> None:
+    """reconcile_tick's pass: one step for every link with an open match. Members stop polling
+    once they leave for the room, so placed, done and a failed ready check happen on time
+    without anyone on the link. Rooms are still set up only by a poll (_run)."""
+    async with sessions() as db:
+        link_ids = (await db.scalars(select(Match.link_id).where(Match.closed_at.is_(None)).distinct())).all()
+    for link_id in link_ids:
+        async with sessions() as db, db.begin():
+            link = await db.scalar(select(StartLink).where(StartLink.link_id == link_id).with_for_update())
+            now = await db.scalar(select(func.clock_timestamp()))
+            after = await _step(db, link, now)
+        await _after(hooks, after)
 
 
 @router.post("/tickets")

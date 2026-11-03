@@ -50,6 +50,13 @@ one JSON list of turns, one per person in it:
  {"speaker_id": "sim_c_21a5", "name": "sim_c_21a5", "text": "Can you explain ...", "source": "speech"}]
 ```
 
+A person whose first words are transcribed before the bot's connect callback has registered
+them (seen with Pipecat 1.14 and three people starting together) is still their own turn:
+`speaker_id` is the transcript's `user_id`, their identity, and `name` its part before `__`.
+Whose turn it is never comes from LiveKit's loudest-speaker signal (`on_active_speaker_changed`,
+which Pipecat fires since 1.13): with people overlapping, that would hand the turn to whoever
+was loudest.
+
 `on_user_turn_stopped` (`bot.py`) reads the turns back (`parse_turns`) and stores each as its
 own utterance under its own `speaker_id`, `meta.source` from the turn. The words are never
 split or searched for a name, so a colon, quotes or a name said aloud change nothing.
@@ -97,7 +104,7 @@ on when people speak.
    which fixes the order and timestamps. The LLM turn stays as it is.
 2. **One aggregator per person.** Each person's chain ends its own turn, and the bot decides
    which turn to answer. This is the larger change the per-participant worker design
-   aimed at (`participant_workers.py`); Pipecat 1.12's aggregator has one turn at a time.
+   aimed at (`participant_workers.py`); Pipecat 1.14's aggregator has one turn at a time.
 3. **Upstream in Pipecat:** let `LLMUserAggregator` keep `user_id` per aggregated part so the
    `on_user_turn_stopped` message carries who said each piece, instead of each transcript
    carrying its turn as JSON text.

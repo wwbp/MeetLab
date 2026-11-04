@@ -57,9 +57,10 @@ export async function POST(request: Request) {
   }
 
   // Size 1: the ID is asked on pre-join, as today, and each click is a new one-off ticket.
+  // A group: the study link's ID if it has one (a second tab gets the same ticket); the
+  // ID is settled at the ready check (ready/route.ts).
   const typed = typeof body?.participant_id === 'string' ? body.participant_id : null;
   const participantId = size > 1 ? normalizeProlificId(typed) : null;
-  if (size > 1 && !participantId) return error('Enter your Prolific ID', 400);
 
   const ip = getClientIp(request);
   const key = `${ip}:${link.linkId}`;

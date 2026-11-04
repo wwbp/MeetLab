@@ -385,6 +385,50 @@ class TicketEndpointsTest(_DbCase):
         self.assertLike(reply, self._fixture("tickets_ready.json"))
         self.assertTrue(reply.json()["view"]["pressed"])
 
+    # The Prolific ID is checked at the ready check, not at joining (team demo, 2026-11-04).
+
+    def _pair_without_ids(self):
+        link_id = self._link(size=2)
+        a = self._post("/tickets", {"link_id": link_id, "participant_id": None}).json()
+        b = self._post("/tickets", {"link_id": link_id, "participant_id": None}).json()
+        self.assertEqual(b["view"]["kind"], "ready_check")
+        return link_id, a["ticket"], b["ticket"]
+
+    def test_join_without_an_id_then_ready_with_one_records_it(self):
+        _, a, _ = self._pair_without_ids()
+        pid = _pid()
+        reply = self._post(f"/tickets/{a}/ready", {"participant_id": pid})
+        self.assertEqual(reply.status_code, 200, reply.text)
+        self.assertEqual(reply.json()["participant_id"], pid)
+        self.assertTrue(reply.json()["view"]["pressed"])
+
+    def test_ready_with_no_id_at_all_is_refused_and_not_pressed(self):
+        link_id, a, _ = self._pair_without_ids()
+        reply = self._post(f"/tickets/{a}/ready")
+        self.assertEqual((reply.status_code, reply.json()), (400, {"error": "id_required"}))
+        self.assertEqual({t.state for t in self._tickets(link_id)}, {"found"})
+
+    def test_the_id_from_joining_is_enough_and_can_be_corrected(self):
+        link_id = self._link(size=2)
+        first, corrected = _pid(), _pid()
+        a = self._post("/tickets", {"link_id": link_id, "participant_id": first}).json()["ticket"]
+        b = self._post("/tickets", {"link_id": link_id, "participant_id": _pid()}).json()["ticket"]
+        self.assertEqual(self._post(f"/tickets/{b}/ready").status_code, 200)
+        self.assertEqual(self._post(f"/tickets/{a}/ready", {"participant_id": corrected}).json()["participant_id"],
+                         corrected)
+
+    def test_an_id_another_live_ticket_holds_is_refused(self):
+        link_id, a, b = self._pair_without_ids()
+        pid = _pid()
+        self.assertEqual(self._post(f"/tickets/{a}/ready", {"participant_id": pid}).status_code, 200)
+        reply = self._post(f"/tickets/{b}/ready", {"participant_id": pid})
+        self.assertEqual((reply.status_code, reply.json()), (409, {"error": "id_in_use"}))
+        self.assertEqual(sorted(t.state for t in self._tickets(link_id)), ["found", "ready"])
+
+    def test_a_ready_body_that_is_not_an_id_is_400(self):
+        _, a, _ = self._pair_without_ids()
+        self.assertEqual(self._post(f"/tickets/{a}/ready", {"participant_id": 5}).status_code, 400)
+
 
 if __name__ == "__main__":
     unittest.main()

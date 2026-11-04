@@ -17,11 +17,60 @@ describe('first screen', () => {
   });
 });
 
+describe('Prolific ID at the ready check', () => {
+  const ready = { kind: 'ready_check', deadline_in_ms: 60_000, pressed: false } as const;
+  const render = (error?: string) =>
+    renderToStaticMarkup(
+      <WaitingPanel
+        w={waitingView(ready, T0, T0)}
+        lost={false}
+        onAction={() => {}}
+        id={{ value: '5f8e2a1b3c4d5e6f7a8b9c0d', error, onChange: () => {} }}
+      />,
+    );
+
+  it('the field comes before the Ready button, prefilled', () => {
+    const html = render();
+    expect(html.indexOf('Prolific ID</label>')).toBeGreaterThan(-1);
+    expect(html.indexOf('id="prolific-id"')).toBeLessThan(html.indexOf('I&#x27;m ready'));
+    expect(html).toContain('value="5f8e2a1b3c4d5e6f7a8b9c0d"');
+  });
+
+  it('shows what is wrong with the ID', () => {
+    expect(render('That is not it')).toContain('That is not it');
+  });
+
+  it('not after Ready is pressed, nor while searching', () => {
+    for (const view of [
+      { ...ready, pressed: true },
+      { kind: 'searching', found: 1, size: 2, expires_in_ms: 1000, requeued: false },
+    ] as const) {
+      const html = renderToStaticMarkup(
+        <WaitingPanel
+          w={waitingView(view, T0, T0)}
+          lost={false}
+          onAction={() => {}}
+          id={{ value: '', onChange: () => {} }}
+        />,
+      );
+      expect(html).not.toContain('prolific-id');
+    }
+  });
+
+  it('the start page of a group link no longer asks for the ID', () => {
+    const html = renderToStaticMarkup(
+      <StartClient token="t" linkId="l" size={2} needsPassword={false} active />,
+    );
+    expect(html).not.toContain('prolific-id');
+    expect(html).toContain('Join');
+  });
+});
+
 describe('WaitingPanel (R39)', () => {
   it('one polite region holds heading and message; the ready-check message is an alert', () => {
     const html = panel({ kind: 'ready_check', deadline_in_ms: 20_000, pressed: false });
     expect(html).toMatch(
-      /<div aria-live="polite"[^>]*><h1[^>]*>Your group is ready<\/h1><p role="alert"[^>]*>Press the button within 20 seconds.<\/p>/,
+      /<div aria-live="polite"[^>]*><h1[^>]*>Your group is ready<\/h1><p role="alert"[^>]*>Check your Prolific ID, then press the button within 20 seconds.<\/p>/,
     );
     expect(html).toContain('>I&#x27;m ready</button>');
   });
@@ -51,12 +100,12 @@ describe('WaitingPanel (R39)', () => {
 });
 
 describe('StartClient form', () => {
-  it('a group link asks for the Prolific ID and a labelled password', () => {
+  it('a group link asks only for a labelled password', () => {
     const html = renderToStaticMarkup(
       <StartClient token="t" linkId="Qm9vdHN0cmFwTGlua0lEMQ" size={3} needsPassword active />,
     );
     expect(html).toContain('Join the group meeting');
-    expect(html).toMatch(/<label for="prolific-id"[^>]*>Prolific ID<\/label>/);
+    expect(html).not.toContain('prolific-id');
     expect(html).toMatch(/<label for="password"[^>]*>Meeting password<\/label>/);
     expect(html).toMatch(
       /<input[^>]*id="password"[^>]*type="password"|<input[^>]*type="password"[^>]*id="password"/,

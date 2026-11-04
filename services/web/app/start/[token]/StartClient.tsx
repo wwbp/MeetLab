@@ -9,6 +9,7 @@ import { COPY, type Waiting, attention, remainingMs, roomUrl, waitingView } from
 
 const POLL_MS = 2_000;
 const BAD_ID = 'A Prolific ID is 24 letters and numbers: please check it.';
+const ID_IN_USE = 'Someone in this line already has that Prolific ID: please check it.';
 
 type Reply = { ticket: string; participant_id: string | null; view: TicketView; at: number };
 type Action = NonNullable<Waiting['action']>;
@@ -54,11 +55,14 @@ export function WaitingPanel({
   lost,
   onAction,
   actionRef,
+  id,
 }: {
   w: Waiting;
   lost: boolean;
   onAction: (action: Action) => void;
   actionRef?: React.Ref<HTMLButtonElement>;
+  /** The Prolific ID, checked before "I'm ready". */
+  id?: { value: string; error?: string; onChange: (value: string) => void };
 }) {
   const label = { ready: "I'm ready", join_again: 'Join again' };
   return (
@@ -78,6 +82,28 @@ export function WaitingPanel({
         <span aria-hidden="true" className="block text-6xl font-bold tabular-nums">
           {w.countdown}
         </span>
+      )}
+      {w.action === 'ready' && id && (
+        <div className="space-y-1.5">
+          <label htmlFor="prolific-id" className="text-sm font-medium">
+            Prolific ID
+          </label>
+          <input
+            id="prolific-id"
+            className={inputClass}
+            value={id.value}
+            onChange={(e) => id.onChange(e.target.value)}
+            placeholder="24-character Prolific ID"
+            autoComplete="off"
+            spellCheck={false}
+            aria-describedby={id.error ? 'prolific-id-error' : undefined}
+          />
+          {id.error && (
+            <p id="prolific-id-error" role="alert" className="text-signal text-sm">
+              {id.error}
+            </p>
+          )}
+        </div>
       )}
       {w.action && (
         <button ref={actionRef} onClick={() => onAction(w.action!)} className={buttonClass}>
@@ -120,6 +146,7 @@ export function StartClient({
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [idError, setIdError] = useState('');
   const [failures, setFailures] = useState(0);
   const audio = useRef<AudioContext | null>(null);
   const actionRef = useRef<HTMLButtonElement>(null);
@@ -128,6 +155,7 @@ export function StartClient({
   const apply = useCallback((data: Omit<Reply, 'at'>) => {
     const at = Date.now();
     setReply({ ...data, at });
+    if (data.participant_id) setPid((typed) => typed || (data.participant_id as string));
     setNow(at);
     setScreen('ticket');
   }, []);
@@ -207,17 +235,13 @@ export function StartClient({
 
   async function join(id = pid) {
     setError('');
-    if (group && !normalizeProlificId(id)) {
-      setScreen('form');
-      setError(BAD_ID);
-      return;
-    }
     if (!audio.current && typeof AudioContext !== 'undefined') audio.current = new AudioContext();
     setLoading(true);
     try {
       const body = {
         token,
-        ...(group ? { participant_id: id } : {}),
+        // The study link's ID, if it has one; it is checked at the ready check.
+        ...(group && normalizeProlificId(id) ? { participant_id: id } : {}),
         ...(needsPassword ? { password } : {}),
       };
       const { res, data } = await post('/api/start-link', body);
@@ -253,10 +277,18 @@ export function StartClient({
       setPid(id);
       void join(id);
     } else if (action === 'ready') {
-      const { res, data } = await post('/api/start-link/ready', { ticket: reply.ticket }).catch(
-        () => ({ res: null, data: null }),
-      );
+      const id = normalizeProlificId(pid);
+      setIdError(id ? '' : BAD_ID);
+      if (!id) {
+        document.getElementById('prolific-id')?.focus();
+        return;
+      }
+      const { res, data } = await post('/api/start-link/ready', {
+        ticket: reply.ticket,
+        participant_id: id,
+      }).catch(() => ({ res: null, data: null }));
       if (res?.ok) apply(data);
+      else if (res?.status === 409) setIdError(ID_IN_USE);
       else void poll(reply.ticket);
     }
   }
@@ -279,6 +311,7 @@ export function StartClient({
           lost={failures >= 2}
           onAction={(a) => void onAction(a)}
           actionRef={actionRef}
+          id={{ value: pid, error: idError, onChange: setPid }}
         />
       </Page>
     );
@@ -303,23 +336,6 @@ export function StartClient({
           void join();
         }}
       >
-        {/* Size 1: the ID is asked on pre-join, as today (R8). */}
-        {group && (
-          <div className="space-y-1.5">
-            <label htmlFor="prolific-id" className="text-sm font-medium">
-              Prolific ID
-            </label>
-            <input
-              id="prolific-id"
-              className={inputClass}
-              value={pid}
-              onChange={(e) => setPid(e.target.value)}
-              placeholder="24-character Prolific ID"
-              autoComplete="off"
-              spellCheck={false}
-            />
-          </div>
-        )}
         {needsPassword && (
           <div className="space-y-1.5">
             <label htmlFor="password" className="text-sm font-medium">

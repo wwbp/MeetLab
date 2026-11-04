@@ -20,6 +20,11 @@ export function getBrowserSupport(): BrowserSupport {
   };
 }
 
+/** The recorder's page (app/recording) only receives, and opens without a microphone: no gate. */
+export function gateApplies(pathname: string): boolean {
+  return pathname !== '/recording';
+}
+
 /** Returns true when the browser can run core LiveKit functionality (WebRTC + mic/camera + transport). */
 export function isCoreSupported(support: BrowserSupport): boolean {
   return support.webRTC && support.mediaDevices && support.webSocket;

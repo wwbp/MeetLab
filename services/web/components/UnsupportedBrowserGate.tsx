@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { getBrowserSupport, isCoreSupported } from '@/lib/browser-support';
+import { gateApplies, getBrowserSupport, isCoreSupported } from '@/lib/browser-support';
 
 const SUPPORTED_BROWSERS = [
   { name: 'Google Chrome', version: '96 or later' },
@@ -19,7 +19,7 @@ export function UnsupportedBrowserGate() {
 
   useEffect(() => {
     const support = getBrowserSupport();
-    if (!isCoreSupported(support)) {
+    if (gateApplies(window.location.pathname) && !isCoreSupported(support)) {
       setUnsupported(true);
     }
   }, []);

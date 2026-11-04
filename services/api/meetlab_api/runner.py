@@ -1028,11 +1028,15 @@ class EgressOutputCompatibilityError(RuntimeError):
 async def _start_room_composite_egress(lk, room_name: str, file_output):
     from livekit.protocol.egress import RoomCompositeEgressRequest
 
+    # Meet's /recording page: a card for every person. LiveKit's stock layouts (used if this is
+    # unset) draw only participants with video, so people with cameras off were missing.
+    template = os.environ.get("RECORDING_TEMPLATE_URL", "")
     try:
         return await lk.egress.start_room_composite_egress(
             RoomCompositeEgressRequest(
                 room_name=room_name,
                 layout="speaker",
+                custom_base_url=template,
                 file_outputs=[file_output],
             )
         )
@@ -1047,6 +1051,7 @@ async def _start_room_composite_egress(lk, room_name: str, file_output):
                 RoomCompositeEgressRequest(
                     room_name=room_name,
                     layout="speaker",
+                    custom_base_url=template,
                     file=file_output,
                 )
             )

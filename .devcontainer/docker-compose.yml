@@ -106,6 +106,7 @@ services:
       - ../.env
     environment: &runner-env
       DATABASE_URL: "postgresql+asyncpg://meetlab:meetlab@postgres:5432/meetlab"
+      RECORDING_TEMPLATE_URL: "http://meet:3000/recording"
       BOT_RUNNER_SECRET: "${BOT_RUNNER_SECRET:-changeme}"
       # Speech-to-text as production runs it: Parakeet on our CPU server (stt-cpu below,
       # infra/stack/stt_cpu.tf), so dev catches what prod would hit.

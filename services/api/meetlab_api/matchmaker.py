@@ -363,8 +363,10 @@ async def poll_ticket(hooks, ticket_id: str, sessions=AsyncSessionLocal):
     return await _run(hooks, sessions, link_id, act)
 
 
-async def ready_ticket(hooks, ticket_id: str, sessions=AsyncSessionLocal):
-    """POST /tickets/{id}/ready: Ready pressed; counts only in `found` during the ready check."""
+async def ready_ticket(hooks, ticket_id: str, sessions=AsyncSessionLocal, participant_id: str | None = None):
+    """POST /tickets/{id}/ready: Ready pressed; counts only in `found` during the ready check.
+    The Prolific ID is settled here: the one sent, else the one from joining. An ID another
+    live ticket on the link holds is refused (the partial unique index would be too)."""
     link_id = await _ticket_link(sessions, ticket_id)
     if link_id is None:
         return _error(404, "not_found")
@@ -374,7 +376,14 @@ async def ready_ticket(hooks, ticket_id: str, sessions=AsyncSessionLocal):
         t.last_seen = now
         m = await db.get(Match, t.room_name) if t.room_name else None
         if t.state == "found" and m and m.starts_at is None and m.ready_deadline and m.ready_deadline > now:
-            t.state, t.ready_at = "ready", now
+            pid = participant_id or t.participant_id
+            if not pid:
+                return _error(400, "id_required")
+            if await db.scalar(select(Ticket.id).where(
+                    Ticket.link_id == link.link_id, Ticket.participant_id == pid,
+                    Ticket.state.in_(NON_TERMINAL), Ticket.id != t.id)):
+                return _error(409, "id_in_use")
+            t.participant_id, t.state, t.ready_at = pid, "ready", now
         return t
     return await _run(hooks, sessions, link_id, act)
 
@@ -409,4 +418,11 @@ async def post_poll(ticket_id: str, request: Request):
 
 @router.post("/tickets/{ticket_id}/ready")
 async def post_ready(ticket_id: str, request: Request):
-    return await ready_ticket(request.app.state, ticket_id)
+    try:
+        body = await request.json() if await request.body() else {}
+    except ValueError:
+        return _error(400, "bad_request")
+    pid = body.get("participant_id") if isinstance(body, dict) else None
+    if not isinstance(body, dict) or not isinstance(pid, (str, type(None))):
+        return _error(400, "bad_request")
+    return await ready_ticket(request.app.state, ticket_id, participant_id=pid or None)

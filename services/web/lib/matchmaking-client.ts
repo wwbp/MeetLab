@@ -111,5 +111,9 @@ export const publicLink = (linkId: string) =>
 export const createTicket = (ticket: NewTicket) => call<TicketReply>('POST', '/tickets', ticket);
 export const pollTicket = (ticket: string) =>
   call<TicketReply>('POST', `/tickets/${id(ticket)}/poll`);
-export const readyTicket = (ticket: string) =>
-  call<TicketReply>('POST', `/tickets/${id(ticket)}/ready`);
+export const readyTicket = (ticket: string, participantId?: string) =>
+  call<TicketReply>(
+    'POST',
+    `/tickets/${id(ticket)}/ready`,
+    participantId ? { participant_id: participantId } : undefined,
+  );

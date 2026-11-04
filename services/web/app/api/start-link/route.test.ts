@@ -80,13 +80,17 @@ describe('POST /api/start-link', () => {
     expect(body.view.starts_in_ms).toBe(30_000);
   });
 
-  it('a group link needs a valid Prolific ID, then returns the ticket and its view', async () => {
+  it('a group link joins without an ID: it is checked at the ready check', async () => {
     mm.publicLink.mockResolvedValue(group());
-    expect((await start({ token: LINK })).status).toBe(400);
-    expect((await start({ token: LINK, participant_id: 'not-an-id' })).status).toBe(400);
-    expect((await start({ token: LINK, participant_id: 42 })).status).toBe(400);
-    expect(mm.createTicket).not.toHaveBeenCalled();
+    mm.createTicket.mockResolvedValue(reply('tickets_create_group'));
+    for (const body of [{ token: LINK }, { token: LINK, participant_id: 'not-an-id' }]) {
+      expect((await start(body)).status).toBe(200);
+      expect(mm.createTicket).toHaveBeenLastCalledWith({ link_id: LINK, participant_id: null });
+    }
+  });
 
+  it("a group link with the study link's ID keeps it, so a second tab gets the same ticket", async () => {
+    mm.publicLink.mockResolvedValue(group());
     mm.createTicket.mockResolvedValue(reply('tickets_create_group'));
     const res = await start({
       token: LINK,

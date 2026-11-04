@@ -186,8 +186,9 @@ https://<host>/start/<link id>?PROLIFIC_PID=${e://Field/PROLIFIC_PID}
 
 (`${e://Field/PROLIFIC_PID}` is Qualtrics's embedded-data field, filled from the
 `PROLIFIC_PID` that Prolific puts on the survey's address.) With a room size above 1 the
-link's page asks for the ID before Join: prefilled, correctable, and required, because it is
-what keeps one person to one place in the line. With size 1 it is asked on the pre-join
+ID is checked at the ready check, above the **I'm ready** button: prefilled from the link,
+correctable, and required. Keep it on the link: it also keeps one person to one place in the
+line from the moment they join, and records people who wait and never reach a group. With size 1 it is asked on the pre-join
 screen, as before (§1), and the ID travels on to the room either way.
 
 **Which bot setting each room gets.** Each new room takes the setting used least so far on
@@ -221,15 +222,15 @@ participant to wait 1 minute.
 
 ### What participants see
 
-1. **Join the group meeting.** Their Prolific ID (prefilled), the password if the link has
-   one, and **Join**. The page says to keep it open and in front.
+1. **Join the group meeting.** The password if the link has one, and **Join**. The page says to keep it open and in front.
 2. **Finding your group: 2 of 3 here.** The count updates every 2 seconds, with the time
    they will be looked for until (their max wait). Closing the page gives up their place:
    someone who hasn't been seen for 90 seconds is no longer matched. Reopening the link
-   with the same Prolific ID, while their place is still held, returns them to it.
+   with the same Prolific ID on it, while their place is still held, returns them to it.
 3. **Your group is ready.** The tab's title changes to "(!) Your group is ready", a tone
-   plays, and a **Ready** button appears with the seconds left to press it (Time to
-   confirm). After pressing: "Waiting for the others to confirm."
+   plays, and the **Prolific ID** field (prefilled from the link) appears above the **I'm
+   ready** button, with the seconds left to press it (Time to confirm). The button needs a
+   valid ID, and refuses one that someone else in this line holds. After pressing: "Waiting for the others to confirm."
 4. **Starting in** with a countdown (the start delay), after "Setting up the room…" while
    the bot is started. Next comes the room itself: "allow your microphone and type your
    name." With a delay of 0 they go straight in.
@@ -298,7 +299,9 @@ WHERE l.name = 'Pilot 3, groups of 3'
 ORDER BY m.created_at, t.participant_id;
 ```
 
-- `prolific_id` is filled for links of size above 1. A size-1 link asks for the ID only on
+- `prolific_id` is filled for links of size above 1 once the person presses Ready, or from
+  joining if the link carried it. Someone who joined from a link without the ID and never
+  pressed Ready has none. A size-1 link asks for the ID only on
   the pre-join screen, so its rows here have none: the ID is with the speaker (§1).
 - Only `placed` (in the room now) and `done` (meeting over) people entered a room. A row in
   any other state is someone still waiting, who missed the ready check (`removed`) or who

@@ -14,7 +14,7 @@ const PER_TICKET_PER_MINUTE = 60;
 export async function ticketRoute(
   request: Request,
   name: string,
-  call: (ticket: string) => Promise<RunnerReply<TicketReply>>,
+  call: (ticket: string, body: Record<string, unknown>) => Promise<RunnerReply<TicketReply>>,
 ) {
   const body = await request.json().catch(() => ({}));
   const ticket = body?.ticket;
@@ -28,6 +28,6 @@ export async function ticketRoute(
       { status: 429, headers: { 'Retry-After': String(Math.ceil(limit.retryAfterMs / 1000)) } },
     );
   }
-  const { status, body: reply } = await call(ticket);
+  const { status, body: reply } = await call(ticket, body);
   return NextResponse.json(reply, { status });
 }

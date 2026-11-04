@@ -39,7 +39,7 @@ describe('waitingView', () => {
     );
     expect(v).toMatchObject({
       heading: 'Your group is ready',
-      message: 'Press the button within 55 seconds.',
+      message: 'Check your Prolific ID, then press the button within 55 seconds.',
       action: 'ready',
     });
     const pressed = waitingView(

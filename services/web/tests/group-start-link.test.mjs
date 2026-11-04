@@ -185,6 +185,29 @@ test('missed ready check: the one who did not press is out, the other is requeue
   assert.equal(pa.view.requeued, true);
 });
 
+test('the Prolific ID is settled at the ready check: join without one, Ready needs one', async () => {
+  const token = await createLink({ name: 'it id at ready', size: 2, delay_s: 60, ready_check_s: 30 });
+  const a = await post('/api/start-link', { token });
+  assert.equal(a.response.status, 200, a.text);
+  assert.equal(a.json.participant_id, null);
+  const b = await post('/api/start-link', { token });
+  assert.equal(b.json.view.kind, 'ready_check', b.text);
+
+  const none = await post('/api/start-link/ready', { ticket: a.json.ticket });
+  assert.equal(none.response.status, 400, none.text);
+  const bad = await post('/api/start-link/ready', { ticket: a.json.ticket, participant_id: 'nope' });
+  assert.equal(bad.response.status, 400, bad.text);
+
+  const id = prolificId();
+  const pressed = await post('/api/start-link/ready', { ticket: a.json.ticket, participant_id: id });
+  assert.equal(pressed.response.status, 200, pressed.text);
+  assert.equal(pressed.json.participant_id, id);
+  assert.equal(pressed.json.view.pressed, true);
+
+  const same = await post('/api/start-link/ready', { ticket: b.json.ticket, participant_id: id });
+  assert.equal(same.response.status, 409, same.text);
+});
+
 test('pool check: a link with an unknown bot setting is refused', async () => {
   const missing = `glmissing-${randomUUID().slice(0, 8)}`;
   const gen = await post('/api/console/start-link', { pool: [SCOPE, missing], size: 2 }, false);

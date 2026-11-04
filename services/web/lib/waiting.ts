@@ -56,7 +56,7 @@ export function waitingView(view: TicketView, arrivedAtMs: number, nowMs: number
         ? { heading: 'Your group is ready', message: 'Waiting for the others to confirm.' }
         : {
             heading: 'Your group is ready',
-            message: `Press the button within ${Math.ceil(remainingMs(view.deadline_in_ms, arrivedAtMs, nowMs) / 1000)} seconds.`,
+            message: `Check your Prolific ID, then press the button within ${Math.ceil(remainingMs(view.deadline_in_ms, arrivedAtMs, nowMs) / 1000)} seconds.`,
             action: 'ready',
           };
     case 'starting': {

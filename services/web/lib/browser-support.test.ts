@@ -1,5 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { getBrowserSupport, isCoreSupported, isEnhancedSupported } from './browser-support';
+import {
+  getBrowserSupport,
+  isCoreSupported,
+  isEnhancedSupported,
+  gateApplies,
+} from './browser-support';
 
 // vitest runs in 'node' env — window is undefined by default, matching SSR behaviour.
 // We use vi.stubGlobal to simulate browser environments.
@@ -100,32 +105,100 @@ describe('getBrowserSupport', () => {
 
 describe('isCoreSupported', () => {
   it('returns true when all core features are present', () => {
-    expect(isCoreSupported({ webRTC: true, mediaDevices: true, webSocket: true, sharedArrayBuffer: false, worker: false })).toBe(true);
+    expect(
+      isCoreSupported({
+        webRTC: true,
+        mediaDevices: true,
+        webSocket: true,
+        sharedArrayBuffer: false,
+        worker: false,
+      }),
+    ).toBe(true);
   });
 
   it('returns false when WebRTC is missing', () => {
-    expect(isCoreSupported({ webRTC: false, mediaDevices: true, webSocket: true, sharedArrayBuffer: true, worker: true })).toBe(false);
+    expect(
+      isCoreSupported({
+        webRTC: false,
+        mediaDevices: true,
+        webSocket: true,
+        sharedArrayBuffer: true,
+        worker: true,
+      }),
+    ).toBe(false);
   });
 
   it('returns false when mediaDevices is missing', () => {
-    expect(isCoreSupported({ webRTC: true, mediaDevices: false, webSocket: true, sharedArrayBuffer: true, worker: true })).toBe(false);
+    expect(
+      isCoreSupported({
+        webRTC: true,
+        mediaDevices: false,
+        webSocket: true,
+        sharedArrayBuffer: true,
+        worker: true,
+      }),
+    ).toBe(false);
   });
 
   it('returns false when WebSocket is missing', () => {
-    expect(isCoreSupported({ webRTC: true, mediaDevices: true, webSocket: false, sharedArrayBuffer: true, worker: true })).toBe(false);
+    expect(
+      isCoreSupported({
+        webRTC: true,
+        mediaDevices: true,
+        webSocket: false,
+        sharedArrayBuffer: true,
+        worker: true,
+      }),
+    ).toBe(false);
   });
 });
 
 describe('isEnhancedSupported', () => {
   it('returns true when SharedArrayBuffer and Worker are present', () => {
-    expect(isEnhancedSupported({ webRTC: true, mediaDevices: true, webSocket: true, sharedArrayBuffer: true, worker: true })).toBe(true);
+    expect(
+      isEnhancedSupported({
+        webRTC: true,
+        mediaDevices: true,
+        webSocket: true,
+        sharedArrayBuffer: true,
+        worker: true,
+      }),
+    ).toBe(true);
   });
 
   it('returns false when SharedArrayBuffer is missing', () => {
-    expect(isEnhancedSupported({ webRTC: true, mediaDevices: true, webSocket: true, sharedArrayBuffer: false, worker: true })).toBe(false);
+    expect(
+      isEnhancedSupported({
+        webRTC: true,
+        mediaDevices: true,
+        webSocket: true,
+        sharedArrayBuffer: false,
+        worker: true,
+      }),
+    ).toBe(false);
   });
 
   it('returns false when Worker is missing', () => {
-    expect(isEnhancedSupported({ webRTC: true, mediaDevices: true, webSocket: true, sharedArrayBuffer: true, worker: false })).toBe(false);
+    expect(
+      isEnhancedSupported({
+        webRTC: true,
+        mediaDevices: true,
+        webSocket: true,
+        sharedArrayBuffer: true,
+        worker: false,
+      }),
+    ).toBe(false);
+  });
+});
+
+describe('gateApplies', () => {
+  it('every page a person uses needs a microphone, so the gate covers it', () => {
+    for (const path of ['/', '/rooms/a', '/start/abc', '/login']) {
+      expect(gateApplies(path), path).toBe(true);
+    }
+  });
+
+  it('the recorder only receives: its page is never gated (it would film the error)', () => {
+    expect(gateApplies('/recording')).toBe(false);
   });
 });

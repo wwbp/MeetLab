@@ -56,7 +56,7 @@ export async function POST(request: Request) {
     size = info.body.size;
   }
 
-  // Size 1: the ID is asked on pre-join, as today, and each click is a new one-off ticket.
+  // Size 1: the page asks for the ID and carries it to the room; each click is a new one-off ticket.
   // A group: the study link's ID if it has one (a second tab gets the same ticket); the
   // ID is settled at the ready check (ready/route.ts).
   const typed = typeof body?.participant_id === 'string' ? body.participant_id : null;

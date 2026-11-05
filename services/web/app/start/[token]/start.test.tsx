@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import { waitingView } from '@/lib/waiting';
-import { StartClient, WaitingPanel, firstScreen } from './StartClient';
+import { StartClient, WaitingPanel, firstScreen, soloRoomUrl } from './StartClient';
 
 const T0 = 1_000_000;
 const panel = (view: Parameters<typeof waitingView>[0]) =>
@@ -112,7 +112,7 @@ describe('StartClient form', () => {
     );
   });
 
-  it("a size-1 link is today's page: no ID, no password", () => {
+  it('a size-1 link asks for the ID before Join meeting: having it means ready', () => {
     const html = renderToStaticMarkup(
       <StartClient
         token="t"
@@ -123,16 +123,34 @@ describe('StartClient form', () => {
       />,
     );
     expect(html).toContain('Join the meeting');
-    expect(html).not.toContain('prolific-id');
+    expect(html).toMatch(/<label for="prolific-id"[^>]*>Prolific ID<\/label>/);
+    expect(html.indexOf('prolific-id')).toBeLessThan(html.indexOf('Join meeting'));
     expect(html).not.toContain('password');
   });
 
-  it('a size-1 link with a password asks for it, still no ID (R27)', () => {
+  it('a size-1 link with a password asks for both (R27)', () => {
     const html = renderToStaticMarkup(
       <StartClient token="t" linkId="x3Jd8kq0VbN2mT5wYc7HfA" size={1} needsPassword active />,
     );
-    expect(html).toContain('Join the meeting');
-    expect(html).not.toContain('prolific-id');
+    expect(html).toContain('prolific-id');
     expect(html).toMatch(/<label for="password"[^>]*>Meeting password<\/label>/);
+  });
+});
+
+describe('size 1: the ID reaches the room', () => {
+  const ID = '5f2a1b3c4d5e6f7a8b9c0d1e';
+
+  it('the typed ID goes on to the room', () => {
+    expect(soloRoomUrl('room-1', ID, '')).toBe(`/rooms/room-1?PROLIFIC_PID=${ID}`);
+  });
+
+  it('a corrected ID replaces the one on the study link', () => {
+    expect(soloRoomUrl('room-1', ID, '?PROLIFIC_PID=wrong&STUDY_ID=s')).toBe(
+      `/rooms/room-1?PROLIFIC_PID=${ID}&STUDY_ID=s`,
+    );
+  });
+
+  it('no valid ID yet: nothing to carry but the study link', () => {
+    expect(soloRoomUrl('room-1', 'nope', '?STUDY_ID=s')).toBe('/rooms/room-1?STUDY_ID=s');
   });
 });

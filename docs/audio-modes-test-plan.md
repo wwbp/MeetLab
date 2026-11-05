@@ -1,6 +1,6 @@
 # Audio modes: test and simulation plan
 
-Status: proposal. Parts built on unmerged branches; nothing reaches a room yet. Three modes, built test-first:
+Status: proposal. The page's gate is in the room (`services/web/lib/room-floor.ts`); parts of the bot's side are on unmerged branches. Three modes, built test-first:
 
 | Mode | Who may speak | Bot speaks when |
 |---|---|---|

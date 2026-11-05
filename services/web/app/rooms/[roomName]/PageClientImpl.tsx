@@ -8,6 +8,7 @@ import { inter } from '@/lib/fonts';
 const SIGNAL = 'oklch(0.68 0.2 27)';
 import { DebugMode } from '@/lib/Debug';
 import { KeyboardShortcuts } from '@/lib/KeyboardShortcuts';
+import { FloorControls } from '@/lib/FloorButtons';
 import { RecordingIndicator } from '@/lib/RecordingIndicator';
 import { SessionTimer } from '@/lib/SessionTimer';
 import { ConnectionDetails } from '@/lib/types';
@@ -38,6 +39,7 @@ import { useSetupE2EE } from '@/lib/useSetupE2EE';
 import { useLowCPUOptimizer } from '@/lib/usePerfomanceOptimiser';
 import { normalizeProlificId, prolificIdFromParams } from '@/lib/study';
 import { armLeaveWarning } from '@/lib/leave-warning';
+import { createMicGate, joinMic } from '@/lib/room-floor';
 import {
   JOIN_FAILED,
   PRE_JOIN_DEFAULTS,
@@ -223,7 +225,7 @@ export function PageClientImpl(props: {
   );
 }
 
-function VideoConferenceComponent(props: {
+export function VideoConferenceComponent(props: {
   userChoices: LocalUserChoices;
   connectionDetails: ConnectionDetails;
   options: {
@@ -335,11 +337,9 @@ function VideoConferenceComponent(props: {
           handleError(error);
         });
       }
-      if (props.userChoices.audioEnabled) {
-        room.localParticipant.setMicrophoneEnabled(true).catch((error) => {
-          handleError(error);
-        });
-      }
+      joinMic(room.localParticipant, micGate, props.userChoices.audioEnabled).catch((error) => {
+        handleError(error);
+      });
     }
     return () => {
       room.off(RoomEvent.Disconnected, handleOnLeave);
@@ -376,6 +376,11 @@ function VideoConferenceComponent(props: {
     console.error(error);
     setErrorMessage(mediaErrorMessage(error));
   }, []);
+  // Per Room, so the relay retry, which remounts this with a new Room, gets a new gate.
+  const micGate = React.useMemo(
+    () => createMicGate(room, props.connectionDetails.audioMode, handleError),
+    [room, props.connectionDetails.audioMode, handleError],
+  );
   const handleEncryptionError = React.useCallback((error: Error) => {
     console.error(error);
     alert(
@@ -418,7 +423,7 @@ function VideoConferenceComponent(props: {
   }
 
   return (
-    <div className="lk-room-container">
+    <div className="lk-room-container" data-mic-gated={micGate ? '' : undefined}>
       {errorMessage && (
         <p
           role="alert"
@@ -469,6 +474,7 @@ function VideoConferenceComponent(props: {
             SettingsComponent={SettingsMenu}
           />
         </ConferenceErrorBoundary>
+        {micGate && e2eeSetupComplete && <FloorControls gate={micGate} />}
         <DebugMode />
         <RecordingIndicator />
         <SessionTimer room={room} limitSeconds={props.connectionDetails.sessionLimitSeconds ?? 0} />

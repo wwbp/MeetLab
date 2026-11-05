@@ -31,7 +31,6 @@ Decisions are in the last section. Numbers marked \* are proposals.
 
 | Hazard | Evidence |
 |---|---|
-| `idle()` reads anyone talking over 3 s as silent, because `_speaking` keeps only the onset time | Reproduced on `main` |
 | A person starting inside the bot's first 600 ms isn't acted on until the next sentence starts | Reproduced that the onset returns False; the rest is from reading |
 | `say()` (greeting, closing) and typed chat bypass any reply gate | Read |
 | `track_muted` arrives 52–90 ms before the last audio, so acting on the event alone drops final words | Measured, local LiveKit, n=60. Last arrival after a mute was 121 ms |
@@ -215,4 +214,5 @@ memory, and this machine has 7.75 GiB, so reserve memory for `stt-cpu` before th
 4. **No bot, or no answer:** the mic works while the button is pressed and closes on release. It
    never opens unpressed.
 5. **Stuck floor:** 20 s, above the 15 s idle release, so a walked-away run can pass.
-6. **The 3 s hazard in normal:** fixed first, in its own PR, before any baseline run.
+6. **The 3 s hazard in normal:** fixed first, in its own PR, before any baseline run. Baselines taken
+   before that fix aren't comparable.

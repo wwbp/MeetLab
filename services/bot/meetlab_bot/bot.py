@@ -589,6 +589,8 @@ async def _bot(runner_args: LiveKitRunnerArguments):
         _stt_factory,
         on_speech_onset=_on_speech_onset,
         on_speech_offset=_on_speech_offset,
+        # Without this, anyone talking past 3.2 s reads as silent (interruption.py).
+        on_still_speaking=lambda sid: interruptions.user_speaking(time.monotonic(), sid),
     )
     logger.info(
         f"STT: model={bot_config.stt_model} mode=per-participant delay={bot_config.stt_delay}"

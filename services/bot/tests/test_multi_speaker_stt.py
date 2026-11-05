@@ -791,5 +791,31 @@ class AdmissionControlTests(unittest.IsolatedAsyncioTestCase):
         refusals = [m for m in seen if "refused" in m]
         self.assertEqual(len(refusals), 1, f"expected one refusal log, got {len(refusals)}")
 
+class TestStillSpeakingSignal(unittest.IsolatedAsyncioTestCase):
+    """VADProcessor's periodic UserSpeakingFrame reaches the interruption tracker, not the pipeline."""
+
+    async def test_reports_the_speaker_and_stays_out_of_the_pipeline(self):
+        q, heard = asyncio.Queue(), []
+        collector = _FrameCollector(q, needs_vad_wrap=True, sid="sidA", on_still_speaking=heard.append)
+        await collector.queue_frame(UserSpeakingFrame())
+        self.assertEqual(heard, ["sidA"])
+        self.assertTrue(q.empty())
+
+    async def test_a_failing_handler_does_not_break_the_audio_path(self):
+        def boom(_sid):
+            raise RuntimeError("no")
+        collector = _FrameCollector(asyncio.Queue(), needs_vad_wrap=True, sid="sidA", on_still_speaking=boom)
+        await collector.queue_frame(UserSpeakingFrame())
+
+    async def test_multi_speaker_passes_the_handler_to_each_collector(self):
+        heard = []
+        multi = MultiSpeakerSTT(lambda sid=None: _ImmediateSTT(), on_still_speaking=heard.append)
+        await multi.setup(_make_setup())
+        await multi._ensure_stt("sidA")
+        collector = multi._stts["sidA"].next
+        await collector.queue_frame(UserSpeakingFrame())
+        self.assertEqual(heard, ["sidA"])
+
+
 if __name__ == "__main__":
     unittest.main()

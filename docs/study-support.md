@@ -188,8 +188,9 @@ https://<host>/start/<link id>?PROLIFIC_PID=${e://Field/PROLIFIC_PID}
 `PROLIFIC_PID` that Prolific puts on the survey's address.) With a room size above 1 the
 ID is checked at the ready check, above the **I'm ready** button: prefilled from the link,
 correctable, and required. Keep it on the link: it also keeps one person to one place in the
-line from the moment they join, and records people who wait and never reach a group. With size 1 it is asked on the pre-join
-screen, as before (§1), and the ID travels on to the room either way.
+line from the moment they join, and records people who wait and never reach a group. With size 1
+there is no ready check: the start page asks for the ID above **Join meeting**, so no room or bot
+starts without one. The ID travels on to the room either way, and pre-join shows it prefilled (§1).
 
 **Which bot setting each room gets.** Each new room takes the setting used least so far on
 this link; if several are tied, one of them at random. So with two settings, rooms alternate
@@ -301,8 +302,8 @@ ORDER BY m.created_at, t.participant_id;
 
 - `prolific_id` is filled for links of size above 1 once the person presses Ready, or from
   joining if the link carried it. Someone who joined from a link without the ID and never
-  pressed Ready has none. A size-1 link asks for the ID only on
-  the pre-join screen, so its rows here have none: the ID is with the speaker (§1).
+  pressed Ready has none. A size-1 link doesn't store the ID on
+  its ticket, so its rows here have none: the ID is with the speaker (§1).
 - Only `placed` (in the room now) and `done` (meeting over) people entered a room. A row in
   any other state is someone still waiting, who missed the ready check (`removed`) or who
   expired.

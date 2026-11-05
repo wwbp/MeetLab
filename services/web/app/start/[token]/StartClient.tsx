@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { buttonClass, inputClass } from '@/components/console/swiss';
-import { carryQuery } from '@/lib/join';
 import type { TicketView } from '@/lib/matchmaking-client';
 import { normalizeProlificId, prolificIdFromParams } from '@/lib/study';
 import { COPY, type Waiting, attention, remainingMs, roomUrl, waitingView } from '@/lib/waiting';
@@ -17,6 +16,11 @@ type Action = NonNullable<Waiting['action']>;
 /** A ticket this tab already holds resumes (reload), even once the link is stopped. */
 export function firstScreen(stored: string | null, active: boolean) {
   return stored ? 'resume' : active ? 'form' : 'closed';
+}
+
+/** Size 1 keeps no ID on its ticket, so the page carries what was typed to the room. */
+export function soloRoomUrl(room: string, typed: string, search: string) {
+  return roomUrl(room, normalizeProlificId(typed), search);
 }
 
 /** Short tone on entering the ready check; the context was made in the Join click (R39). */
@@ -45,6 +49,33 @@ const Page = ({ children }: { children: React.ReactNode }) => (
   </div>
 );
 
+type IdField = { value: string; error?: string; onChange: (value: string) => void };
+
+function ProlificIdField({ value, error, onChange }: IdField) {
+  return (
+    <div className="space-y-1.5">
+      <label htmlFor="prolific-id" className="text-sm font-medium">
+        Prolific ID
+      </label>
+      <input
+        id="prolific-id"
+        className={inputClass}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder="24-character Prolific ID"
+        autoComplete="off"
+        spellCheck={false}
+        aria-describedby={error ? 'prolific-id-error' : undefined}
+      />
+      {error && (
+        <p id="prolific-id-error" role="alert" className="text-signal text-sm">
+          {error}
+        </p>
+      )}
+    </div>
+  );
+}
+
 /**
  * One state of the wait. The polite region (heading + message) changes only when the
  * state does; the countdown's digits are hidden from screen readers, which hear
@@ -62,7 +93,7 @@ export function WaitingPanel({
   onAction: (action: Action) => void;
   actionRef?: React.Ref<HTMLButtonElement>;
   /** The Prolific ID, checked before "I'm ready". */
-  id?: { value: string; error?: string; onChange: (value: string) => void };
+  id?: IdField;
 }) {
   const label = { ready: "I'm ready", join_again: 'Join again' };
   return (
@@ -83,28 +114,7 @@ export function WaitingPanel({
           {w.countdown}
         </span>
       )}
-      {w.action === 'ready' && id && (
-        <div className="space-y-1.5">
-          <label htmlFor="prolific-id" className="text-sm font-medium">
-            Prolific ID
-          </label>
-          <input
-            id="prolific-id"
-            className={inputClass}
-            value={id.value}
-            onChange={(e) => id.onChange(e.target.value)}
-            placeholder="24-character Prolific ID"
-            autoComplete="off"
-            spellCheck={false}
-            aria-describedby={id.error ? 'prolific-id-error' : undefined}
-          />
-          {id.error && (
-            <p id="prolific-id-error" role="alert" className="text-signal text-sm">
-              {id.error}
-            </p>
-          )}
-        </div>
-      )}
+      {w.action === 'ready' && id && <ProlificIdField {...id} />}
       {w.action && (
         <button ref={actionRef} onClick={() => onAction(w.action!)} className={buttonClass}>
           {label[w.action]}
@@ -219,8 +229,12 @@ export function StartClient({
   useEffect(() => {
     if (!reply || reply.view.kind !== 'starting' || !reply.view.room) return;
     if (remainingMs(reply.view.starts_in_ms, reply.at, now) > 0) return;
-    window.location.assign(roomUrl(reply.view.room, reply.participant_id, window.location.search));
-  }, [reply, now]);
+    window.location.assign(
+      reply.participant_id
+        ? roomUrl(reply.view.room, reply.participant_id, window.location.search)
+        : soloRoomUrl(reply.view.room, pid, window.location.search),
+    );
+  }, [reply, now, pid]);
 
   // Title, tone and focus on entering a state (R39).
   useEffect(() => {
@@ -246,8 +260,8 @@ export function StartClient({
       };
       const { res, data } = await post('/api/start-link', body);
       if (res.ok && data.url) {
-        // Keep ?PROLIFIC_PID=... from the study link.
-        window.location.assign(carryQuery(data.url, window.location.search));
+        // The ID just typed, and the rest of the study link's query.
+        window.location.assign(soloRoomUrl(data.roomName, id, window.location.search));
         return; // keep the spinner while the browser navigates
       }
       if (res.ok && data.ticket) {
@@ -269,6 +283,14 @@ export function StartClient({
     setLoading(false);
   }
 
+  /** The valid ID, or says what is wrong with it and puts the cursor there. */
+  function checkedId() {
+    const id = normalizeProlificId(pid);
+    setIdError(id ? '' : BAD_ID);
+    if (!id) document.getElementById('prolific-id')?.focus();
+    return id;
+  }
+
   async function onAction(action: Action) {
     if (!reply) return;
     if (action === 'join_again') {
@@ -277,12 +299,8 @@ export function StartClient({
       setPid(id);
       void join(id);
     } else if (action === 'ready') {
-      const id = normalizeProlificId(pid);
-      setIdError(id ? '' : BAD_ID);
-      if (!id) {
-        document.getElementById('prolific-id')?.focus();
-        return;
-      }
+      const id = checkedId();
+      if (!id) return;
       const { res, data } = await post('/api/start-link/ready', {
         ticket: reply.ticket,
         participant_id: id,
@@ -333,9 +351,11 @@ export function StartClient({
         className="space-y-5"
         onSubmit={(e) => {
           e.preventDefault();
-          void join();
+          // Size 1 has no ready check: a valid ID and this button are the ready step.
+          if (group || checkedId()) void join();
         }}
       >
+        {!group && <ProlificIdField value={pid} error={idError} onChange={setPid} />}
         {needsPassword && (
           <div className="space-y-1.5">
             <label htmlFor="password" className="text-sm font-medium">

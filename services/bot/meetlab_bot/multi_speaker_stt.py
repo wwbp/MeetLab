@@ -78,6 +78,7 @@ class _FrameCollector(FrameProcessor):
     def __init__(self, queue: asyncio.Queue, *, needs_vad_wrap: bool = False,
                  sid: str | None = None, on_speech_onset: Callable[[str], None] | None = None,
                  on_speech_offset: Callable[[str], None] | None = None,
+                 on_still_speaking: Callable[[str], None] | None = None,
                  verdict=None, open_turn_secs: float | None = None):
         super().__init__()
         self._queue = queue
@@ -90,6 +91,7 @@ class _FrameCollector(FrameProcessor):
             self._closer = TurnCloser(queue, open_turn_secs or getattr(verdict, "wait_secs", OPEN_TURN_SECS))
         self._needs_vad_wrap = needs_vad_wrap
         self._sid = sid
+        self._on_still_speaking = on_still_speaking
         self._on_speech_onset = on_speech_onset
         self._on_speech_offset = on_speech_offset
 
@@ -114,6 +116,11 @@ class _FrameCollector(FrameProcessor):
             # But VADUserStartedSpeakingFrame is the REAL user speech onset, so
             # surface it to the interruption tracker (talk-over detection) before
             # dropping it from the main pipeline.
+            if isinstance(frame, UserSpeakingFrame) and self._on_still_speaking:
+                try:
+                    self._on_still_speaking(self._sid)
+                except Exception as e:
+                    logger.warning(f"_FrameCollector: on_still_speaking error: {e}")
             if isinstance(frame, VADUserStoppedSpeakingFrame) and self._on_speech_offset:
                 # Clears this speaker from the interruption tracker's
                 # currently-talking set. Bookkeeping only — it never interrupts.
@@ -171,11 +178,13 @@ class MultiSpeakerSTT(FrameProcessor):
     def __init__(self, stt_factory: Callable[[], FrameProcessor],
                  on_speech_onset: Callable[[str], None] | None = None,
                  on_speech_offset: Callable[[str], None] | None = None,
+                 on_still_speaking: Callable[[str], None] | None = None,
                  cap: int | None = None):
         super().__init__()
         self._stt_factory = stt_factory
         self._on_speech_onset = on_speech_onset
         self._on_speech_offset = on_speech_offset
+        self._on_still_speaking = on_still_speaking
         self._cap = cap
         self._stts: dict[str, FrameProcessor] = {}
         # Participants turned away at the cap. Held so the refusal is logged and
@@ -298,7 +307,8 @@ class MultiSpeakerSTT(FrameProcessor):
         collector = _FrameCollector(
             self._output_queue, needs_vad_wrap=needs_vad_wrap,
             sid=sid, on_speech_onset=self._on_speech_onset,
-            on_speech_offset=self._on_speech_offset, verdict=verdict,
+            on_speech_offset=self._on_speech_offset,
+            on_still_speaking=self._on_still_speaking, verdict=verdict,
         )
         tail.link(collector)
         if self._setup_params is not None:

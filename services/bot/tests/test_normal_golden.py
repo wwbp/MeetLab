@@ -28,6 +28,7 @@ from pipecat.frames.frames import (
     TTSAudioRawFrame,
     TTSSpeakFrame,
     UserAudioRawFrame,
+    UserSpeakingFrame,
     VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
 )
@@ -140,17 +141,19 @@ GOLDEN = [
     ("assistant_turn_stopped", 10.0),
     ("user_offset", 10.5, "alice"),
 
-    # HAZARD, open decision 4 in the plan: bob has been talking since 20.0 with no stop, yet past
-    # _SPEAKING_STALE_SECS he reads as silent, because _speaking keeps only the onset time. A fix
-    # for the 3 s hazard changes these lines: idle(23.1) to False and bot_started(25.0) to True,
-    # followed by a YIELD.
+    # A long talker stays a talker: bob speaks from 20.0 with no stop, and the VAD keeps saying so.
+    # Before 2026-11-05 he read as silent past 3 s: idle(23.1) was True and nothing yielded at 25.0.
     ("user_onset", 20.0, "bob", False),
     ("idle", 20.1, False),
+    ("user_speaking", 22.0, "bob"),
     ("idle", 23.0, False),
-    ("idle", 23.1, True),  # HAZARD: bob is still talking
+    ("idle", 23.1, False),
+    ("user_speaking", 23.5, "bob"),
     ("bot_started", 24.0, False),
     ("bot_stopped", 24.8),
-    ("bot_started", 25.0, False),  # HAZARD: floor spent and bob talking, no yield
+    ("user_speaking", 24.9, "bob"),
+    ("bot_started", 25.0, True),
+    YIELD,
     ("bot_stopped", 25.5),
     ("assistant_turn_stopped", 25.6),
     ("user_offset", 26.0, "bob"),
@@ -291,6 +294,10 @@ class NormalRoomTest(unittest.IsolatedAsyncioTestCase):
                 result = super().user_onset(t, sid)
                 trace.append(("user_onset", t, sid, result))
                 return result
+
+            def user_speaking(tracker, t, sid):
+                super().user_speaking(t, sid)
+                trace.append(("user_speaking", t, sid))
 
             def user_offset(tracker, t, sid=None):
                 super().user_offset(t, sid)
@@ -486,13 +493,16 @@ class NormalRoomTest(unittest.IsolatedAsyncioTestCase):
             await self._at(10.0, self._reply_ended)
             await self._at(10.5, alice.on_cleared)
 
-            # The 3 s hazard: see GOLDEN.
+            # A long talker: see GOLDEN.
             await self._at(20.0, bob.on_detected)
             idle(20.1)
+            await self._at(22.0, bob.push_frame, UserSpeakingFrame())
             idle(23.0)
             idle(23.1)
+            await self._at(23.5, bob.push_frame, UserSpeakingFrame())
             await self._at(24.0, self._bot_audio, on)
             await self._at(24.8, self._bot_audio, off)
+            await self._at(24.9, bob.push_frame, UserSpeakingFrame())
             await self._at(25.0, self._bot_audio, on)
             await self._at(25.5, self._bot_audio, off)
             await self._at(25.6, self._reply_ended)
@@ -505,8 +515,8 @@ class NormalRoomTest(unittest.IsolatedAsyncioTestCase):
         await self._meet(meeting)
 
         self.assertEqual(self.trace, GOLDEN)
-        self.assertEqual(self.tracker.interruptions, 2)
-        self.assertEqual([round(ms, 3) for ms in self.tracker.talkovers_ms], [200.0, 100.0])
+        self.assertEqual(self.tracker.interruptions, 3)
+        self.assertEqual([round(ms, 3) for ms in self.tracker.talkovers_ms], [200.0, 100.0, 500.0])
 
     async def test_normal_wav_bytes_unchanged(self):
         """Each track is exactly the PCM received, in order: no padding for a gap in the frames.

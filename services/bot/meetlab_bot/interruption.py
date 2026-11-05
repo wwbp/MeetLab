@@ -33,6 +33,7 @@ Signals in:
     assistant_turn_stopped(t)  the whole bot response finished
     user_onset(t, sid)         real user speech onset (per-participant VAD, via
                                MultiSpeakerSTT) — NOT the transcript-commit time
+    user_speaking(t, sid)      the VAD still hears them, every 0.2 s
 
 A *talk-over* is a user_onset inside an open response window. We count it once per
 response and measure ``talkover_ms`` = how long the bot's audio kept going after
@@ -45,7 +46,7 @@ import os
 
 from loguru import logger
 
-# Freshness bound on a speech onset that has no matching stop yet.
+# How long after the last sign of speech someone still counts as talking, if no stop came.
 #
 # user_offset is the primary mechanism — a speaker is normally cleared the moment
 # their VAD stop arrives. This bound only decides how long a *lost* stop keeps
@@ -53,9 +54,8 @@ from loguru import logger
 # interruption the next onset would catch anyway; too long and one dropped frame
 # makes the bot yield on every response, silencing it for the session.
 #
-# 3s covers the case this exists for — the LLM-generation and TTS-synthesis window
-# between a user's onset and the bot's first audio. An onset older than that is
-# not something the bot is about to talk over; it is a stop frame we never saw.
+# Signs of speech are the onset and the VAD's UserSpeakingFrame, every 0.2 s while it hears
+# speech. Counting from the onset alone read anyone talking past 3.2 s as silent, until 2026-11-05.
 _SPEAKING_STALE_SECS = 3.0
 
 # Audio the bot is guaranteed to get out before anything may cancel it.
@@ -94,7 +94,7 @@ class InterruptionTracker:
         # One interruption per response. Cleared only when the response ends, so a
         # sentence boundary mid-talk-over cannot re-arm it.
         self._interrupted_this_response = False
-        # sid -> onset time for everyone currently mid-utterance. Needed because
+        # sid -> last sign of speech for everyone currently mid-utterance. Needed because
         # onset is edge-triggered: without it the bot cannot tell, at the moment
         # it starts speaking, that someone is already talking.
         self._speaking: dict[str, float] = {}
@@ -129,8 +129,8 @@ class InterruptionTracker:
     def _current_speaker(self, t: float) -> str | None:
         """Someone who is talking right now, or None.
 
-        Onsets older than _SPEAKING_STALE_SECS are treated as a lost stop frame
-        rather than a very long turn. Without that guard a single dropped
+        Nothing heard from them for _SPEAKING_STALE_SECS is treated as a lost stop
+        frame. Without that guard a single dropped
         VADUserStoppedSpeakingFrame would make the bot yield on every subsequent
         response — silence for the rest of the session, which is a worse failure
         than the talk-over this is here to prevent.
@@ -227,6 +227,11 @@ class InterruptionTracker:
             logger.info(f"Interruption: user {sid} started speaking while bot was talking")
             return True
         return False
+
+    def user_speaking(self, t: float, sid: str) -> None:
+        """The VAD still hears this person. Someone it has cleared stays cleared."""
+        if sid in self._speaking:
+            self._speaking[sid] = t
 
     def user_offset(self, t: float, sid: str | None = None) -> None:
         """A user stopped speaking. Clears them from the currently-talking set.

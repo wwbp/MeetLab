@@ -58,6 +58,7 @@ export default function ConfigPage() {
         auto_record: data.auto_record ?? false,
         session_limit_minutes: data.session_limit_minutes ?? 0,
         closing_message: data.closing_message ?? '',
+        audio_mode: data.audio_mode ?? 'normal',
       });
     } catch {
       setError('Network error loading config');
@@ -275,6 +276,18 @@ export default function ConfigPage() {
                   className={inp}
                   required
                 />
+              </Field>
+              {/* Disabled until they do something: a researcher must not pick a mode that silently does nothing. */}
+              <Field name="audio_mode" label="Audio mode" help="Who may speak when. Only Normal works today; push-to-talk and baton aren’t built yet.">
+                <select
+                  value={form.audio_mode}
+                  onChange={(e) => setForm((f) => ({ ...f, audio_mode: e.target.value }))}
+                  className={sel}
+                >
+                  <option value="normal">Normal: open mic (default)</option>
+                  <option value="ptt" disabled>Push-to-talk (not built yet)</option>
+                  <option value="baton" disabled>Baton (not built yet)</option>
+                </select>
               </Field>
             </div>
           </Section>

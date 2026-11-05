@@ -33,6 +33,13 @@ class TestBotConfigDefaults(unittest.TestCase):
         self.assertEqual(str(col.server_default.arg), "0")
         self.assertFalse(col.nullable)
 
+    def test_audio_mode_default_is_normal(self):
+        """An unconfigured room keeps today's open mic (docs/audio-modes-test-plan.md)."""
+        col = BotConfig.__table__.c.audio_mode
+        self.assertEqual(col.default.arg, "normal")
+        self.assertEqual(str(col.server_default.arg), "normal")
+        self.assertFalse(col.nullable)
+
 
 if __name__ == "__main__":
     unittest.main()

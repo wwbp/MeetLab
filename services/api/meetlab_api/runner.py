@@ -237,6 +237,7 @@ class BotConfigAdmin(ModelView, model=BotConfig):
         "tts_provider": SelectField,
         "tts_aggregation_mode": SelectField,
         "turn_detection": SelectField,
+        "audio_mode": SelectField,
         "stt_endpointing_ms": SelectField,
         "user_speech_timeout_ms": SelectField,
     }
@@ -247,6 +248,8 @@ class BotConfigAdmin(ModelView, model=BotConfig):
         "tts_provider": {"choices": [("elevenlabs", "ElevenLabs — paid service: ElevenLabs (default)"), ("openai", "OpenAI voices — paid service: OpenAI"), ("kokoro", "Kokoro — our own server (staging only)")]},
         "tts_aggregation_mode": {"choices": [("sentence", "sentence (default)"), ("clause", "first clause, then sentences"), ("token", "token (lower latency)")]},
         "turn_detection": {"choices": [("silence", "after a silence (default)"), ("smart_turn", "when the speaker sounds finished (smart turn)")]},
+        # Not ptt or baton: nothing acts on them yet, so nobody should pick them here.
+        "audio_mode": {"choices": [("normal", "normal: open mic (default)")]},
         # These two ADD together to form the turn-end window; 450+300=750ms is
         # calibrated against real pilot audio (tests/integration/test_turn_calibration.py).
         # Judge any change by the sum. Choices are kept inside the range PUT
@@ -746,6 +749,9 @@ async def _handle_egress_event(body: dict) -> None:
         logger.warning(f"_handle_egress_event failed for {egress_id}: {exc}")
 
 
+_AUDIO_MODES_BUILT = ("normal",)
+
+
 @app.get("/configs")
 async def list_configs(_=Depends(verify_api_key)):
     """List all bot_config rows by scope — feeds the console's start-link pool picker.
@@ -787,6 +793,7 @@ async def get_config(room: str | None = None, _=Depends(verify_api_key)):
         "auto_record": cfg.auto_record,
         "session_limit_minutes": cfg.session_limit_minutes,
         "closing_message": cfg.closing_message,
+        "audio_mode": cfg.audio_mode,
     }
 
 
@@ -897,6 +904,12 @@ async def update_config(request: Request, _=Depends(verify_api_key)):
         if not isinstance(body["closing_message"], str):
             return JSONResponse({"error": "closing_message must be a string"}, status_code=400)
         fields["closing_message"] = body["closing_message"]
+    if "audio_mode" in body:
+        # ptt and baton join this when the bot and the room page act on them. Until then, storing
+        # one would be a room that claims a mode and silently runs normal.
+        if body["audio_mode"] not in _AUDIO_MODES_BUILT:
+            return JSONResponse({"error": f"audio_mode must be one of {list(_AUDIO_MODES_BUILT)}"}, status_code=400)
+        fields["audio_mode"] = body["audio_mode"]
 
     await _save_config(scope, fields)
     cfg = await load_bot_config(scope if scope != "global" else None)
@@ -917,6 +930,7 @@ async def update_config(request: Request, _=Depends(verify_api_key)):
         "auto_record": cfg.auto_record,
         "session_limit_minutes": cfg.session_limit_minutes,
         "closing_message": cfg.closing_message,
+        "audio_mode": cfg.audio_mode,
     }
 
 

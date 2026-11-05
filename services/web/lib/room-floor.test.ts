@@ -498,6 +498,287 @@ describe('baton: the contract with the bot', () => {
     expect(onChange).toHaveBeenCalled();
   });
 
+  describe('losing the floor', () => {
+    async function holding() {
+      const r = baton();
+      r.gate.floor.press('space');
+      setFloor(r.room, r.bot, 'me');
+      await flush();
+      expect(r.mic.mock.calls).toEqual([[true]]);
+      return r;
+    }
+    const LOST = 'You no longer have the floor. Press again to talk.';
+
+    it.each([
+      ['an empty holder', { 'floor.holder': '', 'floor.queue': '' }],
+      ['attributes deleted on the server', {}],
+      ['someone else named', { 'floor.holder': 'alice', 'floor.queue': '' }],
+      ['the bot named', { 'floor.holder': 'bot_1', 'floor.queue': '' }],
+    ])('%s closes the mic while still pressed', async (_name, attributes) => {
+      const { room, bot, gate, mic } = await holding();
+
+      Object.assign(bot, { attributes });
+      room.emit(RoomEvent.ParticipantAttributesChanged, attributes, bot);
+      await flush();
+
+      expect(mic.mock.calls).toEqual([[true], [false]]);
+      expect(gate.status()).toBe(LOST);
+    });
+
+    it('does not re-queue, and a stale grant cannot reopen the same hold', async () => {
+      const { room, bot, gate, mic, data } = await holding();
+      setFloor(room, bot, '');
+      data.mockClear();
+
+      setFloor(room, bot, 'me');
+      await vi.advanceTimersByTimeAsync(5000);
+
+      expect(mic.mock.calls).toEqual([[true], [false]]);
+      expect(data).not.toHaveBeenCalled();
+      expect(gate.status()).toBe(LOST);
+    });
+
+    it('stays closed when the bot then leaves, or a new one joins', async () => {
+      const { room, bot, gate, mic, data } = await holding();
+      setFloor(room, bot, '');
+      data.mockClear();
+
+      room.remoteParticipants.delete('bot_1');
+      room.emit(RoomEvent.ParticipantDisconnected, bot);
+      room.emit(RoomEvent.ParticipantConnected, addParticipant(room, 'bot_2'));
+      await vi.advanceTimersByTimeAsync(5000);
+
+      expect(mic.mock.calls).toEqual([[true], [false]]);
+      expect(data).not.toHaveBeenCalled();
+      expect(gate.status()).toBe(LOST);
+    });
+
+    it('letting go and pressing again claims again, and a grant opens it', async () => {
+      const { room, bot, gate, mic } = await holding();
+      setFloor(room, bot, '');
+      await flush();
+
+      gate.floor.release('space');
+      expect(gate.status()).toBe('The floor is free. Your microphone is off.');
+      gate.floor.press('space');
+      expect(gate.status()).toBe('You are waiting for the floor. Your microphone is off.');
+      setFloor(room, bot, 'me');
+      await flush();
+
+      expect(mic.mock.calls).toEqual([[true], [false], [true]]);
+    });
+
+    it('giving the floor up is not losing it: the next press still works', async () => {
+      const { room, bot, gate, mic } = await holding();
+
+      gate.floor.release('space');
+      await flush();
+      gate.floor.press('space'); // pressed again before the bot's answer to the release arrives
+      setFloor(room, bot, '');
+      expect(gate.status()).toBe('You are waiting for the floor. Your microphone is off.');
+      setFloor(room, bot, 'me');
+      await flush();
+
+      expect(mic.mock.calls).toEqual([[true], [false], [true]]);
+    });
+
+    it('a grant that arrives after letting go is no hold to lose', () => {
+      const { room, bot, gate } = baton();
+      gate.floor.press('space');
+      gate.floor.release('space');
+
+      setFloor(room, bot, 'me');
+      setFloor(room, bot, '');
+
+      expect(gate.status()).toBe('The floor is free. Your microphone is off.');
+    });
+
+    it('a queue change while I hold is no loss', async () => {
+      const { room, bot, gate, mic } = await holding();
+
+      setFloor(room, bot, 'me', 'alice');
+      await flush();
+
+      expect(mic.mock.calls).toEqual([[true]]);
+      expect(gate.status()).toBe('You have the floor. Your microphone is on.');
+    });
+  });
+
+  describe('a replacement bot', () => {
+    const claims = (data: ReturnType<typeof fakeRoom>['data']) =>
+      data.mock.calls
+        .map(([bytes]) => JSON.parse(new TextDecoder().decode(bytes)).type)
+        .filter((type) => type === 'claim').length;
+    function replace(room: Room) {
+      room.emit(RoomEvent.ParticipantConnected, addParticipant(room, 'bot_2'));
+    }
+
+    it('claims again while pressing, and the new bot decides', async () => {
+      const { room, bot, gate, mic, data } = baton();
+      gate.floor.press('space');
+      setFloor(room, bot, 'me');
+      await flush();
+
+      replace(room);
+      expect(claims(data)).toBe(2);
+      expect(mic.mock.calls).toEqual([[true]]); // no gap in a hold the new bot may well grant
+
+      setFloor(room, room.remoteParticipants.get('bot_2')!, 'alice', 'me');
+      await flush();
+      expect(mic.mock.calls).toEqual([[true], [false]]);
+    });
+
+    it('claims again for a latch', () => {
+      const { room, gate, data } = baton();
+      gate.floor.toggle();
+
+      replace(room);
+
+      expect(claims(data)).toBe(2);
+    });
+
+    it('claims when the hold began with no bot at all', async () => {
+      vi.useFakeTimers();
+      const { room, mic, data } = fakeRoom();
+      const gate = createMicGate(room, 'baton', () => {})!;
+      gate.bind(new EventTarget(), () => {});
+      gate.floor.press('space');
+      await flush();
+      expect(mic.mock.calls).toEqual([[true]]);
+
+      replace(room);
+
+      expect(claims(data)).toBe(1);
+    });
+
+    it('claims a hold begun before the room connected, when a bot was already there', async () => {
+      vi.useFakeTimers();
+      const { room, data } = fakeRoom();
+      const gate = createMicGate(room, 'baton', () => {})!;
+      gate.bind(new EventTarget(), () => {});
+      gate.floor.press('space');
+      addParticipant(room);
+
+      room.emit(RoomEvent.Connected);
+
+      expect(claims(data)).toBe(1);
+    });
+
+    it('does not claim when nobody is pressing', () => {
+      const { room, gate, data } = baton();
+      gate.floor.press('space');
+      gate.floor.release('space');
+      data.mockClear();
+
+      replace(room);
+
+      expect(data).not.toHaveBeenCalled();
+    });
+
+    it('a person joining is not a replacement bot', () => {
+      const { room, gate, data } = baton();
+      gate.floor.press('space');
+      data.mockClear();
+
+      room.emit(RoomEvent.ParticipantConnected, addParticipant(room, 'carol'));
+
+      expect(data).not.toHaveBeenCalled();
+    });
+
+    it('the dead bot finally leaving does not open a press the new bot denied', async () => {
+      const { room, bot, gate, mic } = baton();
+      gate.floor.press('space');
+      replace(room);
+      setFloor(room, room.remoteParticipants.get('bot_2')!, 'alice', 'me');
+
+      room.remoteParticipants.delete('bot_1');
+      room.emit(RoomEvent.ParticipantDisconnected, bot);
+      await flush();
+
+      expect(mic).not.toHaveBeenCalled();
+    });
+
+    it('the old bot has no say once a new one is here', async () => {
+      const { room, bot, gate, mic } = baton();
+      gate.floor.press('space');
+      setFloor(room, bot, 'me');
+      await flush();
+      replace(room);
+
+      setFloor(room, bot, 'alice'); // the old bot's last word, overtaken
+      await flush();
+
+      expect(mic.mock.calls).toEqual([[true]]);
+    });
+
+    it('a hold the old bot granted can be lost to the new one only by its naming someone', async () => {
+      const { room, bot, gate, mic } = baton();
+      gate.floor.press('space');
+      setFloor(room, bot, 'me');
+      await flush();
+      replace(room);
+
+      setFloor(room, room.remoteParticipants.get('bot_2')!, '', 'carol');
+      await flush();
+
+      expect(mic.mock.calls).toEqual([[true]]); // not this bot's hold to take: it has our claim
+    });
+  });
+
+  describe('attributes missing or empty', () => {
+    it('a bot that has published nothing means free and empty', () => {
+      const { gate } = baton();
+      expect(gate.status()).toBe('The floor is free. Your microphone is off.');
+    });
+
+    it('deleted attributes are no answer: a waiting press keeps its timer', async () => {
+      const { room, bot, gate, mic } = baton();
+      gate.floor.press('space');
+
+      room.emit(RoomEvent.ParticipantAttributesChanged, {}, bot);
+      await vi.advanceTimersByTimeAsync(1499);
+      expect(mic).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1);
+
+      expect(mic.mock.calls).toEqual([[true]]);
+    });
+
+    it('a holder deleted while the queue stays still reads the queue', () => {
+      const { room, bot, gate } = baton();
+      const attributes = { 'floor.queue': 'me' };
+      Object.assign(bot, { attributes });
+      room.emit(RoomEvent.ParticipantAttributesChanged, attributes, bot);
+
+      expect(gate.status()).toBe('You are waiting for the floor. Your microphone is off.');
+    });
+  });
+
+  describe('the bot holding', () => {
+    it('shows the assistant, under the identity the bot really publishes', () => {
+      const { room, bot, gate } = baton();
+
+      setFloor(room, bot, 'bot_1');
+
+      expect(gate.status()).toBe('The assistant has the floor. Your microphone is off.');
+    });
+
+    it('a press queues: closed, no fail-open, granted when the bot lets go', async () => {
+      const { room, bot, gate, mic, data } = baton();
+      setFloor(room, bot, 'bot_1');
+
+      gate.floor.press('space');
+      expect(data).toHaveBeenCalledTimes(1);
+      setFloor(room, bot, 'bot_1', 'me');
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(mic).not.toHaveBeenCalled();
+      expect(gate.status()).toBe('You are waiting for the floor. Your microphone is off.');
+
+      setFloor(room, bot, 'me');
+      await flush();
+      expect(mic.mock.calls).toEqual([[true]]);
+    });
+  });
+
   it('every change tells the page, and unbinding stops it', () => {
     const onChange = vi.fn();
     const { room, bot, gate, unbind } = baton(onChange);

@@ -33,6 +33,8 @@ export function createMicGate(
   const lp = room.localParticipant;
   let micOn = false;
   let claiming = false;
+  let iHold = false; // the bot named me holder of this hold
+  let lost = false; // and then stopped: closed until this hold ends. No re-queue, by decision.
   let changed = () => {};
 
   // The control bar, the settings menu and the shortcut all end here, through useTrackToggle.
@@ -53,6 +55,8 @@ export function createMicGate(
     [...room.remoteParticipants.values()].filter((p) => isBot(p.identity)).at(-1);
   const send = (type: 'claim' | 'release') => {
     claiming = type === 'claim';
+    iHold = false;
+    lost = false;
     changed();
     lp.publishData(new TextEncoder().encode(JSON.stringify({ type })), {
       reliable: true,
@@ -97,29 +101,53 @@ export function createMicGate(
     bind(window: EventTarget, onChange: () => void) {
       changed = onChange;
       const onAttributes = (_changed: unknown, participant: Participant) => {
-        if (isBot(participant.identity)) {
+        // Only the newest bot: a replacement's claim is out, so the old one has no say.
+        if (participant.identity === newestBot()?.identity) {
           const { holder, queue } = readBaton(participant);
-          if (holder === lp.identity) floor.answer(true);
-          else if (holder || queue.includes(lp.identity)) floor.answer(false);
+          if (holder === lp.identity) {
+            if (!lost) {
+              iHold = claiming;
+              floor.answer(true);
+            }
+          } else if (iHold) {
+            iHold = false;
+            claiming = false;
+            lost = true;
+            floor.answer(false);
+          } else if (holder || queue.includes(lp.identity)) floor.answer(false);
         }
         changed();
       };
+      // This bot has never heard of a hold in progress, and would drop its audio unannounced.
+      const claimAgain = () => {
+        iHold = false;
+        if ((claiming || micOn) && newestBot()) send('claim');
+        changed();
+      };
+      const onJoined = (participant: Participant) => {
+        if (isBot(participant.identity)) claimAgain();
+        changed();
+      };
       const onLeft = (participant: Participant) => {
-        if (isBot(participant.identity)) floor.answer(true);
+        // A dead bot leaves ~22 s late, maybe long after its replacement answered.
+        if (isBot(participant.identity) && !newestBot()) {
+          iHold = false;
+          if (!lost) floor.answer(true);
+        }
         changed();
       };
       if (mode === 'baton') {
         room.on(RoomEvent.ParticipantAttributesChanged, onAttributes);
-        room.on(RoomEvent.Connected, changed); // a bot already here fires no ParticipantConnected
-        room.on(RoomEvent.ParticipantConnected, changed);
+        room.on(RoomEvent.Connected, claimAgain); // a bot already here fires no ParticipantConnected
+        room.on(RoomEvent.ParticipantConnected, onJoined);
         room.on(RoomEvent.ParticipantDisconnected, onLeft);
       }
       const unbind = bindFloor(window, floor);
       return () => {
         unbind();
         room.off(RoomEvent.ParticipantAttributesChanged, onAttributes);
-        room.off(RoomEvent.Connected, changed);
-        room.off(RoomEvent.ParticipantConnected, changed);
+        room.off(RoomEvent.Connected, claimAgain);
+        room.off(RoomEvent.ParticipantConnected, onJoined);
         room.off(RoomEvent.ParticipantDisconnected, onLeft);
         changed = () => {};
       };
@@ -127,6 +155,7 @@ export function createMicGate(
 
     /** One plain sentence: what the mic is doing, and in a baton room, why. */
     status() {
+      if (lost) return 'You no longer have the floor. Press again to talk.';
       const bot = newestBot();
       if (mode === 'ptt' || !bot) return `Your microphone is ${micOn ? 'on' : 'off'}.`;
       if (micOn) return 'You have the floor. Your microphone is on.';

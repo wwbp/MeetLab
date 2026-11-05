@@ -78,6 +78,7 @@ export function createMicGate(
     mic: {
       setMicrophoneEnabled(on) {
         micOn = on;
+        if (on) lost = false;
         changed();
         enqueue(() => setMic(micOn)); // the latest wish: a tap during the publish never unmutes
       },
@@ -116,11 +117,13 @@ export function createMicGate(
             }
           } else if (iHold) {
             iHold = false;
-            if (Date.now() - grantedAt >= REAL_LOSS_AFTER_MS) {
-              claiming = false;
-              lost = true;
-            }
+            const realLoss = Date.now() - grantedAt >= REAL_LOSS_AFTER_MS;
             floor.answer(false);
+            if (realLoss) {
+              floor.release('latch'); // a latch left pressed would claim a mic that's closed
+              claiming = false;
+              lost = true; // after that release, which clears it
+            }
           } else if (holder || queue.includes(lp.identity)) floor.answer(false);
         }
         changed();
@@ -165,7 +168,8 @@ export function createMicGate(
       if (lost) return 'You no longer have the floor. Press again to talk.';
       const bot = newestBot();
       if (mode === 'ptt' || !bot) return `Your microphone is ${micOn ? 'on' : 'off'}.`;
-      if (micOn) return 'You have the floor. Your microphone is on.';
+      // Only on the bot's word: a mic opened by the timeout may be one the bot is dropping.
+      if (micOn) return `${iHold ? 'You have the floor. ' : ''}Your microphone is on.`;
       const { holder, queue } = readBaton(bot);
       if (queue.includes(lp.identity) || (claiming && !holder)) {
         return 'You are waiting for the floor. Your microphone is off.';

@@ -33,7 +33,6 @@ export function LatchButton({ pressed, onToggle }: { pressed: boolean; onToggle:
 /** What a push-to-talk or baton room shows in place of the mic toggle. */
 export function FloorControls({ gate }: { gate: MicGate }) {
   const [, rerender] = React.useReducer((n: number) => n + 1, 0);
-  const [latched, setLatched] = React.useState(false);
   React.useEffect(() => gate.bind(window, rerender), [gate]);
   return (
     <div
@@ -59,7 +58,13 @@ export function FloorControls({ gate }: { gate: MicGate }) {
       </p>
       <div style={{ display: 'flex', gap: '0.5rem' }}>
         <HoldButton floor={gate.floor} />
-        <LatchButton pressed={latched} onToggle={() => setLatched(gate.floor.toggle())} />
+        <LatchButton
+          pressed={gate.floor.isLatched()}
+          onToggle={() => {
+            gate.floor.toggle();
+            rerender();
+          }}
+        />
       </div>
     </div>
   );

@@ -391,13 +391,37 @@ describe('baton: the contract with the bot', () => {
     expect(gate.status()).toBe('The floor is free. Your microphone is off.');
   });
 
-  it('a mic opened by the timeout says so, despite a dead bot naming a holder', async () => {
+  it('a mic opened by the timeout says only that: the bot granted nothing', async () => {
     const { room, bot, gate } = baton();
     setFloor(room, bot, 'alice');
 
     gate.floor.press('space');
     await vi.advanceTimersByTimeAsync(1500);
 
+    expect(gate.status()).toBe('Your microphone is on.');
+  });
+
+  it('a grant after the timeout does say you have the floor', async () => {
+    const { room, bot, gate } = baton();
+
+    gate.floor.press('space');
+    await vi.advanceTimersByTimeAsync(1500);
+    setFloor(room, bot, 'me');
+
+    expect(gate.status()).toBe('You have the floor. Your microphone is on.');
+  });
+
+  it('a hold carried over to a replacement bot has no floor until that bot says so', async () => {
+    const { room, bot, gate } = baton();
+    gate.floor.press('space');
+    setFloor(room, bot, 'me');
+    await flush();
+
+    const next = addParticipant(room, 'bot_2');
+    room.emit(RoomEvent.ParticipantConnected, next);
+    expect(gate.status()).toBe('Your microphone is on.');
+
+    setFloor(room, next, 'me');
     expect(gate.status()).toBe('You have the floor. Your microphone is on.');
   });
 
@@ -580,6 +604,86 @@ describe('baton: the contract with the bot', () => {
       await flush();
 
       expect(mic.mock.calls).toEqual([[true], [false], [true]]);
+    });
+
+    it('holding is not latching: the latch stays not pressed during a held key', () => {
+      const { gate } = baton();
+
+      gate.floor.press('space');
+
+      expect(renderToStaticMarkup(createElement(FloorControls, { gate }))).toContain(
+        'aria-pressed="false"',
+      );
+    });
+
+    describe('while latched', () => {
+      async function latchedThenLost() {
+        const r = baton();
+        r.gate.floor.toggle();
+        setFloor(r.room, r.bot, 'me');
+        await vi.advanceTimersByTimeAsync(15000);
+        expect(r.mic.mock.calls).toEqual([[true]]);
+        setFloor(r.room, r.bot, '');
+        await flush();
+        return r;
+      }
+
+      it('the latch reads not pressed, and the status still says why', async () => {
+        const { gate, mic } = await latchedThenLost();
+
+        expect(mic.mock.calls).toEqual([[true], [false]]);
+        expect(renderToStaticMarkup(createElement(FloorControls, { gate }))).toContain(
+          'aria-pressed="false"',
+        );
+        expect(gate.status()).toBe(LOST);
+      });
+
+      it('one activation claims again, and a grant opens it', async () => {
+        const { room, bot, gate, mic, data } = await latchedThenLost();
+        data.mockClear();
+
+        expect(gate.floor.toggle()).toBe(true);
+        expect(data).toHaveBeenCalledTimes(1);
+        expect(JSON.parse(new TextDecoder().decode(data.mock.calls[0][0]))).toEqual({
+          type: 'claim',
+        });
+        expect(gate.status()).toBe('You are waiting for the floor. Your microphone is off.');
+
+        setFloor(room, bot, 'me');
+        await flush();
+        expect(mic.mock.calls).toEqual([[true], [false], [true]]);
+        expect(renderToStaticMarkup(createElement(FloorControls, { gate }))).toContain(
+          'aria-pressed="true"',
+        );
+      });
+
+      it('a press with no bot left clears the notice', async () => {
+        const { room, bot, gate } = await latchedThenLost();
+        room.remoteParticipants.delete('bot_1');
+        room.emit(RoomEvent.ParticipantDisconnected, bot);
+
+        gate.floor.press('space');
+
+        expect(gate.status()).toBe('Your microphone is on.');
+      });
+
+      it('a key held as well stays lost until it is let go', async () => {
+        const r = baton();
+        r.gate.floor.toggle();
+        r.gate.floor.press('space');
+        setFloor(r.room, r.bot, 'me');
+        await vi.advanceTimersByTimeAsync(15000);
+        setFloor(r.room, r.bot, '');
+        await flush();
+        r.data.mockClear();
+
+        expect(r.gate.status()).toBe(LOST);
+        expect(r.data).not.toHaveBeenCalled();
+
+        setFloor(r.room, r.bot, 'me');
+        await flush();
+        expect(r.mic.mock.calls).toEqual([[true], [false]]);
+      });
     });
 
     it('tap, tap: the echo of my own release is no loss, and the next grant opens', async () => {

@@ -75,7 +75,9 @@ export function createFloor({
     press,
     release,
     answer,
-    /** The latched alternative to holding. Returns its new state, for `aria-pressed`. */
+    /** For `aria-pressed`: a lost floor unlatches, so this can change on its own. */
+    isLatched: () => holds.has('latch'),
+    /** The latched alternative to holding. Returns its new state. */
     toggle() {
       const latched = !holds.has('latch');
       if (latched) press('latch');

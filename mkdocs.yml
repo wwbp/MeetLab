@@ -25,6 +25,7 @@ nav:
       - "Speaker attribution: people talking at once": speaker-attribution.md
   - Testing and operations:
       - "Testing: levels, types and pass criteria": testing.md
+      - "Audio modes: test and simulation plan": audio-modes-test-plan.md
       - Load and quality testing: load-testing.md
       - "Load test report, October 2026": load-test-report-2026-10.md
       - "Fastest options per stage": latency-options.md

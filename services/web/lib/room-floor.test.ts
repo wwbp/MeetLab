@@ -503,7 +503,7 @@ describe('baton: the contract with the bot', () => {
       const r = baton();
       r.gate.floor.press('space');
       setFloor(r.room, r.bot, 'me');
-      await flush();
+      await vi.advanceTimersByTimeAsync(15000); // the bot's idle limit: the soonest a real loss comes
       expect(r.mic.mock.calls).toEqual([[true]]);
       return r;
     }
@@ -580,6 +580,37 @@ describe('baton: the contract with the bot', () => {
       await flush();
 
       expect(mic.mock.calls).toEqual([[true], [false], [true]]);
+    });
+
+    it('tap, tap: the echo of my own release is no loss, and the next grant opens', async () => {
+      // Seen 2 of 25 against the real bot: holder=me, "", me, all inside the second press.
+      const { room, bot, gate, mic } = baton();
+      gate.floor.press('space');
+      gate.floor.release('space');
+      gate.floor.press('space');
+
+      setFloor(room, bot, 'me');
+      setFloor(room, bot, '');
+      await flush();
+      expect(gate.status()).toBe('You are waiting for the floor. Your microphone is off.');
+
+      setFloor(room, bot, 'me');
+      await flush();
+      expect(mic.mock.calls.at(-1)).toEqual([true]);
+      expect(gate.status()).toBe('You have the floor. Your microphone is on.');
+    });
+
+    it('a queue change does not restart the clock on a real loss', async () => {
+      const { room, bot, gate } = baton();
+      gate.floor.press('space');
+      setFloor(room, bot, 'me');
+      await vi.advanceTimersByTimeAsync(14000);
+      setFloor(room, bot, 'me', 'alice');
+      await vi.advanceTimersByTimeAsync(1000);
+
+      setFloor(room, bot, 'alice');
+
+      expect(gate.status()).toBe('You no longer have the floor. Press again to talk.');
     });
 
     it('a grant that arrives after letting go is no hold to lose', () => {

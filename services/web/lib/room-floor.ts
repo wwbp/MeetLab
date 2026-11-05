@@ -13,6 +13,9 @@ import { bindFloor, createFloor, type Baton } from './floor';
 import type { ConnectionDetails } from './types';
 
 const FLOOR_TOPIC = 'meetlab.floor';
+// The bot only takes the floor after 15 s of silence (floor.py IDLE_SECS). Any sooner, it's the echo
+// of this person's own quick release and re-press, with the new grant on its way. Keep below that.
+const REAL_LOSS_AFTER_MS = 5000;
 
 const isBot = (identity: string) => identity.startsWith('bot_');
 
@@ -34,6 +37,7 @@ export function createMicGate(
   let micOn = false;
   let claiming = false;
   let iHold = false; // the bot named me holder of this hold
+  let grantedAt = 0;
   let lost = false; // and then stopped: closed until this hold ends. No re-queue, by decision.
   let changed = () => {};
 
@@ -106,13 +110,16 @@ export function createMicGate(
           const { holder, queue } = readBaton(participant);
           if (holder === lp.identity) {
             if (!lost) {
+              if (!iHold) grantedAt = Date.now();
               iHold = claiming;
               floor.answer(true);
             }
           } else if (iHold) {
             iHold = false;
-            claiming = false;
-            lost = true;
+            if (Date.now() - grantedAt >= REAL_LOSS_AFTER_MS) {
+              claiming = false;
+              lost = true;
+            }
             floor.answer(false);
           } else if (holder || queue.includes(lp.identity)) floor.answer(false);
         }

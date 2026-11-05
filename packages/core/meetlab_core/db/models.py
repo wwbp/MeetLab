@@ -241,6 +241,11 @@ class BotConfig(Base):
         server_default=CLOSING_MESSAGE,
         nullable=False,
     )
+    # "normal" (open mic) | "ptt" | "baton" (docs/audio-modes-test-plan.md). Only stored and served
+    # so far: nothing acts on it, so the console offers only normal.
+    audio_mode: Mapped[str] = mapped_column(
+        String, default="normal", server_default="normal", nullable=False
+    )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_now, onupdate=_now
     )

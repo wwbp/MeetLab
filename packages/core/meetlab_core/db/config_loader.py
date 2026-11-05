@@ -30,6 +30,7 @@ class EffectiveBotConfig:
     closing_message: str = CLOSING_MESSAGE
     turn_detection: str = "silence"  # "silence" | "smart_turn" (smart_turn.py)
     smart_turn_wait_ms: int = 3000
+    audio_mode: str = "normal"  # "normal" | "ptt" | "baton"; nothing acts on it yet
 
 
 async def load_bot_config(room_name: str | None = None) -> EffectiveBotConfig:
@@ -74,6 +75,7 @@ async def load_bot_config(room_name: str | None = None) -> EffectiveBotConfig:
                 auto_record=False,
                 session_limit_minutes=0,
                 closing_message=CLOSING_MESSAGE,
+                audio_mode="normal",
             )
 
         return EffectiveBotConfig(
@@ -92,4 +94,5 @@ async def load_bot_config(room_name: str | None = None) -> EffectiveBotConfig:
             auto_record=bool(getattr(row, "auto_record", False)),
             session_limit_minutes=int(getattr(row, "session_limit_minutes", 0) or 0),
             closing_message=getattr(row, "closing_message", None) or CLOSING_MESSAGE,
+            audio_mode=row.audio_mode,
         )

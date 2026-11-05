@@ -124,6 +124,39 @@ describe('GET /api/connection-details — session limit', () => {
   });
 });
 
+describe('GET /api/connection-details — audio mode', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockGetServerConfig.mockReturnValue(DEFAULT_CONFIG);
+  });
+
+  it('test_connection_details_returns_room_audio_mode: room scope wins', async () => {
+    // The runner answers per scope, so the room's mode comes back only if the room is asked for.
+    mockFetch.mockImplementation(async (url: string) =>
+      runnerConfig({ audio_mode: url.endsWith('?room=room-ptt') ? 'ptt' : 'normal' }),
+    );
+    expect((await (await GET(req('room-ptt'))).json()).audioMode).toBe('ptt');
+    expect((await (await GET(req('other-room'))).json()).audioMode).toBe('normal');
+  });
+
+  it('asks the runner once for both the mode and the limit', async () => {
+    mockFetch.mockResolvedValue(runnerConfig({ audio_mode: 'baton', session_limit_minutes: 30 }));
+    const body = await (await GET(req())).json();
+    expect(body).toMatchObject({ audioMode: 'baton', sessionLimitSeconds: 30 * 60 });
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+  });
+
+  // Joining must never fail or stall over this, and anything unknown means today's open mic.
+  it('falls back to normal when the runner fails or the mode is unknown', async () => {
+    mockFetch.mockRejectedValueOnce(new Error('ECONNREFUSED'));
+    expect((await (await GET(req())).json()).audioMode).toBe('normal');
+    mockFetch.mockResolvedValueOnce(runnerConfig({ error: 'boom' }, 500));
+    expect((await (await GET(req())).json()).audioMode).toBe('normal');
+    mockFetch.mockResolvedValueOnce(runnerConfig({ audio_mode: 'nonsense' }));
+    expect((await (await GET(req())).json()).audioMode).toBe('normal');
+  });
+});
+
 describe('GET /api/connection-details — who the participant can be', () => {
   beforeEach(() => {
     vi.clearAllMocks();

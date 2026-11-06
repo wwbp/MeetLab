@@ -49,6 +49,10 @@ run "secrets_are_injected_never_written_into_task_definitions" {
     strcontains(s.valueFrom, ":parameter/meetlab-v2/staging/") || startswith(s.valueFrom, aws_db_instance.this.master_user_secret[0].secret_arn)]]))
     error_message = "secrets come from /meetlab-v2/staging/* or the RDS-managed secret only"
   }
+  assert {
+    condition     = contains([for s in jsondecode(aws_ecs_task_definition.meet_app.container_definitions)[0].secrets : s.name], "CONSOLE_SESSION_SECRET")
+    error_message = "meet signs console sessions with its own key, CONSOLE_SESSION_SECRET (not LIVEKIT_API_SECRET)"
+  }
 }
 
 run "the_runner_reaches_the_database_by_parts" {

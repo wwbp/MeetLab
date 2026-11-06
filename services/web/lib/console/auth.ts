@@ -4,8 +4,8 @@ export const COOKIE_NAME = 'console-session';
 export const SESSION_TTL_SECONDS = 8 * 60 * 60; // 8 hours
 
 function signingKey(): Uint8Array {
-  const secret = process.env.LIVEKIT_API_SECRET;
-  if (!secret) throw new Error('LIVEKIT_API_SECRET is not set');
+  const secret = process.env.CONSOLE_SESSION_SECRET;
+  if (!secret) throw new Error('CONSOLE_SESSION_SECRET is not set');
   return new TextEncoder().encode(secret);
 }
 

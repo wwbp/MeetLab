@@ -17,6 +17,7 @@ export type BotConfig = {
   auto_record: boolean;
   session_limit_minutes: number;
   closing_message: string;
+  audio_mode: string;
 };
 
 export const EMPTY_CONFIG: Omit<BotConfig, 'scope'> = {
@@ -35,6 +36,7 @@ export const EMPTY_CONFIG: Omit<BotConfig, 'scope'> = {
   auto_record: false,
   session_limit_minutes: 0,
   closing_message: '',
+  audio_mode: 'normal',
 };
 
 // The scope typed in "Applies to": a room's name, or global when the box is empty.

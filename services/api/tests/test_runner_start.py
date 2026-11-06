@@ -528,7 +528,7 @@ class RunnerStartApiTests(unittest.TestCase):
             "stt_endpointing_ms", "user_speech_timeout_ms",
             "llm_model", "tts_voice", "tts_provider",
             "stt_model", "stt_delay", "auto_record",
-            "session_limit_minutes",
+            "session_limit_minutes", "audio_mode",
         ):
             self.assertIn(key, body, f"GET /config response missing field: {key}")
         self.assertEqual(body["scope"], "global")
@@ -706,6 +706,33 @@ class RunnerStartApiTests(unittest.TestCase):
                 )
                 self.assertEqual(response.status_code, 400, f"{bad!r} was accepted")
                 self.assertIn("session_limit_minutes", response.json().get("error", ""))
+
+    def test_put_rejects_a_mode_that_is_not_built_yet(self):
+        """A room set to one would claim a mode and silently run normal."""
+        for mode in ("ptt", "baton"):
+            with self.subTest(mode=mode):
+                response = self.client.put("/config", json={"scope": "test-runner-scope", "audio_mode": mode})
+                self.assertEqual(response.status_code, 400, f"{mode} was accepted")
+
+    def test_put_rejects_unknown_audio_mode(self):
+        for bad in ("open", "PTT", "", None, 1, ["ptt"]):
+            with self.subTest(bad=bad):
+                response = self.client.put(
+                    "/config", json={"scope": "test-runner-scope", "audio_mode": bad}
+                )
+                self.assertEqual(response.status_code, 400, f"{bad!r} was accepted")
+                self.assertIn("audio_mode", response.json().get("error", ""))
+
+    def test_config_audio_mode_room_scope_wins(self):
+        room = _room("test-audio-mode")
+        self.assertEqual(self.client.get(f"/config?room={room}").json()["audio_mode"], "normal")
+        with mock.patch.object(self.runner_module, "_AUDIO_MODES_BUILT", ("normal", "baton")):
+            self.assertEqual(
+                self.client.put("/config", json={"scope": room, "audio_mode": "baton"}).json()["audio_mode"],
+                "baton",
+            )
+        self.assertEqual(self.client.get(f"/config?room={room}").json()["audio_mode"], "baton")
+        self.assertEqual(self.client.get("/config").json()["audio_mode"], "normal")
 
     def test_config_put_invalid_auto_record_returns_400(self):
         response = self.client.put(

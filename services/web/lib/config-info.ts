@@ -17,7 +17,7 @@ export const SECTIONS: { id: string; label: string; about: string; fields: strin
     label: 'Speech-to-text and turn-taking',
     about:
       'How people’s speech becomes text, and when the bot decides someone has finished. Each person in the room is transcribed separately, so overlapping speakers keep their own words.',
-    fields: ['stt_model', 'stt_delay', 'turn_detection', 'smart_turn_wait_ms', 'stt_endpointing_ms', 'user_speech_timeout_ms'],
+    fields: ['stt_model', 'stt_delay', 'turn_detection', 'smart_turn_wait_ms', 'stt_endpointing_ms', 'user_speech_timeout_ms', 'audio_mode'],
   },
   {
     id: 'llm',
@@ -161,5 +161,10 @@ export const CONFIG_INFO: Record<string, Info> = {
   closing_message: {
     title: 'Closing message',
     about: 'Said once when time is up: mention the completion code.',
+  },
+  audio_mode: {
+    title: 'Audio mode',
+    about: 'Who may speak when. Only Normal (open mic) works today: push-to-talk and baton aren’t built yet, so they can’t be chosen.',
+    default: 'Normal',
   },
 };

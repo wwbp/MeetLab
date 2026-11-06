@@ -26,6 +26,8 @@ room-gone cleanup can never be what closes a session and hide a failure.
   record_auth      an outsider cannot start or stop a room's recording (F10): 401
   study_prolific   a participant joins as a study sends them (Prolific ID, before the bot): the completion
                    code is HMAC(room:ID) and their speaker record keeps the ID          (D2)
+  group_link       a size-2 start link: two participants join, both press Ready, reach one room with
+                   one bot, and each speaker record keeps their ticket's Prolific ID
   session_limit    a room's time limit: the bot speaks its closing message when time is up   (D2)
   our_models       a room configured for our LLM (vLLM) and voice (Kokoro): the bot hears,
                    answers and speaks on them (waits for cold models first)          (L3)
@@ -568,6 +570,11 @@ async def scenario_auto_record():
         await _until(lambda: any("bot line" in l for l in _log_lines(f"{LOGS}/bot", m.session, m.started)),
                      60, "the greeting stored as the bot's line")
         await asyncio.sleep(10)
+        # Nobody speaks here, so the bot's one line is its greeting, stored once (it was
+        # stored twice, by say() and by its spoken turn, until 2026-11-03).
+        said = [u["text"] for u in _meeting_get(m.session, "utterances") if u["bot"]]
+        if len(said) != 1:
+            raise Fail(f"the greeting should be stored once, got {len(said)} bot lines: {said}")
         _web.open(urllib.request.Request(f"{MEET}/api/record/stop?roomName={room}"), timeout=30)
         ecs.stop_task(cluster=CLUSTER, task=m.task, reason="acceptance: auto_record")  # flushes the audio
         await _until(lambda: _describe(m.task)["lastStatus"] == "STOPPED", 150, "task stopped")
@@ -577,7 +584,7 @@ async def scenario_auto_record():
                     if room in o["Key"]]
             return any(k.endswith("-recording.mp4") for k in keys) and any(f"-audio-{m.bot_identity}" in k for k in keys)
         await _until(recorded, 180, "the room's video and the bot's own audio in the media bucket")
-        return "video, the bot's own audio and its greeting line, with no Record press"
+        return "video, the bot's own audio and its greeting line (stored once), with no Record press"
 
 
 async def scenario_record_auth():
@@ -644,6 +651,72 @@ async def scenario_study_prolific():
         return f"completion code {expected} = HMAC(room:ID), only after speaking; Prolific ID stored for a participant who joined before the bot"
     finally:
         await person.disconnect()
+
+
+async def ticket_to_room(reply: dict, post, timeout: float, sleep=asyncio.sleep, clock=time.monotonic) -> str:
+    """A group link's ticket driven as its waiting page drives it (StartClient.tsx): poll every
+    2 s, press Ready once in the ready check, return the room once it is set. Expired, missed
+    or done is a Fail, and so is no room by the deadline."""
+    t0, pressed = clock(), False
+    while True:
+        view = reply["view"]
+        if view["kind"] == "starting" and view["room"]:
+            return view["room"]
+        if view["kind"] in ("expired", "missed", "done"):
+            raise Fail(f"ticket {reply['ticket']} ended {view['kind']} before its room")
+        if clock() - t0 > timeout:
+            raise Fail(f"ticket {reply['ticket']} had no room within {timeout} s (still {view['kind']})")
+        if view["kind"] == "ready_check" and not view["pressed"] and not pressed:
+            pressed, reply = True, post("/api/start-link/ready", {"ticket": reply["ticket"]})
+            continue
+        await sleep(2)
+        reply = post("/api/start-link/status", {"ticket": reply["ticket"]})
+
+
+async def scenario_group_link():
+    """Group start links: a size-2 link with no start delay; two participants with their own
+    Prolific IDs join, both press Ready, and both reach the same room with one bot. Each says
+    a sentence, and the speaker the runner records for each keeps their ticket's Prolific ID."""
+    scope = f"accept-{uuid.uuid4().hex[:6]}"  # the pool: a test room's settings, purged after the run
+    _post("/api/console/login", {"password": os.environ["CONSOLE_PASSWORD"]})
+    _post("/api/console/config", {"scope": scope}, method="PUT")
+    link = _post("/api/console/start-link", {"name": f"acceptance {scope}", "pool": [scope], "size": 2,
+                                             "min_size": 2, "delay_s": 0, "max_wait_s": 120, "ready_check_s": 60})["token"]
+    people = []
+    try:
+        pids = [uuid.uuid4().hex[:24] for _ in range(2)]
+        joined = [_post("/api/start-link", {"token": link, "participant_id": pid}) for pid in pids]
+        for j, pid in zip(joined, pids):
+            if j.get("participant_id") != pid:
+                raise Fail(f"ticket {j.get('ticket')} carries {j.get('participant_id')!r}, expected {pid}")
+        rooms = await asyncio.gather(*(ticket_to_room(j, _post, 240) for j in joined))
+        if rooms[0] != rooms[1]:
+            raise Fail(f"the group was split: {rooms}")
+        room = rooms[0]
+        for name, j in zip(("Ana", "Ben"), joined):  # the room page, with the ticket's ID (lib/waiting.ts roomUrl)
+            person = rtc.Room()
+            await person.connect(os.environ["LIVEKIT_URL"], _join_as_participant(room, name, j["participant_id"])["participantToken"])
+            people.append(person)
+        bots = lambda: [p for p in people[0].remote_participants.values() if p.identity.startswith("bot_")]  # noqa: E731
+        await _until(bots, 420, "the bot in the group's room")
+        running = [c for c in json.loads(_web.open(f"{MEET}/api/meetings?limit=200", timeout=30).read())["conversations"]
+                   if c["room_name"] == room and c["status"] == "running"]
+        if len(running) != 1 or len(bots()) != 1:
+            raise Fail(f"{len(running)} running session(s) and {len(bots())} bot(s) in {room}, expected one of each")
+        session = running[0]["id"]
+        await asyncio.sleep(5)  # the greeting
+        for person in people:
+            await _play_wav(person, SPEECH, 8)
+        stored = lambda: {s["display_name"]: s["prolific_id"] for s in _meeting_get(session, "speakers")}  # noqa: E731
+        await _until(lambda: {"Ana", "Ben"} <= stored().keys(), 120, "both speakers' records")
+        want = {"Ana": joined[0]["participant_id"], "Ben": joined[1]["participant_id"]}
+        if {k: stored()[k] for k in want} != want:
+            raise Fail(f"stored Prolific IDs {stored()}, expected each ticket's {want}")
+        return f"two tickets, one room ({room}), one bot session; each speaker keeps their ticket's Prolific ID"
+    finally:
+        for person in people:
+            await person.disconnect()
+        _post(f"/api/console/start-link/{link}", {"active": False}, method="PATCH")
 
 
 async def scenario_session_limit():
@@ -800,7 +873,7 @@ SCENARIOS = {"start": scenario_start, "stoptask": scenario_stoptask, "removed": 
              "audio_recording": scenario_audio_recording, "video_recording": scenario_video_recording,
              "transcript": scenario_transcript, "two_humans": scenario_two_humans, "refresh": scenario_refresh,
              "chat": scenario_chat, "auto_record": scenario_auto_record, "our_models": scenario_our_models, "record_auth": scenario_record_auth,
-             "study_prolific": scenario_study_prolific, "session_limit": scenario_session_limit,
+             "study_prolific": scenario_study_prolific, "group_link": scenario_group_link, "session_limit": scenario_session_limit,
              "turn_relay": scenario_turn_relay, "bot_ready": scenario_bot_ready, "smart_turn": scenario_smart_turn, "transcript_file": scenario_transcript_file,
              "prewarm": scenario_prewarm}  # last: its Stop preparing cools the pool the run prepared
 

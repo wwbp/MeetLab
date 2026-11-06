@@ -151,6 +151,183 @@ Participants can type in the meeting's chat panel as well as speak. Today:
 **Open question for the team:** should the bot answer every chat message, only ones
 addressed to it, or none (store them only)? Nothing changes until that's decided.
 
+## 4. Group start links (since 2026-11-02)
+
+A start link sends every participant who opens it to a meeting with a bot. With a
+**room size** above 1, participants first wait on the link's page until enough of them
+have arrived; then they meet together, with one bot, in a new room. Participants reach the
+link from Prolific through your Qualtrics survey, and their **Prolific ID is their
+participant ID** throughout: in the line, in the room and on the completion code.
+
+A link of room size 1 with start delay 0 (the defaults) behaves as start links always
+have: each person who opens it gets a meeting of their own, at once.
+
+### Creating a link
+
+Console → **Start links**. On the left are your saved bot settings (search, click to add);
+on the right, the ones this link uses. Then fill in:
+
+| Field | Default | What it does |
+|---|---|---|
+| **Name** | (required) | For you only, in the list of links, e.g. "Pilot 3, groups of 3". |
+| **Room size (people)** | 1 | How many participants meet in one room, 1 to 8. |
+| **Min size** | the room size | Shown when the size is above 1. If the line has waited for **max wait** without filling a room, the people waiting start with at least this many. Equal to the room size means never start short. |
+| **Start delay (seconds)** | 0 | A countdown, 0 to 300 seconds, between the group being confirmed and everyone entering the room. |
+| **Max wait (minutes)** | 5 | How long a participant waits for a group, 1 to 30 minutes, counted from when they first joined the line. After that they are told no group could be formed. |
+| **Time to confirm (seconds)** | 60 | Shown when the size is above 1. When a group forms, each person must press **Ready** within this time, 10 to 300 seconds. 60 leaves room for someone whose tab is in the background. |
+| **Password** | none | Optional. Put it on the survey page, next to the link: you **cannot see it again** after you create the link. |
+
+**Create link** gives you the address, `https://<host>/start/<link id>`. In Qualtrics, link
+to it with the Prolific ID on the end:
+
+```
+https://<host>/start/<link id>?PROLIFIC_PID=${e://Field/PROLIFIC_PID}
+```
+
+(`${e://Field/PROLIFIC_PID}` is Qualtrics's embedded-data field, filled from the
+`PROLIFIC_PID` that Prolific puts on the survey's address.) With a room size above 1 the
+ID is checked at the ready check, above the **I'm ready** button: prefilled from the link,
+correctable, and required. Keep it on the link: it also keeps one person to one place in the
+line from the moment they join, and records people who wait and never reach a group. With size 1
+there is no ready check: the start page asks for the ID above **Join meeting**, so no room or bot
+starts without one. The ID travels on to the room either way, and pre-join shows it prefilled (§1).
+
+**Which bot setting each room gets.** Each new room takes the setting used least so far on
+this link; if several are tied, one of them at random. So with two settings, rooms alternate
+between them and stay balanced however many arrive. A group that falls apart at the ready
+check (below) does not count. A link only accepts saved bot settings: a name that doesn't
+exist is refused when you create it.
+
+### The list of links, stopping and starting
+
+Under the form, every link with its settings and live counts:
+
+- **Waiting now**: in the line or at the ready check.
+- **In rooms**: entered a room (now or earlier).
+- **Expired**: waited the full max wait without a group.
+- **Missed**: did not press Ready in time.
+
+**Stop** closes a link to new participants: anyone who opens it reads "This link is
+closed… Go back to the survey and contact the researcher." People already waiting, and
+meetings already running, carry on. **Start** opens it again. Stop a link at the end of a
+study so late arrivals don't wait for a group that will never form.
+
+If a bot setting a link uses is **deleted** (in Bot settings or the Database page), the link
+**stops by itself** within a few seconds, and the Events page shows a `link_stopped` warning
+naming the missing setting. Otherwise its rooms would quietly run on the global settings.
+Save the setting again under the same name, then press **Start**. Until you do, **Start**
+is refused and names the missing setting.
+
+The password is checked on every join. After too many wrong tries the page asks the
+participant to wait 1 minute.
+
+### What participants see
+
+1. **Join the group meeting.** The password if the link has one, and **Join**. The page says to keep it open and in front.
+2. **Finding your group: 2 of 3 here.** The count updates every 2 seconds, with the time
+   they will be looked for until (their max wait). Closing the page gives up their place:
+   someone who hasn't been seen for 90 seconds is no longer matched. Reopening the link
+   with the same Prolific ID on it, while their place is still held, returns them to it.
+3. **Your group is ready.** The tab's title changes to "(!) Your group is ready", a tone
+   plays, and the **Prolific ID** field (prefilled from the link) appears above the **I'm
+   ready** button, with the seconds left to press it (Time to confirm). The button needs a
+   valid ID, and refuses one that someone else in this line holds. After pressing: "Waiting for the others to confirm."
+4. **Starting in** with a countdown (the start delay), after "Setting up the room…" while
+   the bot is started. Next comes the room itself: "allow your microphone and type your
+   name." With a delay of 0 they go straight in.
+5. In the room everything is as in a 1-on-1 meeting (§1, §2): the closing message, and the
+   completion code on leaving.
+
+When something goes wrong:
+
+- **Someone doesn't press Ready in time.** That person sees **You missed the start** and a
+  **Join again** button, which puts them at the **back** of the line, with a new max wait.
+  Everyone who did press Ready goes back to the line **with their place kept** and reads
+  "Someone did not confirm in time. You are back in line with your place kept." Their max
+  wait still counts from when they first joined.
+- **No group within max wait.** They see **We could not form a group in time**: "Go back to
+  the survey and follow its instructions." Write those instructions into the survey.
+
+### Who gets a completion code
+
+The rule of §2 is unchanged: a code goes only to someone the bot **heard speak** in the room.
+
+| What happened | Completion code |
+|---|---|
+| Entered the room and spoke | Yes, on leaving |
+| Entered the room and never spoke | No; told to contact the researcher |
+| Waited until max wait, no group | No: there is **no waiting code**. They never entered a room |
+| Missed the ready check and left | No, unless they press Join again and later meet |
+
+Decide before the study how you will treat people who waited and got no group (for
+example a fixed payment or a bonus in Prolific), and say so in the survey. To list them,
+Database → **Tickets**, searched by the link's ID, those with state `expired`; or in SQL:
+
+```sql
+SELECT t.participant_id, t.queued_at, l.name AS link
+FROM tickets t JOIN start_links l ON l.link_id = t.link_id
+WHERE t.state = 'expired' AND l.name = 'Pilot 3, groups of 3'
+ORDER BY t.queued_at;
+```
+
+### Who was in which room, with which setting
+
+Without SQL: the console's **Database** page. **Tickets**, searched by the link's ID (the
+part after `/start/` in its address, or the participant's Prolific ID), lists each person
+with their `state` and `room_name`; **Matches**, searched by the same link ID, gives each
+room's `bot_config_scope` (its bot setting). Both download as CSV.
+
+In SQL it is one query: each participant's place in the line (`tickets`), their group
+(`matches`), the room's meeting (`conversations`) and its bot setting (`bot_config`). The
+Database page browses tables but does not run SQL, so this is for anyone with database
+access (an engineer can run it on production); change the link's name:
+
+```sql
+SELECT t.participant_id    AS prolific_id,
+       m.room_name,
+       m.bot_config_scope  AS bot_setting,
+       m.size              AS people_in_group,
+       c.id                AS conversation_id,
+       c.started_at, c.ended_at,
+       b.llm_model, b.tts_voice
+FROM tickets t
+JOIN start_links l        ON l.link_id = t.link_id
+JOIN matches m            ON m.room_name = t.room_name
+LEFT JOIN conversations c ON c.room_name = m.room_name
+LEFT JOIN bot_config b    ON b.scope = m.bot_config_scope
+WHERE l.name = 'Pilot 3, groups of 3'
+  AND t.state IN ('placed', 'done')
+ORDER BY m.created_at, t.participant_id;
+```
+
+- `prolific_id` is filled for links of size above 1 once the person presses Ready, or from
+  joining if the link carried it. Someone who joined from a link without the ID and never
+  pressed Ready has none. A size-1 link doesn't store the ID on
+  its ticket, so its rows here have none: the ID is with the speaker (§1).
+- Only `placed` (in the room now) and `done` (meeting over) people entered a room. A row in
+  any other state is someone still waiting, who missed the ready check (`removed`) or who
+  expired.
+- A room has more than one conversation if its bot was replaced mid-meeting (it rejoins
+  with context); each appears as its own row.
+- `bot_config` holds the setting **as it is now**. If you edit a setting during a study,
+  the rooms before the edit ran with the old values; `bot_setting` still names it.
+- The bot setting's other columns (prompt, models, voice) can be added to the `SELECT`
+  as `b.<column>`. Who actually spoke, and their completion codes, are in §1 and §2:
+  **Meetings → People** for each `conversation_id`.
+
+### Warnings on the Events page
+
+The Events page shows errors only at first: choose **warnings** to see these.
+
+| Event | What it means | What to do |
+|---|---|---|
+| `ready_failed` | A group formed, but someone didn't press Ready in time. They were taken out of the line; the others went back with their place kept. | One now and then is normal. Many mean participants leave the page in the background: tell them in the survey to keep it in front, or raise **Time to confirm**. |
+| `ticket_expired` | Someone waited the full max wait with no group. | Too few people arriving at once for the room size. Recruit in bursts, lower **Min size**, or raise **Max wait**. Each is someone to handle by your no-group rule above. |
+| `link_stopped` | A link stopped itself because a bot setting it uses was deleted. | Save the setting again under the same name, then **Start** the link. |
+
+`match_formed` (a group formed, with its room and bot setting) is information, shown under
+**info**. Payloads: `docs/event-log.md`.
+
 ## Verifying a code
 
 ```bash

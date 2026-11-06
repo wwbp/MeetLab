@@ -9,7 +9,7 @@ token aggregation; this is its sentence aggregator plus the first-clause rule.
 ponytail: installed on the TTS service's private `_text_aggregator` (Pipecat has no hook for a
 custom one); a constructor parameter upstream would replace that.
 """
-from pipecat.utils.text.base_text_aggregator import Aggregation, AggregationType
+from pipecat.utils.text.base_text_aggregator import Aggregation, TextType
 from pipecat.utils.text.simple_text_aggregator import SimpleTextAggregator
 
 CLAUSE_ENDINGS = ",;:"
@@ -30,7 +30,7 @@ class FirstClauseTextAggregator(SimpleTextAggregator):
             if self._first and char == " " and self._text[-2:-1] in tuple(CLAUSE_ENDINGS) \
                     and len(self._text.split()) >= MIN_WORDS:
                 clause, self._text, self._first = self._text.strip(), "", False
-                yield Aggregation(text=clause, type=AggregationType.SENTENCE)
+                yield Aggregation(text=clause, type=TextType.SENTENCE)
 
     async def flush(self):
         self._first = True  # the reply is over: the next one starts with a clause again
@@ -45,5 +45,5 @@ def install(tts, mode: str) -> None:
     """Give a "clause" room's voice the first-clause aggregator; any provider (the aggregation
     runs in Pipecat before the provider is called)."""
     if mode == "clause":
-        tts._text_aggregator = FirstClauseTextAggregator(aggregation_type=AggregationType.SENTENCE,
+        tts._text_aggregator = FirstClauseTextAggregator(aggregation_type=TextType.SENTENCE,
                                                          language=tts._text_aggregator.language)

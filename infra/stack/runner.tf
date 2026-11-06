@@ -29,6 +29,8 @@ locals {
   runner_environment = concat(local.bot_environment, [
     # Step 4c: each meeting's bot is its own ECS task (dispatch.py), not a coroutine here.
     { name = "BOT_DISPATCHER", value = "ecs" },
+    # LiveKit's recorder opens this page, so it must be public (services/web/app/recording).
+    { name = "RECORDING_TEMPLATE_URL", value = "https://meet${var.hostname_suffix}.wwbp.org/recording" },
     { name = "ECS_CLUSTER", value = aws_ecs_cluster.this.name },
     { name = "BOT_TASK_DEFINITION", value = aws_ecs_task_definition.bot.family },
     { name = "BOT_CAPACITY_PROVIDER", value = aws_ecs_capacity_provider.bots.name },

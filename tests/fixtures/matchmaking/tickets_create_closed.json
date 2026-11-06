@@ -1,0 +1,18 @@
+{
+  "endpoint": "POST /tickets",
+  "request": {
+    "method": "POST",
+    "path": "/tickets",
+    "body": {
+      "link_id": "Qm9vdHN0cmFwTGlua0lEMQ",
+      "participant_id": "5f8e2a1b3c4d5e6f7a8b9c0d",
+      "password": "blue-river"
+    }
+  },
+  "response": {
+    "status": 410,
+    "body": {
+      "error": "closed"
+    }
+  }
+}

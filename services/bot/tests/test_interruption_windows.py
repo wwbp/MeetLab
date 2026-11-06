@@ -175,5 +175,65 @@ class TestStaleSpeakers(unittest.TestCase):
         self.assertTrue(t.bot_started(1.0), "sidB is still talking")
 
 
+class TestLongSpeech(unittest.TestCase):
+    """2026-11-05: idle() read anyone talking past 3.2 s as silent. Measured with real Silero on
+    recorded speech: 5 of 5 long segments, at 3.16-3.18 s. Staleness counted from the onset, so a
+    long sentence looked like a lost stop. It now counts from the last sign of speech."""
+
+    @staticmethod
+    def talking(t, until, sid="sidA"):
+        """VADProcessor's UserSpeakingFrame, every 0.2 s while it hears speech."""
+        for tick in range(int(until / 0.2)):
+            t.user_speaking(0.2 * (tick + 1), sid)
+
+    def test_a_long_talker_is_never_idle(self):
+        t = tracker()
+        t.user_onset(0.0, "sidA")
+        for tick in range(1, 300):
+            now = 0.2 * tick
+            t.user_speaking(now, "sidA")
+            self.assertFalse(t.idle(now), f"read as silent at {now:.1f} s")
+
+    def test_stopping_after_a_long_turn_is_idle_at_once(self):
+        t = tracker()
+        t.user_onset(0.0, "sidA")
+        self.talking(t, 60.0)
+        t.user_offset(60.1, "sidA")
+        self.assertTrue(t.idle(60.1))
+
+    def test_a_long_talker_yields_at_the_sentence_boundary(self):
+        t = tracker()
+        t.user_onset(0.0, "sidA")
+        self.talking(t, 10.0)
+        self.assertFalse(t.bot_started(10.0), "the floor: the bot gets its phrase")
+        t.bot_stopped(10.7)
+        t.user_speaking(10.8, "sidA")
+        self.assertTrue(t.bot_started(10.8))
+
+    def test_a_lost_stop_goes_stale_after_the_last_sign_of_speech(self):
+        """The protection the 3 s bound exists for: audio stopped and no stop ever came."""
+        t = tracker()
+        t.user_onset(0.0, "sidA")
+        self.talking(t, 10.0)
+        self.assertFalse(t.idle(12.9))
+        self.assertTrue(t.idle(13.1))
+
+    def test_a_late_sign_of_speech_cannot_bring_back_a_stopped_speaker(self):
+        t = tracker()
+        t.user_onset(0.0, "sidA")
+        t.user_offset(1.0, "sidA")
+        t.user_speaking(1.01, "sidA")
+        self.assertTrue(t.idle(1.02))
+
+    def test_nobody_else_is_kept_alive_by_one_long_talker(self):
+        t = tracker()
+        t.user_onset(0.0, "sidA")
+        t.user_onset(0.0, "sidB")
+        for tick in range(1, 30):
+            t.user_speaking(0.2 * tick, "sidB")
+        t.user_offset(5.9, "sidB")
+        self.assertTrue(t.idle(6.0), "sidA's stop was lost and went stale at 3 s")
+
+
 if __name__ == "__main__":
     unittest.main()

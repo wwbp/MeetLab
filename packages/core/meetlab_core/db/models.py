@@ -5,15 +5,17 @@ from sqlalchemy import (
     BigInteger,
     Integer,
     Boolean,
+    CheckConstraint,
     DateTime,
     Float,
     ForeignKey,
     Index,
     String,
     Text,
+    func,
     text,
 )
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 # What the bot says when the session limit runs out. Overridable per room via
@@ -239,6 +241,86 @@ class BotConfig(Base):
         server_default=CLOSING_MESSAGE,
         nullable=False,
     )
+    # "normal" (open mic) | "ptt" | "baton" (docs/audio-modes-test-plan.md). Only stored and served
+    # so far: nothing acts on it, so the console offers only normal.
+    audio_mode: Mapped[str] = mapped_column(
+        String, default="normal", server_default="normal", nullable=False
+    )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_now, onupdate=_now
     )
+
+
+# --- Group start links (docs: group start links spec). A link's queue of tickets; the
+# matchmaker (meetlab_api.matchmaker) turns enough live tickets into a match: one room.
+
+TICKET_STATES = ("searching", "found", "ready", "placed", "done", "expired", "removed")
+LIVE_TICKET_STATES = ("searching", "found", "ready", "placed")  # non-terminal
+
+
+class StartLink(Base):
+    """One start link. link_id is the URL's /start/<link_id>; a legacy (JWT) link's ID is
+    the hash of its token, its row made on first use."""
+
+    __tablename__ = "start_links"
+
+    link_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    pool: Mapped[list] = mapped_column(JSONB, nullable=False, server_default="[]")  # bot_config scopes
+    size: Mapped[int] = mapped_column(Integer, nullable=False, server_default="1")
+    min_size: Mapped[int] = mapped_column(Integer, nullable=False, server_default="1")
+    delay_s: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    max_wait_s: Mapped[int] = mapped_column(Integer, nullable=False, server_default="300")
+    ready_check_s: Mapped[int] = mapped_column(Integer, nullable=False, server_default="60")
+    # scrypt$<salt b64>$<hash b64> (links.hash_password); null = no password.
+    password_hash: Mapped[str | None] = mapped_column(Text)
+    active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="true")
+    legacy: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    stopped_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class Match(Base):
+    """One formed group: a room, its bot setting and its members (tickets.room_name)."""
+
+    __tablename__ = "matches"
+
+    room_name: Mapped[str] = mapped_column(String(256), primary_key=True)
+    link_id: Mapped[str] = mapped_column(String(64), ForeignKey("start_links.link_id"), nullable=False, index=True)
+    bot_config_scope: Mapped[str] = mapped_column(String(256), nullable=False)
+    size: Mapped[int] = mapped_column(Integer, nullable=False)  # members
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    ready_deadline: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))  # null when link size 1
+    starts_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))  # null until all ready
+    closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    session_id: Mapped[str | None] = mapped_column(String(64))  # set once setup_match started the bot
+    setup_claimed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class Ticket(Base):
+    """One participant's place in a link's queue.
+
+    ponytail: the token is the raw UUID pk, visible to SQLAdmin users (console-only); store a
+    hash if the Database page is ever opened wider.
+    """
+
+    __tablename__ = "tickets"
+    __table_args__ = (
+        CheckConstraint("state IN ('searching', 'found', 'ready', 'placed', 'done', 'expired', 'removed')",
+                        name="ck_tickets_state"),
+        # Same participant + same link → same ticket while it is non-terminal (R7).
+        Index("uq_tickets_one_live_per_participant", "link_id", "participant_id", unique=True,
+              postgresql_where=text("state IN ('searching', 'found', 'ready', 'placed')")),
+        Index("ix_tickets_link_state", "link_id", "state"),
+    )
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=_uuid)
+    link_id: Mapped[str] = mapped_column(String(64), ForeignKey("start_links.link_id"), nullable=False)
+    participant_id: Mapped[str | None] = mapped_column(String(256))  # null for size-1 one-off tickets
+    state: Mapped[str] = mapped_column(String(16), nullable=False, server_default="searching")
+    queued_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    last_seen: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    ready_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    placed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    requeued_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    room_name: Mapped[str | None] = mapped_column(String(256), ForeignKey("matches.room_name"))

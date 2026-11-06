@@ -247,10 +247,12 @@ class FloorRoom:
         if isinstance(frame, BotSpeakingFrame):
             self._floor.heard(t, Floor.BOT)
         elif isinstance(frame, BotStoppedSpeakingFrame):
+            self._log_sentence_end()
             self._sentence_ended = False
             self._floor.release(t, Floor.BOT)
             self._sync(t)
         elif isinstance(frame, TTSTextFrame):
+            self._log_sentence_end()
             if self._sentence_ended and self._floor.waiting and self._floor.holder == Floor.BOT:
                 self._sentence_ended = False
                 self._floor.release(t, Floor.BOT)
@@ -259,6 +261,11 @@ class FloorRoom:
                 return False  # this word's audio is what gets cut, so it wasn't said
             self._sentence_ended = frame.text.rstrip().endswith(_SENTENCE_ENDS)
         return True
+
+    def _log_sentence_end(self):
+        """The next word, or the bot stopping: only then has a sentence been heard to its end."""
+        if self._baton and self._sentence_ended:
+            self._log("sentence_end", Floor.BOT)
 
     async def _cancel_reply(self):
         await self._enqueue(InterruptionTaskFrame(), FrameDirection.UPSTREAM)

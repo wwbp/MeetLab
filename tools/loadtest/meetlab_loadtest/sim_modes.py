@@ -16,13 +16,7 @@ A timeline is one run, times in seconds from just after the bot's greeting:
     bot_sentence_ends  [time]         baton: where the bot's sentences end
     infra   ["lag" | "stt-cpu restart"]  infrastructure signals: the only way a run is invalid
 
-Not built: the live driver (`make sim-modes`, `make sim-modes-matrix` refuse until it exists). It
-waits for the bot and room-page wiring, then needs to: set `audio_mode` for the room; publish the
-library's lines with Python's LocalAudioTrack.mute()/unmute() as the press and release (no track
-churn in livekit 1.1.7: 0 events over 120 cycles), press timing from hold_timing; in baton claim
-the way the page does and start a line on the grant; record a timeline as above and write row()s;
-map event-loop lag over 500 ms and stt-cpu restarts to infra; rerun an invalid attempt under the
-same run key until it is valid (108 valid, about 130 attempts). Reserve memory for stt-cpu first.
+The live driver is sim_modes_live.py (`make sim-modes`, `make sim-modes-matrix`).
 """
 import math
 import random

@@ -65,6 +65,8 @@ services:
   stt-cpu:
     build:
       context: ../services/stt
+    # Local 3-speaker runs were noisy below 8 GB of Docker memory (audio-modes plan). Used 1.3-1.9 GiB.
+    mem_reservation: 2g
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request,json,sys; sys.exit(0 if json.load(urllib.request.urlopen('http://localhost:8000/health'))['ready'] else 1)"]
       interval: 10s

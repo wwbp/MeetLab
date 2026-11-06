@@ -65,3 +65,14 @@ h2 a {
 h2 a {
   text-decoration: none;
 }
+
+/* Push-to-talk and baton rooms: the floor owns the mic (lib/room-floor.ts), so its toggles go.
+   The device menus stay. Covers the control bar and the settings menu. */
+[data-mic-gated] button[data-lk-source='microphone'] {
+  display: none;
+}
+
+/* Above the floor controls, which sit over the room. */
+[data-mic-gated] .lk-settings-menu-modal {
+  z-index: 11;
+}

@@ -487,5 +487,3 @@ describe('the camera', () => {
 it('the real participant fits the mic interface, so tests here hold for the wiring', () => {
   expectTypeOf<LocalParticipant>().toExtend<FloorMic>();
 });
-
-it.todo('test_ptt_blocks_other_mic_paths: needs the wiring in PageClientImpl');

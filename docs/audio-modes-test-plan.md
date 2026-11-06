@@ -42,7 +42,10 @@ Decisions are in the last section. Numbers marked \* are proposals.
 **Ruled out at SDK level (2026-11-05):** a muted publisher's `AudioStream` keeps yielding 100 frames/s
 of digital zero, drifting at most 10 ms over 100 s, for Python and Chromium publishers. So Pipecat's
 1.0 s forced stop and collapsed WAV gaps shouldn't occur. This is inferred until checked through
-Pipecat and `AudioTrackSink`, on LiveKit Cloud, because the measurements used local LiveKit only.
+`AudioTrackSink`, on LiveKit Cloud, because the measurements used local LiveKit only.
+
+At the bot's pipeline those frames are near zero, not zero: peak 1 (real page, real Pipecat
+transport, local LiveKit). Pipecat's resampler is the likely cause, not confirmed.
 
 ## Test ladder
 
@@ -80,7 +83,7 @@ Still to add: `test_press_during_generation_blocks_first_audio` (0 audio frames)
 | `test_non_holder_audio_never_reaches_stt` | 0 frames to STT; recorder receives all |
 | `test_floor_events_are_logged` | Press, release, claim, grant, deny, timeout: 1 event each, with event time |
 | `test_hung_event_log_does_not_delay_grant` | 0 ms waited |
-| `test_wav_keeps_time_across_hold_gap` | Integration, not fake frames: real `AudioStream` to Pipecat to `AudioTrackSink`. Drift ≤50 ms\* over a 60 s hold; hold is peak 0, speech intact |
+| `test_wav_keeps_time_across_hold_gap` | Integration, not fake frames: real `AudioStream` to Pipecat to `AudioTrackSink`. Drift ≤50 ms\* over a 60 s hold; hold is near zero (peak 1 measured at the pipeline, so allow a small limit), speech intact |
 
 ### Web: `services/web/lib/floor.test.ts`
 

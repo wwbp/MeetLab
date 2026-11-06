@@ -73,7 +73,7 @@ In AWS, secrets live in SSM under `/meetlab-v2/<env>/`, never in Terraform state
 |---|---|---|
 | `services/web` | — | Next.js: rooms and the console (below) |
 | `services/api` | `meetlab_api` | `runner.py` (API, background loop), `dispatch.py`, `capacity.py` / `capacity_model.py` (Prepare for study; how much to run for N rooms), `transcript.py` |
-| `services/bot` | `meetlab_bot` | `bot.py` (pipeline), `bot_task.py` (a bot's process), `multi_speaker_stt.py`, `smart_turn.py`, `interruption.py`, … |
+| `services/bot` | `meetlab_bot` | `bot.py` (pipeline), `bot_task.py` (a bot's process), `multi_speaker_stt.py`, `smart_turn.py`, `interruption.py`, `floor.py` + `floor_room.py` (ptt and baton), … |
 | `packages/core` | `meetlab_core` | shared by both: `config.py`, `db/` (models, engine) and `migrations/` (Alembic, `packages/core/alembic.ini`), `sessions.py`, `heartbeat.py`, `rejoin.py`, `storage.py` (S3 via task roles), `event_log.py` |
 | `services/stt` | — | the speech-to-text server (FastAPI + Parakeet ONNX), its own image |
 | `tools/loadtest` | `meetlab_loadtest` | the load-test harness (runs in AWS as the load generator), the conversation library, quality scores |

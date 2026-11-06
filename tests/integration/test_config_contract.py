@@ -36,10 +36,6 @@ NOT_PIPELINE_FIELDS = {
         "advisory browser-side countdown; served to the client via meet's "
         "/api/connection-details and never read by the bot (see lib/session-limit.ts)"
     ),
-    "audio_mode": (
-        "stored and served via /api/connection-details; no behaviour reads it yet. Remove this "
-        "exemption when the bot's floor logic does (docs/audio-modes-test-plan.md)"
-    ),
 }
 
 # Known-dead fields. Each entry is a standing bug, not an exemption: the test

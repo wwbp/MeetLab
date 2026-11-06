@@ -587,6 +587,9 @@ async def _bot(runner_args: LiveKitRunnerArguments):
         now=lambda: time.monotonic(),  # looked up per call: the clock tests replace
     )
 
+    if floor:
+        floor.listen_from_connect(transport._client)
+
     _yield_to_onset = make_speech_onset_handler(interruptions, _enqueue_frame)
 
     async def _on_speech_onset(sid: str) -> None:
@@ -1069,7 +1072,7 @@ async def _bot(runner_args: LiveKitRunnerArguments):
     @transport.event_handler("on_connected")
     async def on_connected(transport):
         if floor:
-            floor.attach(transport._client.room)
+            floor.connected()
         # Everyone already here: no on_participant_connected will come for them.
         for p in list(transport._client.room.remote_participants.values()):
             if not p.identity.startswith("bot_"):

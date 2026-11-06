@@ -102,7 +102,24 @@ class FloorRoom:
 
     # In from the room.
 
-    def attach(self, room):
+    def listen_from_connect(self, client):
+        """Listen from before the room connects: a page claims as soon as it sees a replacement
+        bot, which can be before on_connected, and nothing would ever send that claim again.
+
+        ponytail: wraps a private of Pipecat's LiveKit client (1.14), the only point with the room
+        made and not yet connected. RealClientTest fails if an upgrade moves it. on_data_received
+        is public and in time too, but drops the topic.
+        """
+        connect = client.connect
+
+        async def listen_then_connect():
+            if self._room is None:  # the input's setup connects, then the output's
+                self._listen(client.room)
+            await connect()
+
+        client.connect = listen_then_connect
+
+    def _listen(self, room):
         """rtc.Room's handlers must be sync: everything they reach only schedules its waiting."""
         self._room = room
         if self._baton:
@@ -113,7 +130,12 @@ class FloorRoom:
         # A mic first enabled after PreJoin arrives published and unmuted: no track_unmuted comes.
         room.on("track_published")(lambda publication, person: self._on_mic(person, publication, not publication.muted))
         room.on("track_unpublished")(lambda publication, person: self._on_mic(person, publication, False))
-        for person in room.remote_participants.values():
+
+    def connected(self):
+        """Whoever was already holding when the bot came: no event will come for them."""
+        if self._baton:
+            return
+        for person in self._room.remote_participants.values():
             for publication in person.track_publications.values():
                 if not publication.muted:
                     self._on_mic(person, publication, True)
@@ -136,8 +158,9 @@ class FloorRoom:
             self.release(packet.participant.identity)
 
     def press(self, who):
-        if self._floor.holds(who) or who in self._floor.queue:
-            return  # key repeat
+        # Pipecat publishes bot audio as an unmuted mic, and a killed bot stays visible about 22 s.
+        if who.startswith(Floor.BOT) or self._floor.holds(who) or who in self._floor.queue:
+            return  # a bot, or a key repeat
         t = self._now()
         self._released.pop(who, None)
         granted = self._floor.press(t, who)

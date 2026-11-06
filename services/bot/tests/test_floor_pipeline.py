@@ -40,6 +40,7 @@ from pipecat.frames.frames import (
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
 from pipecat.processors.frame_processor import FrameProcessor
+from pipecat.transports.livekit import transport as livekit_transport
 from pipecat.workers.runner import WorkerRunner
 
 from meetlab_bot import bot, floor_room
@@ -129,6 +130,8 @@ class FloorRoomTest(golden.NormalRoomTest):
         self.room, self.events = _Room(), []
         self.hang_events = False
         self.words = []
+        self.during_connect = lambda: None  # what the room delivers before on_connected runs
+        self.transport._client.connect = mock.AsyncMock()
         self.transport._client.room = self.room
 
         async def record_event(event_type, severity="info", room_name=None, conv_id=None, payload=None):
@@ -167,6 +170,11 @@ class FloorRoomTest(golden.NormalRoomTest):
                 p.link(following)
                 await p.setup(_make_setup())
             await chain[0].process_frame(StartFrame(), DOWN)
+        # As Pipecat does: the input's setup, then the output's, then on_connected.
+        await self.transport._client.connect()
+        await self.transport._client.connect()
+        self.during_connect()
+        await self._spin()
         await self.transport.handlers["on_connected"](self.transport)
         self.trace.clear()
 
@@ -602,6 +610,77 @@ class FloorRoomTest(golden.NormalRoomTest):
 
         await self._meet_in("baton", meeting)
 
+    # Bots are not people.
+
+    async def test_a_dead_bots_audio_is_not_a_press(self):
+        """Pipecat publishes bot audio as an unmuted microphone, and a killed bot stays visible for
+        about 22 s. Seen in a real run: its replacement's first audio refused for 16 s."""
+        old_bot = SimpleNamespace(identity="bot_old", name="bot", metadata="", track_publications={"m": _mic()})
+        self.room.remote_participants = {"bot_old": old_bot}
+
+        async def meeting():
+            self.now = 1.0
+            self.room.emit("track_published", _mic(), old_bot)
+            self.room.emit("track_unmuted", old_bot, _mic())
+            await self._reply_now(1.5)
+            self.assertEqual(self._out_audio(), 1)
+            self.room.emit("track_muted", old_bot, _mic(muted=True))
+            self.room.emit("track_unpublished", _mic(), old_bot)
+            await self.transport.handlers["on_participant_disconnected"](self.transport, "bot_old")
+            await self._spin()
+            self.assertEqual(self.events, [])
+
+        await self._meet_in("ptt", meeting)
+
+    async def test_a_bot_cannot_claim_or_release(self):
+        old_bot = SimpleNamespace(identity="bot_old", name="bot", metadata="", track_publications={})
+
+        async def meeting():
+            self.now = 1.0
+            self.room.emit("data_received", _packet(old_bot))
+            self.room.emit("data_received", _packet(old_bot, b'{"type":"release"}'))
+            await self._spin()
+            self.assertEqual(self.events, [])
+            self.assertEqual(self.room.attributes, [])
+            await self._reply_now(1.5)
+            self.assertEqual(self._out_audio(), 1)
+
+        await self._meet_in("baton", meeting)
+
+    # What the room delivers before on_connected.
+
+    async def test_a_claim_before_on_connected_is_kept(self):
+        """A replacement bot, someone mid-hold: their page claims as soon as it sees the bot, which
+        can be before on_connected. Seen in a real run, 2 of 36: mic open, floor empty, audio dropped."""
+        speech_ = b"\x01\x02" * 160
+        self.during_connect = lambda: self.room.emit("data_received", _packet(ALICE))
+
+        async def meeting():
+            await self._spin()
+            self.assertEqual(self._holder_and_queue(), ("alice", ""))
+            self.assertEqual(self._event_types(), ["floor.claim", "floor.grant"])
+            await self._audio("alice", speech_)
+            self.assertEqual(self.stts[-1].audio, [speech_])
+
+        await self._meet_in("baton", meeting)
+
+    async def test_a_press_before_on_connected_counts_once(self):
+        person = SimpleNamespace(identity="alice", name="alice", metadata="", track_publications={"m": _mic()})
+        self.room.remote_participants = {"alice": person}
+        self.during_connect = lambda: self.room.emit("track_unmuted", person, _mic())
+
+        async def meeting():
+            await self._spin()
+            self.assertEqual(self._event_types(), ["floor.press"])
+
+        await self._meet_in("ptt", meeting)
+
+    async def test_two_connects_listen_once(self):
+        async def meeting():
+            self.assertEqual(len(self.room.handlers["data_received"]), 1)
+
+        await self._meet_in("baton", meeting)
+
     # baton: the contract with the page.
 
     async def test_identity_comes_from_the_sender_never_the_payload(self):
@@ -786,6 +865,34 @@ class FloorRoomTest(golden.NormalRoomTest):
             self.assertEqual(self._holder_and_queue(), ("bob", ""))
 
         await self._meet_in("baton", meeting)
+
+
+class RealClientTest(unittest.IsolatedAsyncioTestCase):
+    """Pipecat's real LiveKit client, with only rtc faked: pins that nothing it does between
+    creating the room and on_connected can lose a packet, and fails if an upgrade moves connect."""
+
+    async def test_a_packet_during_connect_reaches_the_floor(self):
+        room = _Room()
+        patch = mock.patch.object(floor_room, "record_event", new=mock.AsyncMock())
+        patch.start()
+        self.addCleanup(patch.stop)
+        floor = FloorRoom("baton", bot_identity="bot_r1", room_name="r1", conv_id="s1", enqueue=mock.AsyncMock(),
+                          vad_stop_secs=0.45, now=lambda: 1.0)
+
+        async def connect(*args, **kwargs):
+            room.emit("data_received", _packet(ALICE))
+
+        room.connect = connect
+        room.local_participant = mock.MagicMock(identity="bot_r1", publish_track=mock.AsyncMock())
+        fake_rtc = mock.MagicMock()
+        fake_rtc.Room.return_value = room
+        with mock.patch.object(livekit_transport, "rtc", fake_rtc):
+            transport = livekit_transport.LiveKitTransport(
+                url="ws://lk", token="t", room_name="r1", params=livekit_transport.LiveKitParams())
+            floor.listen_from_connect(transport._client)
+            await transport._client.setup(_make_setup())
+            await transport._client.connect()
+        self.assertTrue(floor._floor.holds("alice"))
 
 
 class BotTokenTest(unittest.TestCase):

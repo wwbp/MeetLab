@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { NextRequest } from 'next/server';
+import { decodeJwt } from 'jose';
 
 const mockFetch = vi.hoisted(() => vi.fn());
 const mockGetServerConfig = vi.hoisted(() => vi.fn());
@@ -120,5 +121,75 @@ describe('GET /api/connection-details — session limit', () => {
     });
     expect((await GET(bad)).status).toBe(400);
     expect(mockFetch).not.toHaveBeenCalled();
+  });
+});
+
+describe('GET /api/connection-details — audio mode', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockGetServerConfig.mockReturnValue(DEFAULT_CONFIG);
+  });
+
+  it('test_connection_details_returns_room_audio_mode: room scope wins', async () => {
+    // The runner answers per scope, so the room's mode comes back only if the room is asked for.
+    mockFetch.mockImplementation(async (url: string) =>
+      runnerConfig({ audio_mode: url.endsWith('?room=room-ptt') ? 'ptt' : 'normal' }),
+    );
+    expect((await (await GET(req('room-ptt'))).json()).audioMode).toBe('ptt');
+    expect((await (await GET(req('other-room'))).json()).audioMode).toBe('normal');
+  });
+
+  it('asks the runner once for both the mode and the limit', async () => {
+    mockFetch.mockResolvedValue(runnerConfig({ audio_mode: 'baton', session_limit_minutes: 30 }));
+    const body = await (await GET(req())).json();
+    expect(body).toMatchObject({ audioMode: 'baton', sessionLimitSeconds: 30 * 60 });
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+  });
+
+  // Joining must never fail or stall over this, and anything unknown means today's open mic.
+  it('falls back to normal when the runner fails or the mode is unknown', async () => {
+    mockFetch.mockRejectedValueOnce(new Error('ECONNREFUSED'));
+    expect((await (await GET(req())).json()).audioMode).toBe('normal');
+    mockFetch.mockResolvedValueOnce(runnerConfig({ error: 'boom' }, 500));
+    expect((await (await GET(req())).json()).audioMode).toBe('normal');
+    mockFetch.mockResolvedValueOnce(runnerConfig({ audio_mode: 'nonsense' }));
+    expect((await (await GET(req())).json()).audioMode).toBe('normal');
+  });
+});
+
+describe('GET /api/connection-details — who the participant can be', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockGetServerConfig.mockReturnValue(DEFAULT_CONFIG);
+    mockFetch.mockResolvedValue(runnerConfig({ session_limit_minutes: 0 }));
+  });
+
+  const join = (participantName: string, cookie?: string) => {
+    ipCounter += 1;
+    return GET(
+      new NextRequest(
+        `http://localhost/api/connection-details?roomName=room-1&participantName=${encodeURIComponent(participantName)}&metadata=5f2a91b3c4d5e6f708192a3b`,
+        { headers: { 'x-forwarded-for': `10.0.2.${ipCounter}`, ...(cookie ? { cookie } : {}) } },
+      ),
+    );
+  };
+
+  it('does not hand out the completion code at join (anyone could fetch it without attending)', async () => {
+    const body = await (await join('abby')).json();
+    expect(body.participantToken).toBeTruthy();
+    expect(body).not.toHaveProperty('completionCode');
+  });
+
+  it("refuses a name that would make the participant look like the bot (identity.startsWith('bot_'))", async () => {
+    for (const name of ['bot_x', 'BOT_x', 'Bot_ana']) {
+      expect((await join(name)).status, name).toBe(400);
+    }
+    expect((await join('robot_ana')).status).toBe(200);
+  });
+
+  it('picks the identity suffix itself, so a cookie cannot reuse (and kick) someone else', async () => {
+    const body = await (await join('abby', 'random-participant-postfix=VICTIM')).json();
+    expect(decodeJwt(body.participantToken).sub).not.toBe('abby__VICTIM');
+    expect(decodeJwt(body.participantToken).sub).toMatch(/^abby__/);
   });
 });

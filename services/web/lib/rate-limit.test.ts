@@ -67,11 +67,19 @@ describe('checkRateLimit', () => {
 });
 
 describe('getClientIp', () => {
-  it('extracts first IP from x-forwarded-for chain', () => {
+  // The ALB appends the address it saw as the LAST entry; earlier ones are client-supplied.
+  it('takes the last IP of the x-forwarded-for chain (the one the ALB appended)', () => {
     const req = new Request('http://localhost/', {
       headers: { 'x-forwarded-for': '1.2.3.4, 10.0.0.1, 10.0.0.2' },
     });
-    expect(getClientIp(req)).toBe('1.2.3.4');
+    expect(getClientIp(req)).toBe('10.0.0.2');
+  });
+
+  it('ignores a spoofed first x-forwarded-for entry', () => {
+    const req = new Request('http://localhost/', {
+      headers: { 'x-forwarded-for': '6.6.6.6, 203.0.113.7' },
+    });
+    expect(getClientIp(req)).toBe('203.0.113.7');
   });
 
   it('falls back to x-real-ip', () => {

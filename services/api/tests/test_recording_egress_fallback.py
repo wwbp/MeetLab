@@ -1,5 +1,7 @@
+import os
 import unittest
 from types import SimpleNamespace
+from unittest import mock
 
 from livekit.protocol.egress import EncodedFileOutput
 
@@ -51,6 +53,23 @@ class RecordingEgressFallbackTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(lk.egress.requests[1].file_outputs), 0)
         self.assertTrue(lk.egress.requests[1].HasField("file"))
         self.assertEqual(lk.egress.requests[1].file.filepath, "/recordings/session.mp4")
+
+    async def test_records_our_page_so_everyone_has_a_card(self):
+        """LiveKit's stock layout draws only participants with video: people with cameras off
+        were missing from recordings (team demo, 2026-11-04)."""
+        lk = FakeLiveKitApi()
+        file_output = EncodedFileOutput(filepath="/recordings/session.mp4")
+        with mock.patch.dict(os.environ, {"RECORDING_TEMPLATE_URL": "https://meet.test/recording"}):
+            await runner._start_room_composite_egress(lk, "room-1", file_output)
+        self.assertEqual(lk.egress.requests[0].custom_base_url, "https://meet.test/recording")
+
+    async def test_the_legacy_retry_records_our_page_too(self):
+        lk = FakeLiveKitApi(Exception(
+            "TwirpError(code=invalid_argument, message=request has missing or invalid field: output, status=400)"))
+        file_output = EncodedFileOutput(filepath="/recordings/session.mp4")
+        with mock.patch.dict(os.environ, {"RECORDING_TEMPLATE_URL": "https://meet.test/recording"}):
+            await runner._start_room_composite_egress(lk, "room-1", file_output)
+        self.assertEqual(lk.egress.requests[1].custom_base_url, "https://meet.test/recording")
 
     async def test_does_not_retry_unrelated_livekit_errors(self):
         lk = FakeLiveKitApi(Exception("TwirpError(code=not_found, message=room not found)"))

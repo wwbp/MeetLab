@@ -1,14 +1,7 @@
 import { beforeAll, describe, expect, it } from 'vitest';
+import { createHash } from 'node:crypto';
 import { SignJWT } from 'jose';
-import {
-  generateStartRoomName,
-  pickUniform,
-  signStartLink,
-  verifyStartLink,
-} from './start-link';
-
-// Matches ROOM_NAME_PATTERN in app/api/concierge/rooms/route.ts
-const ROOM_NAME_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$/;
+import { linkSettings, resolveLinkParam, signStartLink, verifyStartLink } from './start-link';
 
 beforeAll(() => {
   process.env.LIVEKIT_API_SECRET = 'test-secret-test-secret-test-secret';
@@ -53,34 +46,107 @@ describe('signStartLink / verifyStartLink', () => {
   });
 });
 
-describe('pickUniform', () => {
-  it('always returns a member', () => {
-    const items = ['a', 'b', 'c'];
-    for (let i = 0; i < 100; i++) {
-      expect(items).toContain(pickUniform(items));
-    }
+describe('resolveLinkParam', () => {
+  const legacyId = (token: string) =>
+    createHash('sha256').update(token).digest('base64url').slice(0, 22);
+
+  it('takes a stored link ID as it is', async () => {
+    expect(await resolveLinkParam('Qm9vdHN0cmFwTGlua0lEMQ')).toEqual({
+      linkId: 'Qm9vdHN0cmFwTGlua0lEMQ',
+    });
   });
 
-  it('is roughly uniform over 3 items x 3000 draws', () => {
-    const counts: Record<string, number> = { a: 0, b: 0, c: 0 };
-    for (let i = 0; i < 3000; i++) {
-      counts[pickUniform(['a', 'b', 'c'])]++;
-    }
-    // Expected ~1000 each; loose bounds to avoid flakes (p(<800) is astronomically small).
-    for (const k of ['a', 'b', 'c']) {
-      expect(counts[k]).toBeGreaterThan(800);
+  it('gives an old JWT link an ID of the same shape, and its pool', async () => {
+    const token = await signStartLink(['friendly', 'strict']);
+    const resolved = await resolveLinkParam(token);
+    expect(resolved).toEqual({ linkId: legacyId(token), legacyPool: ['friendly', 'strict'] });
+    expect(resolved?.linkId).toMatch(/^[A-Za-z0-9_-]{22}$/);
+  });
+
+  it('hashes the URL-decoded token: an encoded and a decoded link are one link', async () => {
+    const token = await signStartLink(['friendly']);
+    const encoded = encodeURIComponent(token).replace(/\./g, '%2E');
+    expect(encoded).not.toBe(token);
+    expect(await resolveLinkParam(encoded)).toEqual(await resolveLinkParam(token));
+  });
+
+  it('refuses anything else', async () => {
+    for (const bad of [
+      '',
+      'not-a-jwt',
+      'Qm9vdHN0cmFwTGlua0lEM',
+      'Qm9vdHN0cmFwTGlua0lEMQ=',
+      '%E0%A4%A',
+      'a'.repeat(23),
+    ]) {
+      expect(await resolveLinkParam(bad), bad).toBeNull();
     }
   });
 });
 
-describe('generateStartRoomName', () => {
-  it('generates valid, distinct room names', () => {
-    const names = new Set<string>();
-    for (let i = 0; i < 200; i++) {
-      const name = generateStartRoomName();
-      expect(name).toMatch(ROOM_NAME_PATTERN);
-      names.add(name);
+describe('linkSettings', () => {
+  const base = { name: 'Pilot 3', pool: ['friendly'] };
+
+  it('fills the defaults: size 1, min size = size, no delay, 5 min max wait, 60 s to confirm, no password', () => {
+    expect(linkSettings(base)).toEqual({
+      link: {
+        name: 'Pilot 3',
+        pool: ['friendly'],
+        size: 1,
+        min_size: 1,
+        delay_s: 0,
+        max_wait_s: 300,
+        ready_check_s: 60,
+      },
+    });
+    expect(linkSettings({ ...base, size: 3 })).toMatchObject({ link: { size: 3, min_size: 3 } });
+  });
+
+  it('keeps every value given, and the password when there is one', () => {
+    const link = {
+      ...base,
+      size: 3,
+      min_size: 2,
+      delay_s: 10,
+      max_wait_s: 600,
+      ready_check_s: 45,
+      password: 'blue-river',
+    };
+    expect(linkSettings(link)).toEqual({ link });
+    expect(linkSettings({ ...base, password: '' })).toEqual(linkSettings(base));
+  });
+
+  it('trims the name, and names an unnamed request (older callers send only the pool)', () => {
+    expect(linkSettings({ ...base, name: '  Pilot 3 ' })).toMatchObject({
+      link: { name: 'Pilot 3' },
+    });
+    expect(linkSettings({ pool: ['friendly'] })).toMatchObject({ link: { name: 'Untitled link' } });
+  });
+
+  it('refuses values out of range', () => {
+    for (const bad of [
+      { name: '  ' },
+      { pool: [] },
+      { pool: [''] },
+      { size: 0 },
+      { size: 9 },
+      { size: 2.5 },
+      { size: '3' },
+      { size: 3, min_size: 4 },
+      { min_size: 0 },
+      { delay_s: -1 },
+      { delay_s: 301 },
+      { max_wait_s: 59 },
+      { max_wait_s: 1801 },
+      { ready_check_s: 9 },
+      { ready_check_s: 301 },
+      { password: 42 },
+    ]) {
+      expect(linkSettings({ ...base, ...bad }), JSON.stringify(bad)).toHaveProperty('error');
     }
-    expect(names.size).toBe(200);
+  });
+
+  it('refuses a body that is not an object', () => {
+    for (const bad of [null, 'x', 3, []]) expect(linkSettings(bad)).toHaveProperty('error');
   });
 });

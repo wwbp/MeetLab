@@ -1,0 +1,110 @@
+# Speaker attribution: who said what when people talk at once
+
+When two or three people speak over each other, each person's words must be stored under
+their own name. This page says how MeetLab keeps them apart, what went wrong before
+November 2026 (finding F11), and what is still imperfect.
+
+Check it with `make sim-attribution`: three simulated people (a, b, c) in one room, each
+saying a different sentence in a different voice, started 0.15 s apart. `OFFSET_S=3` spaces
+the starts further apart; `SPEAKERS=a` is the one-speaker control.
+
+## How speech travels, person by person
+
+| Step | Where | Kept apart per person? |
+|---|---|---|
+| Each person publishes their own microphone track | LiveKit | yes |
+| The transport hands the bot one audio stream per participant (`user_id` = identity) | Pipecat LiveKit transport | yes |
+| Each person gets their own VAD and speech-to-text chain | `services/bot/meetlab_bot/multi_speaker_stt.py` (`MultiSpeakerSTT._ensure_stt`) | yes |
+| Each transcript becomes a *turn*: who (identity and name), the words, speech or typed chat | `SpeakerLabelInjector`, same file | yes |
+| **One** user aggregator collects transcripts into a user turn | Pipecat `LLMUserAggregator` (`bot.py`, `context_aggregator.user()`) | **no** |
+| The turn is stored | `on_user_turn_stopped` in `services/bot/meetlab_bot/bot.py` | yes, since F11's fix |
+
+## What went wrong (F11)
+
+Recognition was always right per person; the merge happened afterwards. Pipecat has one
+user aggregator per pipeline, and every transcript that arrives before its end-of-turn wait
+(`user_speech_timeout_ms`, 50 ms by default) runs out joins the same turn. The turn was then
+stored as one utterance under whoever was transcribed **last** (`_current_speaker_sid`), with
+only that person's label taken out (the LLM then read people as "Name: words" text). Before the fix the database held, for room `sim-attr-6318d5`:
+
+```
+sim_c_21a5 | sim_b_3bdc: Are we seeing higher latency on the transcription service since Tuesday? Can you explain what a retrieval augmented generation system does?
+```
+
+b's and c's sentences, each recognised correctly, in one row of c's. A 50 ms window still merges
+because the transcripts arrive together: the three people's segments go to the shared speech
+server at about the same time and come back in the same millisecond (bot log of the
+2026-11-02 run: VAD stops at 44.0, 45.4 and 45.5 s; all three transcripts at 48.162 s).
+
+## The fix: who said what is data, in and out
+
+Since November 2026 the model's input and output are both structured (`packages/core/meetlab_core/turns.py`),
+so nothing is parsed out of the words.
+
+**In.** Each transcript is a `Turn`: `speaker_id` (the participant's identity), `name`,
+`text`, `source` (`speech`, or `chat` when typed). A committed user turn reaches the model as
+one JSON list of turns, one per person in it:
+
+```json
+[{"speaker_id": "sim_b_3bdc", "name": "sim_b_3bdc", "text": "We are seeing higher latency ...", "source": "speech"},
+ {"speaker_id": "sim_c_21a5", "name": "sim_c_21a5", "text": "Can you explain ...", "source": "speech"}]
+```
+
+A person whose first words are transcribed before the bot's connect callback has registered
+them (seen with Pipecat 1.14 and three people starting together) is still their own turn:
+`speaker_id` is the transcript's `user_id`, their identity, and `name` its part before `__`.
+Whose turn it is never comes from LiveKit's loudest-speaker signal (`on_active_speaker_changed`,
+which Pipecat fires since 1.13): with people overlapping, that would hand the turn to whoever
+was loudest.
+
+`on_user_turn_stopped` (`bot.py`) reads the turns back (`parse_turns`) and stores each as its
+own utterance under its own `speaker_id`, `meta.source` from the turn. The words are never
+split or searched for a name, so a colon, quotes or a name said aloud change nothing.
+
+**Out.** The model answers under a strict JSON schema (OpenAI's `response_format`, also
+accepted by our vLLM): `{"reply": what to say, "addressed_to": [speaker_id, ...]}` (empty for
+everyone). A short paragraph appended to the researchers' Bot settings prompt
+(`FORMAT_INSTRUCTIONS`) tells the model both shapes. Only `reply` is spoken, as it streams
+(`ReplyStreamer`, `reply_stream.py`); the bot's stored utterance is what was said, and
+`meta.addressed_to` whom it answered. A model that ignores the schema is still spoken, to
+no one in particular.
+
+**History.** The model's past answers stay in its context in the shape it answers in
+(`{"reply", "addressed_to"}`, with the reply cut where an interruption stopped it), and a
+bot that rejoins a meeting after dying rebuilds the same messages from the stored rows
+(`rejoin.context_messages`).
+
+Tests: `packages/core/tests/test_turns.py` (the schema, the stored text above as turns),
+`TestStructuredTurns` in `services/bot/tests/test_bot.py`, `TestSpeakerLabelInjector` in
+`services/bot/tests/test_multi_speaker_stt.py`, `TestContext` in `packages/core/tests/test_rejoin.py`.
+
+After the fix the same simulation passes: one turn held all three people's words, logged as
+`user turn held 3 speakers' words: stored as one utterance each`, and stored as three rows.
+With `OFFSET_S=3` the three transcripts came back 2 to 4 s apart and formed three turns of
+their own, no merge at all: how much overlap merges depends on when transcripts return, not
+on when people speak.
+
+## What is still imperfect
+
+- **Order inside a merged turn is the order recognition finished, not the order people
+  started.** In the run above the turn read c, a, b although a started first. The pieces get
+  the turn's start time plus 1 ms each, so a transcript of an overlap may list speakers in an
+  order they did not speak in.
+- **Everyone in a merged turn gets one reply.** The bot answers all of them at once and says
+  whom it answered (`addressed_to`); it cannot yet answer one person and hold the other's question.
+- **Two people with the same display name** are told apart by `speaker_id`, but the model
+  sees the same name for both, so its reply may confuse them.
+- **One microphone, two people** (a shared laptop) is one LiveKit track: they are one speaker
+  to MeetLab. Telling them apart needs diarisation, which MeetLab does not do.
+
+## Options, if these matter for a study
+
+1. **Store from the transcripts, not the turn.** Record each person's transcript with its own
+   VAD start time as it leaves their chain (`_FrameCollector` in `multi_speaker_stt.py`),
+   which fixes the order and timestamps. The LLM turn stays as it is.
+2. **One aggregator per person.** Each person's chain ends its own turn, and the bot decides
+   which turn to answer. This is the larger change the per-participant worker design
+   aimed at (`participant_workers.py`); Pipecat 1.14's aggregator has one turn at a time.
+3. **Upstream in Pipecat:** let `LLMUserAggregator` keep `user_id` per aggregated part so the
+   `on_user_turn_stopped` message carries who said each piece, instead of each transcript
+   carrying its turn as JSON text.

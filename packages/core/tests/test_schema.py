@@ -31,6 +31,11 @@ class SchemaTest(unittest.TestCase):
         self.assertIn("stt_model", columns, "read the right table")
         self.assertNotIn("stt_vad_mode", columns)
 
+    def test_group_start_link_tables_match_their_models(self):
+        from meetlab_core.db.models import Match, StartLink, Ticket
+        for model in (StartLink, Match, Ticket):
+            self.assertEqual(_columns(model.__tablename__), set(model.__table__.c.keys()), model.__tablename__)
+
 
 if __name__ == "__main__":
     unittest.main()

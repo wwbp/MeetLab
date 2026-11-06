@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { PageHeader, Stat, secondaryButtonClass, textActionClass } from '@/components/console/swiss';
 import type { ConversationRecord, ConversationsResponse } from '@/lib/concierge/types';
+import type { Person } from '@/lib/people-csv';
 
 const POLL_INTERVAL_MS = 10_000;
 const PAGE_SIZE = 10;
@@ -75,6 +76,40 @@ function FileActions({
   );
 }
 
+// Who took part in one meeting, with the Prolific ID a paid study pays on (docs/study-support.md).
+function People({ convId }: { convId: string }) {
+  const [people, setPeople] = useState<Person[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    fetch(`/api/meetings/${convId}/speakers`, { cache: 'no-store' })
+      .then(async (res) => {
+        if (!res.ok) throw new Error('Could not load the people in this meeting');
+        setPeople(((await res.json()) as { speakers: Person[] }).speakers);
+      })
+      .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)));
+  }, [convId]);
+
+  if (error) return <p className="text-signal text-sm">{error}</p>;
+  if (!people) return <p className="text-muted-foreground text-sm">Loading…</p>;
+  return (
+    <div className="space-y-1 text-sm">
+      {people.length === 0 ? (
+        <p className="text-muted-foreground">Nobody spoke in this meeting.</p>
+      ) : (
+        people.map((p, i) => (
+          <p key={i} className="flex gap-4">
+            <span className="w-40 truncate">{p.display_name ?? 'No name'}</span>
+            <span className="font-mono">
+              {p.prolific_id ?? (p.prolific_id_invalid ? `${p.prolific_id_invalid} (not a valid Prolific ID)` : 'No Prolific ID')}
+            </span>
+          </p>
+        ))
+      )}
+      <a className={textActionClass} href={`/api/meetings/${convId}/people`} download>Download CSV</a>
+    </div>
+  );
+}
+
 // A meeting's status in plain words.
 const MEETING_STATE: Record<string, string> = { running: 'Live', completed: 'Ended', ended: 'Room closed', error: 'Ended with an error' };
 
@@ -85,6 +120,7 @@ export function MeetingsTab() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [openPeople, setOpenPeople] = useState<string | null>(null);
 
   const offset = page * PAGE_SIZE;
   const totalPages = Math.ceil(total / PAGE_SIZE);
@@ -174,7 +210,13 @@ export function MeetingsTab() {
             <div key={conv.id} className="border-foreground/15 grid grid-cols-[minmax(0,2fr)_5rem_4rem_10rem_minmax(0,2fr)] items-center gap-4 border-b py-3">
               <div className="min-w-0">
                 <p className="truncate font-mono text-sm font-medium">{conv.room_name}</p>
-                <p className="text-muted-foreground text-xs">{formatDate(conv.started_at)}</p>
+                <p className="text-muted-foreground text-xs">
+                  {formatDate(conv.started_at)}
+                  {' · '}
+                  <button className={textActionClass} onClick={() => setOpenPeople(openPeople === conv.id ? null : conv.id)}>
+                    {openPeople === conv.id ? 'Hide people' : 'People'}
+                  </button>
+                </p>
               </div>
               <p className="text-sm tabular-nums">{formatDuration(conv.started_at, conv.ended_at)}</p>
               <p className="text-sm tabular-nums">{conv.utterance_count}</p>
@@ -182,6 +224,7 @@ export function MeetingsTab() {
                 {MEETING_STATE[conv.status] ?? conv.status}
               </p>
               <FileActions conv={conv} onGenerate={handleGenerate} onDownload={handleDownload} />
+              {openPeople === conv.id && <div className="col-span-full"><People convId={conv.id} /></div>}
             </div>
           ))}
 

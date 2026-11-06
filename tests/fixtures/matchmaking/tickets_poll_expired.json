@@ -1,0 +1,18 @@
+{
+  "endpoint": "POST /tickets/{id}/poll",
+  "request": {
+    "method": "POST",
+    "path": "/tickets/6f1c2b3a-4d5e-4f60-8a7b-9c0d1e2f3a4b/poll"
+  },
+  "response": {
+    "status": 200,
+    "body": {
+      "ticket": "6f1c2b3a-4d5e-4f60-8a7b-9c0d1e2f3a4b",
+      "link_id": "Qm9vdHN0cmFwTGlua0lEMQ",
+      "participant_id": "5f8e2a1b3c4d5e6f7a8b9c0d",
+      "view": {
+        "kind": "expired"
+      }
+    }
+  }
+}

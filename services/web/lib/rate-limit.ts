@@ -54,10 +54,12 @@ export function checkRateLimit(
   return { allowed: true, retryAfterMs: 0 };
 }
 
-/** Extracts the best available client IP from a Next.js request. */
+/** Extracts the best available client IP from a Next.js request.
+ *  The ALB appends the address it saw to X-Forwarded-For, so the LAST entry is the real
+ *  client; earlier entries are whatever the client sent and can be spoofed. */
 export function getClientIp(request: Request): string {
   const headers = new Headers(request.headers);
   const forwarded = headers.get('x-forwarded-for');
-  if (forwarded) return forwarded.split(',')[0].trim();
+  if (forwarded) return forwarded.split(',').at(-1)!.trim();
   return headers.get('x-real-ip') ?? 'unknown';
 }

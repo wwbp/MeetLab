@@ -30,6 +30,7 @@ from pipecat.processors.frame_processor import FrameDirection, FrameProcessor, F
 from loguru import logger
 
 from meetlab_bot.multi_speaker_stt import MultiSpeakerSTT, SpeakerLabelInjector, _FrameCollector
+from meetlab_core.turns import Turn, turn_json
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────
@@ -558,7 +559,7 @@ class TestSpeakerLabelInjector(unittest.IsolatedAsyncioTestCase):
 
         transcripts = [f for f in self.sink.received if isinstance(f, TranscriptionFrame)]
         self.assertTrue(
-            any(f.text == "alice_123: what is X?" for f in transcripts),
+            any(f.text == turn_json(Turn("alice_123", "alice_123", "what is X?")) for f in transcripts),
             f"Expected labeled text, got: {[f.text for f in transcripts]}",
         )
 
@@ -568,14 +569,23 @@ class TestSpeakerLabelInjector(unittest.IsolatedAsyncioTestCase):
         transcripts = [f for f in self.sink.received if isinstance(f, TranscriptionFrame)]
         self.assertTrue(all(f.user_id == "alice_sid" for f in transcripts))
 
-    async def test_unknown_sid_text_unchanged(self):
-        await self.injector.process_frame(_make_transcription("unknown_sid", "mystery"), FrameDirection.DOWNSTREAM)
+    async def test_a_speaker_not_yet_registered_is_a_turn_under_their_identity_and_name(self):
+        """Since Pipecat 1.8 user_id is the identity. Three people starting 0.15 s apart
+        (make sim-attribution SPEAKERS=abc, Pipecat 1.14): Bob's first words arrived before
+        his connect callback registered him. They are still his turn, named "bob" for the
+        model, and bot.py resolves whom to store them under (_speaker_of)."""
+        await self.injector.process_frame(_make_transcription("bob__x1y2", "we are seeing latency"), FrameDirection.DOWNSTREAM)
 
         transcripts = [f for f in self.sink.received if isinstance(f, TranscriptionFrame)]
-        self.assertTrue(
-            any(f.text == "mystery" for f in transcripts),
-            "Unknown SID should not have label prepended",
-        )
+        self.assertEqual([f.text for f in transcripts], [turn_json(Turn("bob__x1y2", "bob", "we are seeing latency"))])
+
+    async def test_typed_chat_is_marked_as_chat(self):
+        frame = _make_transcription("alice_sid", "typed words")
+        frame.metadata["source"] = "chat"  # as bot.py's _chat_turn queues it
+        await self.injector.process_frame(frame, FrameDirection.DOWNSTREAM)
+
+        transcripts = [f for f in self.sink.received if isinstance(f, TranscriptionFrame)]
+        self.assertEqual([f.text for f in transcripts], [turn_json(Turn("alice_123", "alice_123", "typed words", "chat"))])
 
     async def test_empty_text_not_labeled(self):
         await self.injector.process_frame(_make_transcription("alice_sid", ""), FrameDirection.DOWNSTREAM)
@@ -590,10 +600,11 @@ class TestSpeakerLabelInjector(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(len(vad_frames) >= 1, "UserStartedSpeakingFrame should pass through")
 
     async def test_live_dict_update_reflected(self):
-        # Unknown SID — no label
+        # Not registered yet: labeled by the identity itself
         await self.injector.process_frame(_make_transcription("charlie_sid", "new person"), FrameDirection.DOWNSTREAM)
         before = [f for f in self.sink.received if isinstance(f, TranscriptionFrame)]
-        self.assertTrue(any(f.text == "new person" for f in before), "Before: text should be unlabeled")
+        self.assertTrue(any(f.text == turn_json(Turn("charlie_sid", "charlie_sid", "new person")) for f in before),
+                        [f.text for f in before])
 
         self.sink.received.clear()
         self.sid_map["charlie_sid"] = "charlie_789"  # live update — same dict reference
@@ -601,7 +612,7 @@ class TestSpeakerLabelInjector(unittest.IsolatedAsyncioTestCase):
         await self.injector.process_frame(_make_transcription("charlie_sid", "new person"), FrameDirection.DOWNSTREAM)
         after = [f for f in self.sink.received if isinstance(f, TranscriptionFrame)]
         self.assertTrue(
-            any(f.text == "charlie_789: new person" for f in after),
+            any(f.text == turn_json(Turn("charlie_789", "charlie_789", "new person")) for f in after),
             f"After dict update: expected labeled text, got {[f.text for f in after]}",
         )
 
@@ -624,7 +635,7 @@ class TestSpeakerLabelInjector(unittest.IsolatedAsyncioTestCase):
 
         transcripts = [f for f in self.sink.received if isinstance(f, TranscriptionFrame)]
         self.assertTrue(
-            any(f.text == "alice_123: partial" for f in transcripts),
+            any(f.text == turn_json(Turn("alice_123", "alice_123", "partial")) for f in transcripts),
             f"Interim transcription should also be labeled, got: {[f.text for f in transcripts]}",
         )
 
@@ -663,7 +674,7 @@ class TestSpeakerLabelInjector(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(labeled[0].language, "fr", "language field should survive the label-prepend")
 
     async def test_postfix_stripped_when_no_name_map(self):
-        """Without sid_to_name, label uses identity with __postfix stripped."""
+        """Without sid_to_name, the name is the identity with __postfix stripped."""
         sid_map = {"alice_sid": "Alice__abc1"}
         injector = SpeakerLabelInjector(sid_map)
         sink = _Sink()
@@ -674,7 +685,7 @@ class TestSpeakerLabelInjector(unittest.IsolatedAsyncioTestCase):
         await injector.process_frame(_make_transcription("alice_sid", "hi"), FrameDirection.DOWNSTREAM)
         transcripts = [f for f in sink.received if isinstance(f, TranscriptionFrame)]
         self.assertTrue(
-            any(f.text == "Alice: hi" for f in transcripts),
+            any(f.text == turn_json(Turn("Alice__abc1", "Alice", "hi")) for f in transcripts),
             f"Expected postfix stripped label, got: {[f.text for f in transcripts]}",
         )
 
@@ -691,7 +702,7 @@ class TestSpeakerLabelInjector(unittest.IsolatedAsyncioTestCase):
         await injector.process_frame(_make_transcription("alice_sid", "hello"), FrameDirection.DOWNSTREAM)
         transcripts = [f for f in sink.received if isinstance(f, TranscriptionFrame)]
         self.assertTrue(
-            any(f.text == "Alice: hello" for f in transcripts),
+            any(f.text == turn_json(Turn("Alice__abc1", "Alice", "hello")) for f in transcripts),
             f"Expected clean name from sid_to_name, got: {[f.text for f in transcripts]}",
         )
 
@@ -708,7 +719,7 @@ class TestSpeakerLabelInjector(unittest.IsolatedAsyncioTestCase):
         await injector.process_frame(_make_transcription("alice_sid", "fallback"), FrameDirection.DOWNSTREAM)
         transcripts = [f for f in sink.received if isinstance(f, TranscriptionFrame)]
         self.assertTrue(
-            any(f.text == "Alice: fallback" for f in transcripts),
+            any(f.text == turn_json(Turn("Alice__abc1", "Alice", "fallback")) for f in transcripts),
             f"Expected stripped-identity fallback, got: {[f.text for f in transcripts]}",
         )
 
@@ -779,6 +790,32 @@ class AdmissionControlTests(unittest.IsolatedAsyncioTestCase):
             logger.remove(sink)
         refusals = [m for m in seen if "refused" in m]
         self.assertEqual(len(refusals), 1, f"expected one refusal log, got {len(refusals)}")
+
+class TestStillSpeakingSignal(unittest.IsolatedAsyncioTestCase):
+    """VADProcessor's periodic UserSpeakingFrame reaches the interruption tracker, not the pipeline."""
+
+    async def test_reports_the_speaker_and_stays_out_of_the_pipeline(self):
+        q, heard = asyncio.Queue(), []
+        collector = _FrameCollector(q, needs_vad_wrap=True, sid="sidA", on_still_speaking=heard.append)
+        await collector.queue_frame(UserSpeakingFrame())
+        self.assertEqual(heard, ["sidA"])
+        self.assertTrue(q.empty())
+
+    async def test_a_failing_handler_does_not_break_the_audio_path(self):
+        def boom(_sid):
+            raise RuntimeError("no")
+        collector = _FrameCollector(asyncio.Queue(), needs_vad_wrap=True, sid="sidA", on_still_speaking=boom)
+        await collector.queue_frame(UserSpeakingFrame())
+
+    async def test_multi_speaker_passes_the_handler_to_each_collector(self):
+        heard = []
+        multi = MultiSpeakerSTT(lambda sid=None: _ImmediateSTT(), on_still_speaking=heard.append)
+        await multi.setup(_make_setup())
+        await multi._ensure_stt("sidA")
+        collector = multi._stts["sidA"].next
+        await collector.queue_frame(UserSpeakingFrame())
+        self.assertEqual(heard, ["sidA"])
+
 
 if __name__ == "__main__":
     unittest.main()

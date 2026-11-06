@@ -5,9 +5,9 @@ for each participant's individual audio track. MultiSpeakerSTT exploits this by
 routing each participant's frames to a dedicated STT instance, so TranscriptionFrames
 are emitted with the exact LiveKit SID in user_id — no last-write-wins race.
 
-SpeakerLabelInjector sits downstream and prepends "DisplayName: " to each
-TranscriptionFrame's text before it reaches the LLM context aggregator, giving
-the model group-conversation awareness ("Alice: what is X?").
+SpeakerLabelInjector sits downstream and turns each TranscriptionFrame's text into a
+Turn (meetlab_core.turns: speaker_id, name, text, source) before it reaches the LLM
+context aggregator, so the model knows who said what without a label to parse.
 Display names use the LiveKit token name field and strip the __randomPostfix
 added by connection-details for uniqueness.
 
@@ -55,6 +55,7 @@ from pipecat.frames.frames import (
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor, FrameProcessorSetup
 
 from meetlab_bot.participant_workers import route_audio, worker_name
+from meetlab_core.turns import Turn, turn_json
 
 
 class _FrameCollector(FrameProcessor):
@@ -77,6 +78,7 @@ class _FrameCollector(FrameProcessor):
     def __init__(self, queue: asyncio.Queue, *, needs_vad_wrap: bool = False,
                  sid: str | None = None, on_speech_onset: Callable[[str], None] | None = None,
                  on_speech_offset: Callable[[str], None] | None = None,
+                 on_still_speaking: Callable[[str], None] | None = None,
                  verdict=None, open_turn_secs: float | None = None):
         super().__init__()
         self._queue = queue
@@ -89,6 +91,7 @@ class _FrameCollector(FrameProcessor):
             self._closer = TurnCloser(queue, open_turn_secs or getattr(verdict, "wait_secs", OPEN_TURN_SECS))
         self._needs_vad_wrap = needs_vad_wrap
         self._sid = sid
+        self._on_still_speaking = on_still_speaking
         self._on_speech_onset = on_speech_onset
         self._on_speech_offset = on_speech_offset
 
@@ -113,6 +116,11 @@ class _FrameCollector(FrameProcessor):
             # But VADUserStartedSpeakingFrame is the REAL user speech onset, so
             # surface it to the interruption tracker (talk-over detection) before
             # dropping it from the main pipeline.
+            if isinstance(frame, UserSpeakingFrame) and self._on_still_speaking:
+                try:
+                    self._on_still_speaking(self._sid)
+                except Exception as e:
+                    logger.warning(f"_FrameCollector: on_still_speaking error: {e}")
             if isinstance(frame, VADUserStoppedSpeakingFrame) and self._on_speech_offset:
                 # Clears this speaker from the interruption tracker's
                 # currently-talking set. Bookkeeping only — it never interrupts.
@@ -170,11 +178,13 @@ class MultiSpeakerSTT(FrameProcessor):
     def __init__(self, stt_factory: Callable[[], FrameProcessor],
                  on_speech_onset: Callable[[str], None] | None = None,
                  on_speech_offset: Callable[[str], None] | None = None,
+                 on_still_speaking: Callable[[str], None] | None = None,
                  cap: int | None = None):
         super().__init__()
         self._stt_factory = stt_factory
         self._on_speech_onset = on_speech_onset
         self._on_speech_offset = on_speech_offset
+        self._on_still_speaking = on_still_speaking
         self._cap = cap
         self._stts: dict[str, FrameProcessor] = {}
         # Participants turned away at the cap. Held so the refusal is logged and
@@ -297,7 +307,8 @@ class MultiSpeakerSTT(FrameProcessor):
         collector = _FrameCollector(
             self._output_queue, needs_vad_wrap=needs_vad_wrap,
             sid=sid, on_speech_onset=self._on_speech_onset,
-            on_speech_offset=self._on_speech_offset, verdict=verdict,
+            on_speech_offset=self._on_speech_offset,
+            on_still_speaking=self._on_still_speaking, verdict=verdict,
         )
         tail.link(collector)
         if self._setup_params is not None:
@@ -339,13 +350,15 @@ def _stt_emits_vad_frames(stt: FrameProcessor) -> bool:
 
 
 class SpeakerLabelInjector(FrameProcessor):
-    """Prepends "DisplayName: " to TranscriptionFrame text before the LLM sees it.
+    """Writes each TranscriptionFrame's text as a Turn (turn_json) before the LLM sees it.
 
     Sits between MultiSpeakerSTT (or _SpeakerTracker) and context_aggregator.user()
-    so the LLM context accumulates group-conversation-aware messages:
-        [user] "Alice: what is the speed of light?"
-        [assistant] "..."
-        [user] "Bob: what is the boiling point of water?"
+    so the LLM context accumulates who said what (bot.py writes a turn as user_message):
+        [user] [{"speaker_id": "alice__1a", "name": "Alice", "text": "what is X?", "source": "speech"}]
+
+    Typed chat arrives marked frame.metadata["source"] = "chat" (bot.py's _chat_turn).
+    A sid not yet in the map is still a Turn, under the sid and no name; bot.py stores it
+    under the participant it resolves.
 
     Takes live references to the bot's _sid_to_identity and _sid_to_name dicts —
     no copy, so they always reflect the latest participant map.
@@ -363,14 +376,14 @@ class SpeakerLabelInjector(FrameProcessor):
     async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
         await super().process_frame(frame, direction)
         if direction == FrameDirection.DOWNSTREAM and isinstance(frame, TranscriptionFrame):
-            identity = self.sid_to_identity.get(frame.user_id)
-            if identity and frame.text:
-                if self.sid_to_name is not None:
-                    display = self.sid_to_name.get(frame.user_id) or identity.split("__")[0]
-                else:
-                    display = identity.split("__")[0]
+            # user_id is the identity (Pipecat 1.8+): name a speaker even before the connect
+            # callback registers them (three people starting together, Pipecat 1.14).
+            identity = self.sid_to_identity.get(frame.user_id) or frame.user_id or ""
+            if frame.text:
+                display = (self.sid_to_name or {}).get(frame.user_id) or identity.split("__")[0]
+                turn = Turn(identity, display, frame.text, frame.metadata.get("source", "speech"))
                 frame = TranscriptionFrame(
-                    text=f"{display}: {frame.text}",
+                    text=turn_json(turn),
                     user_id=frame.user_id,
                     timestamp=frame.timestamp,
                     language=frame.language,

@@ -8,15 +8,11 @@ import { AccessToken, AccessTokenOptions, VideoGrant } from 'livekit-server-sdk'
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerConfig, requireEnv } from '@/lib/config/server';
 import { noteRouteError } from '@/lib/concierge/event-log';
-import { completionCode } from '@/lib/completion-code';
-import { normalizeProlificId } from '@/lib/study';
-
-const COOKIE_KEY = 'random-participant-postfix';
 
 // The bot runner is not on the critical path for joining — if the config lookup
-// is slow or fails, the participant joins with no session limit rather than not
-// at all. Kept short for the same reason.
-const SESSION_LIMIT_LOOKUP_TIMEOUT_MS = 2_000;
+// is slow or fails, the participant joins with no session limit and normal audio
+// rather than not at all. Kept short for the same reason.
+const ROOM_CONFIG_LOOKUP_TIMEOUT_MS = 2_000;
 
 // 20 token requests per minute per IP — sufficient for legitimate users,
 // blocks automated token farming.
@@ -94,13 +90,15 @@ export async function GET(request: NextRequest) {
     if (participantName === null) {
       return new NextResponse('Missing required query parameter: participantName', { status: 400 });
     }
-
-    let randomParticipantPostfix = request.cookies.get(COOKIE_KEY)?.value;
-    if (!randomParticipantPostfix) {
-      randomParticipantPostfix = randomString(4);
+    // The room treats identity.startsWith('bot_') as the bot.
+    if (participantName.toLowerCase().startsWith('bot_')) {
+      return new NextResponse('participantName may not start with bot_', { status: 400 });
     }
 
-    const [participantToken, sessionLimitSeconds] = await Promise.all([
+    // Always ours: a client-chosen suffix could reuse someone's identity and kick them out.
+    const randomParticipantPostfix = randomString(4);
+
+    const [participantToken, roomConfig] = await Promise.all([
       createParticipantToken(
         {
           identity: `${participantName}__${randomParticipantPostfix}`,
@@ -111,7 +109,7 @@ export async function GET(request: NextRequest) {
         apiKey,
         apiSecret,
       ),
-      fetchSessionLimitSeconds(roomName),
+      fetchRoomConfig(roomName),
     ]);
 
     const data: ConnectionDetails = {
@@ -119,21 +117,11 @@ export async function GET(request: NextRequest) {
       roomName,
       participantToken,
       participantName,
-      sessionLimitSeconds,
-      // Keyed on the Prolific ID where there is one, so a researcher can recompute
-      // a participant's code from their Prolific export. Falls back to the display
-      // name so a room outside a study still gets a working code.
-      completionCode: completionCode(
-        roomName,
-        normalizeProlificId(metadata) ?? metadata ?? participantName,
-        apiSecret,
-      ),
+      sessionLimitSeconds: sessionLimitSecondsFromConfig(roomConfig),
+      audioMode: audioModeFromConfig(roomConfig),
     };
     return new NextResponse(JSON.stringify(data), {
-      headers: {
-        'Content-Type': 'application/json',
-        'Set-Cookie': `${COOKIE_KEY}=${randomParticipantPostfix}; Path=/; HttpOnly; SameSite=Strict; Secure; Expires=${getCookieExpirationTime()}`,
-      },
+      headers: { 'Content-Type': 'application/json' },
     });
   } catch (error) {
     noteRouteError('GET /api/connection-details', error);
@@ -145,12 +133,12 @@ export async function GET(request: NextRequest) {
 }
 
 /**
- * Ask the bot runner for this room's session limit. Never throws: any failure
- * (runner down, no BOT_RUNNER_URL, timeout, junk payload) means "no limit".
+ * Ask the bot runner for this room's config. Never throws: any failure (runner
+ * down, no BOT_RUNNER_URL, timeout, junk payload) means null.
  */
-async function fetchSessionLimitSeconds(roomName: string): Promise<number> {
+async function fetchRoomConfig(roomName: string): Promise<unknown> {
   const { botRunnerUrl, botRunnerSecret } = getServerConfig();
-  if (!botRunnerUrl) return 0;
+  if (!botRunnerUrl) return null;
 
   const base = botRunnerUrl.endsWith('/') ? botRunnerUrl : `${botRunnerUrl}/`;
   const headers: HeadersInit = botRunnerSecret
@@ -161,13 +149,18 @@ async function fetchSessionLimitSeconds(roomName: string): Promise<number> {
     const res = await fetch(`${base}config?room=${encodeURIComponent(roomName)}`, {
       headers,
       cache: 'no-store',
-      signal: AbortSignal.timeout(SESSION_LIMIT_LOOKUP_TIMEOUT_MS),
+      signal: AbortSignal.timeout(ROOM_CONFIG_LOOKUP_TIMEOUT_MS),
     });
-    if (!res.ok) return 0;
-    return sessionLimitSecondsFromConfig(await res.json());
+    return res.ok ? await res.json() : null;
   } catch {
-    return 0;
+    return null;
   }
+}
+
+/** Anything missing or unknown means today's open mic. */
+function audioModeFromConfig(payload: unknown): ConnectionDetails['audioMode'] {
+  const mode = (payload as { audio_mode?: unknown } | null)?.audio_mode;
+  return mode === 'ptt' || mode === 'baton' ? mode : 'normal';
 }
 
 function createParticipantToken(
@@ -187,10 +180,4 @@ function createParticipantToken(
   };
   at.addGrant(grant);
   return at.toJwt();
-}
-
-function getCookieExpirationTime(): string {
-  const now = new Date();
-  now.setTime(now.getTime() + 60 * 120 * 1000);
-  return now.toUTCString();
 }

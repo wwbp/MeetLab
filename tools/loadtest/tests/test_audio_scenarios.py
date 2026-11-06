@@ -136,3 +136,37 @@ class TestWavExport(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestLoadStreamedWav(unittest.TestCase):
+    """The conversation fixtures were written by a streaming encoder: their RIFF and data
+    sizes are 0xffffffff. Reading getnframes() at once asks for ~4 GB, a MemoryError in
+    the tests container (make sim-attribution)."""
+
+    def test_reads_a_wav_whose_header_sizes_are_unknown(self):
+        import os
+        import struct
+        import tempfile
+        from unittest import mock
+
+        from meetlab_loadtest.audio_scenarios import load_wav_float
+
+        pcm = float_to_pcm16(np.full(2400, 0.25, dtype=np.float32))
+        header = (b"RIFF" + struct.pack("<I", 0xFFFFFFFF) + b"WAVEfmt "
+                  + struct.pack("<IHHIIHH", 16, 1, 1, 24000, 48000, 2, 16)
+                  + b"data" + struct.pack("<I", 0xFFFFFFFF))
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
+            f.write(header + pcm)
+        self.addCleanup(os.unlink, f.name)
+
+        real = wave.Wave_read.readframes
+
+        def bounded(self, n):
+            if n > 1_000_000:
+                raise MemoryError(f"asked for {n} frames at once")
+            return real(self, n)
+
+        with mock.patch.object(wave.Wave_read, "readframes", bounded):
+            signal, sr = load_wav_float(f.name)
+        self.assertEqual(sr, 24000)
+        self.assertEqual(len(signal), 2400)

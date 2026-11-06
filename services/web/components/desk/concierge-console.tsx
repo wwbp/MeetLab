@@ -3,6 +3,7 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { Label, PageHeader, SectionHeading, Stat, buttonClass, inputClass, secondaryButtonClass, textActionClass } from '@/components/console/swiss';
 import { PrepareStudy } from '@/components/desk/prepare-study';
+import { botState } from '@/lib/concierge/bot-state';
 import type {
   ConciergeRoom,
   InviteResponse,
@@ -62,14 +63,6 @@ function formatTimestamp(value?: string): string {
   }
   return parsed.toLocaleString();
 }
-
-// The bot's state in plain words (the raw status stays under Details).
-const BOT_STATE: Record<string, string> = {
-  missing: 'No bot',
-  starting: 'Joining…',
-  connected_no_tracks: 'In the room, no audio yet',
-  connected: 'In the room',
-};
 
 function prettyStatus(value: string): string {
   return value.replace(/_/g, ' ');
@@ -334,6 +327,7 @@ export function ConciergeConsole({ tracesUrl }: { tracesUrl?: string }) {
               const botAssignedIdentity = health?.bot.assignedIdentity;
               const botIsAssigned = Boolean(botIdentity || botAssignedIdentity);
               const canStartBot = !botIsAssigned;
+              const bot = botState(health?.bot.status ?? 'missing', health?.bot.startedAt, Date.parse(health?.checkedAt ?? ''));
               return (
                 <div key={room.name} className="border-foreground/15 border-b py-4">
                   <div className="grid grid-cols-[minmax(0,2fr)_6rem_minmax(0,1.5fr)_auto] items-center gap-4">
@@ -345,7 +339,10 @@ export function ConciergeConsole({ tracesUrl }: { tracesUrl?: string }) {
                       <p className="text-muted-foreground text-xs">Created {formatTimestamp(health?.room.creationTime ?? room.creationTime)}</p>
                     </div>
                     <p className="text-sm tabular-nums">{health?.room.numParticipants ?? room.numParticipants ?? 0}</p>
-                    <p className="text-sm">{BOT_STATE[health?.bot.status ?? 'missing']}</p>
+                    <div className="text-sm">
+                      <p>{bot.label}</p>
+                      {bot.hint && <p className="text-signal text-xs">{bot.hint}</p>}
+                    </div>
                     <div className="flex items-center justify-end gap-3">
                       {canStartBot ? (
                         <button className={buttonClass + ' px-3 py-1.5'} disabled={runningAction === `start-bot-${room.name}`} onClick={() => handleStartBot(room.name)}>

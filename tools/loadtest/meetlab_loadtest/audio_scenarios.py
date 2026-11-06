@@ -117,5 +117,6 @@ def load_wav_float(path: str) -> tuple[np.ndarray, int]:
     """Load a mono 16-bit WAV file as (float32 signal, sample_rate)."""
     with wave.open(path, "rb") as wf:
         sr = wf.getframerate()
-        raw = wf.readframes(wf.getnframes())
+        # Read to the end in chunks: a streamed WAV's header says 0xffffffff bytes.
+        raw = b"".join(iter(lambda: wf.readframes(65536), b""))
     return pcm16_to_float(raw), sr

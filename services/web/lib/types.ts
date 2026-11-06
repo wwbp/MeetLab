@@ -14,6 +14,6 @@ export type ConnectionDetails = {
   participantToken: string;
   /** Advisory session cap for this room, in seconds. 0 = unlimited. */
   sessionLimitSeconds: number;
-  /** This room's audio mode. Nothing acts on it yet (docs/audio-modes-test-plan.md). */
+  /** This room's audio mode. ptt and baton gate the mic (`room-floor.ts`). */
   audioMode: 'normal' | 'ptt' | 'baton';
 };

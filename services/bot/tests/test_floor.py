@@ -227,6 +227,50 @@ class TestBotHolds(unittest.TestCase):
         self.assertIsNone(floor.holder)
 
 
+class TestTimeouts(unittest.TestCase):
+    """The event log's `timeout`: each hold that went silent, reported once."""
+
+    def test_silent_baton_holder_times_out_once(self):
+        floor = Floor("baton")
+        floor.press(0.0, "a")
+        self.assertEqual(floor.timeouts(Floor.IDLE_SECS - 0.1), [])
+        self.assertEqual(floor.timeouts(Floor.IDLE_SECS), ["a"])
+        self.assertEqual(floor.timeouts(Floor.IDLE_SECS + 1), [])
+
+    def test_silent_ptt_hold_times_out_once_and_again_after_speaking(self):
+        floor = Floor("ptt")
+        floor.press(0.0, "a")
+        self.assertEqual(floor.timeouts(Floor.IDLE_SECS), ["a"])
+        self.assertEqual(floor.timeouts(Floor.IDLE_SECS + 1), [])
+        floor.heard(20.0, "a")
+        self.assertEqual(floor.timeouts(20.0 + Floor.IDLE_SECS), ["a"])
+
+    def test_a_release_is_not_a_timeout(self):
+        floor = Floor("ptt")
+        floor.press(0.0, "a")
+        floor.release(1.0, "a")
+        self.assertEqual(floor.timeouts(Floor.IDLE_SECS + 1), [])
+
+    def test_a_ptt_release_after_a_timeout_clears_it(self):
+        floor = Floor("ptt")
+        floor.press(0.0, "a")
+        floor.timeouts(Floor.IDLE_SECS)
+        floor.release(16.0, "a")
+        floor.press(17.0, "a")
+        self.assertEqual(floor.timeouts(17.0 + Floor.IDLE_SECS), ["a"])
+
+
+class TestWhoIsWhere(unittest.TestCase):
+    def test_queue_is_in_order_and_holds_is_per_person(self):
+        floor = Floor("baton")
+        floor.press(0.0, "a")
+        floor.press(0.1, "b")
+        floor.press(0.2, "c")
+        self.assertEqual(floor.queue, ["b", "c"])
+        self.assertTrue(floor.holds("a"))
+        self.assertFalse(floor.holds("b"))
+
+
 class TestModes(unittest.TestCase):
     def test_normal_has_no_floor(self):
         """Normal rooms keep today's code path: nothing may build a Floor for them."""

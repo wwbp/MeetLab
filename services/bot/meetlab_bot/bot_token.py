@@ -14,6 +14,7 @@ def bot_token(room_name: str, identity: str, key: str, secret: str, ttl_minutes:
         .with_grants(api.VideoGrants(
             room_join=True, room=room_name,
             can_publish=True, can_subscribe=True, can_publish_data=True, agent=True,
+            can_update_own_metadata=True,  # floor.holder and floor.queue (floor_room.py)
         ))
         .with_ttl(timedelta(minutes=ttl_minutes))
     )

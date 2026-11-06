@@ -16,6 +16,21 @@ It survives restarts and deploys, which the previous in-memory version did not.
 | **LiveKit** (lost recording) | `egress_ended` with a failed or aborted egress | **error** |
 | **bot runner / bots** | any `logger.warning` or `logger.error` anywhere in the Python code | warning / error |
 
+### Audio modes
+
+Push-to-talk and baton rooms record who had the floor (`services/bot/meetlab_bot/floor_room.py`).
+All are info, with `who` (the participant's identity) and `at` (when it happened, Unix seconds,
+as the row itself is written a moment later).
+
+| Event | Mode | When |
+|---|---|---|
+| `floor.press` | ptt | A mic opened |
+| `floor.claim` | baton | A person asked for the baton |
+| `floor.grant` | baton | They got it, at once or from the line |
+| `floor.deny` | baton | They joined the line |
+| `floor.release` | both | A person let go, or left, holding or in line |
+| `floor.timeout` | both | 15 s of silence: a baton taken, or a ptt hold no longer blocking the bot. `who` may be the bot |
+
 ### Group start links
 
 The matchmaker (`services/api/meetlab_api/matchmaker.py`, `links.py`) records four events of

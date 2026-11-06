@@ -26,6 +26,8 @@ class Floor:
         self._active = {}  # who: time last heard. ptt: everyone holding. baton: the holder.
         self._queue = []  # baton only; not empty only while someone holds
         self._granted = []  # taken from the queue, until tick() reports them
+        self._timed_out = []  # baton: the baton taken for silence, until timeouts() reports them
+        self._silent = set()  # ptt: holds timeouts() has reported, until they speak or let go
 
     @property
     def holder(self):
@@ -36,6 +38,14 @@ class Floor:
     def waiting(self):
         """Someone was denied and still holds: the bot's cue to release after its sentence."""
         return bool(self._queue)
+
+    @property
+    def queue(self):
+        """Who waits for the baton, in order."""
+        return list(self._queue)
+
+    def holds(self, who):
+        return who in self._active
 
     def press(self, t, who):
         """True if who may speak now. False means who waits in line; tick() reports the grant."""
@@ -51,6 +61,7 @@ class Floor:
 
     def release(self, t, who):
         """who let go or left: out of the line, or off the floor. Grants the next."""
+        self._silent.discard(who)
         if who in self._queue:
             self._queue.remove(who)
         elif self._active.pop(who, None) is not None:
@@ -63,6 +74,7 @@ class Floor:
         self._expire(t)
         if who in self._active:
             self._active[who] = t
+            self._silent.discard(who)
 
     def idle(self, t):
         """Nobody holds, or every hold has been silent for IDLE_SECS. Changes nothing."""
@@ -88,8 +100,19 @@ class Floor:
         granted, self._granted = self._granted, []
         return granted
 
+    def timeouts(self, t):
+        """Holds that went silent for IDLE_SECS since the last call, each once."""
+        self._expire(t)
+        timed_out, self._timed_out = self._timed_out, []
+        if not self._baton:
+            timed_out = [who for who, last in self._active.items()
+                         if t - last >= self.IDLE_SECS and who not in self._silent]
+            self._silent.update(timed_out)
+        return timed_out
+
     def _expire(self, t):
         if self._baton and self._active and self.idle(t):
+            self._timed_out.extend(self._active)
             self._active.clear()
             self._grant_next(t)
 

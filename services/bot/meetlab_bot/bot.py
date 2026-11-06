@@ -60,6 +60,7 @@ from meetlab_core.db.models import Conversation, MediaFile, Speaker, Utterance
 from meetlab_core.turns import (
     FORMAT_INSTRUCTIONS, RESPONSE_FORMAT, BotReply, assistant_message, parse_turns, user_message,
 )
+from meetlab_bot.floor_room import FloorRoom
 from meetlab_bot.interruption import InterruptionTracker
 from meetlab_bot.study_support import closing_due, speaker_meta
 from meetlab_bot.multi_speaker_stt import MultiSpeakerSTT, SpeakerLabelInjector
@@ -578,19 +579,42 @@ async def _bot(runner_args: LiveKitRunnerArguments):
         if task_ is not None:
             await task_.queue_frame(frame, direction)
 
-    _on_speech_onset = make_speech_onset_handler(interruptions, _enqueue_frame)
+    # Who may speak, in ptt and baton rooms (floor_room.py). Normal rooms have none.
+    floor = None if bot_config.audio_mode == "normal" else FloorRoom(
+        bot_config.audio_mode, bot_identity=runner_args.bot_identity, room_name=runner_args.room_name,
+        conv_id=runner_args.session_id, enqueue=_enqueue_frame,
+        vad_stop_secs=(bot_config.stt_endpointing_ms or _DEFAULT_ENDPOINTING_MS) / 1000,
+        now=lambda: time.monotonic(),  # looked up per call: the clock tests replace
+    )
+
+    if floor:
+        floor.listen_from_connect(transport._client)
+
+    _yield_to_onset = make_speech_onset_handler(interruptions, _enqueue_frame)
+
+    async def _on_speech_onset(sid: str) -> None:
+        if floor:
+            floor.heard(sid)
+        await _yield_to_onset(sid)
 
     async def _on_speech_offset(sid: str) -> None:
+        if floor:
+            floor.quiet(sid)
         # Clears the speaker so bot_started's already-speaking check stays honest.
         # Never interrupts anything itself.
         interruptions.user_offset(time.monotonic(), sid)
+
+    def _on_still_speaking(sid: str) -> None:
+        if floor:
+            floor.heard(sid)
+        interruptions.user_speaking(time.monotonic(), sid)
 
     multi_stt = MultiSpeakerSTT(
         _stt_factory,
         on_speech_onset=_on_speech_onset,
         on_speech_offset=_on_speech_offset,
         # Without this, anyone talking past 3.2 s reads as silent (interruption.py).
-        on_still_speaking=lambda sid: interruptions.user_speaking(time.monotonic(), sid),
+        on_still_speaking=_on_still_speaking,
     )
     logger.info(
         f"STT: model={bot_config.stt_model} mode=per-participant delay={bot_config.stt_delay}"
@@ -775,11 +799,14 @@ async def _bot(runner_args: LiveKitRunnerArguments):
         _addressed_to[0] = reply.addressed_to
 
     from meetlab_bot.reply_stream import ReplyStreamer  # speaks only the reply of the model's JSON
+    # After the recorder, so it keeps everyone's audio; before the bot's, so it holds what was played.
+    mic_gate, reply_gate, played = ([floor.mic_gate], [floor.reply_gate], [floor.played]) if floor else ([], [], [])
     pipeline = Pipeline(
         [
             transport.input(),
             _AudioTimestampRecorder(),
             audio_recorder,
+            *mic_gate,
             multi_stt,
             _SpeakerTracker(),
             SpeakerLabelInjector(_sid_to_identity, _sid_to_name),
@@ -787,9 +814,11 @@ async def _bot(runner_args: LiveKitRunnerArguments):
             llm,
             ReplyStreamer(_on_reply),
             tts,
+            *reply_gate,
             bot_audio_recorder,
             _TTSFirstTimer(),
             transport.output(),
+            *played,
             context_aggregator.assistant(),
         ]
     )
@@ -1042,6 +1071,8 @@ async def _bot(runner_args: LiveKitRunnerArguments):
 
     @transport.event_handler("on_connected")
     async def on_connected(transport):
+        if floor:
+            floor.connected()
         # Everyone already here: no on_participant_connected will come for them.
         for p in list(transport._client.room.remote_participants.values()):
             if not p.identity.startswith("bot_"):
@@ -1124,6 +1155,8 @@ async def _bot(runner_args: LiveKitRunnerArguments):
         if _current_speaker_sid[0] == participant_id:
             _current_speaker_sid[0] = None
         await multi_stt.remove_participant(participant_id)
+        if floor:
+            floor.disconnected(participant_id)
         logger.info(f"Participant disconnected: {identity}")
 
     @transport.event_handler("on_disconnected")
@@ -1139,6 +1172,8 @@ async def _bot(runner_args: LiveKitRunnerArguments):
         """Speak a fixed line and store it as the bot's turn. Its words reach Pipecat only
         with the audio, after Pipecat has closed the turn, so it would be missing from the
         transcript (1.12 stores nothing; 1.4 kept only the first word)."""
+        if floor:
+            floor.saying(text)
         await task.queue_frame(TTSSpeakFrame(text))
         utt_id = _new_id()
         try:
@@ -1186,6 +1221,7 @@ async def _bot(runner_args: LiveKitRunnerArguments):
         await task.cancel()
 
     presence_task = asyncio.create_task(leave_when_empty())
+    floor_task = asyncio.create_task(floor.run()) if floor else None
     try:
         await runner.add_workers(task)
         await runner.run()
@@ -1201,6 +1237,8 @@ async def _bot(runner_args: LiveKitRunnerArguments):
     finally:
         heartbeat_task.cancel()
         presence_task.cancel()
+        if floor_task:
+            floor_task.cancel()
         # Flush any audio still buffered (speakers who never fired a disconnect, or
         # the final drain). Shielded so end-of-call cancellation can't abort a write
         # mid-flight.

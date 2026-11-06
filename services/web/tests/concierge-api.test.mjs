@@ -127,10 +127,8 @@ async function deleteRoom(roomName) {
   createdRooms.delete(roomName);
 }
 
-// LiveKit's DeleteRoom API returns before async cleanup completes, so listRooms
-// can still show the deleted room for a short window. In CI the bot lingers
-// longer because it blocks on external-service connection timeouts (fake keys)
-// before fully disconnecting from LiveKit after ROOM_DELETED — use 30s.
+// LiveKit closes the room before DeleteRoom returns; this only absorbs listRooms lag.
+// A room that stays listed was recreated by a join (see the delete-cleanup test).
 async function waitForRoomGone(roomName) {
   await waitFor(
     async () => {
@@ -389,17 +387,22 @@ test('room delete clears bot claim and supports clean recreate/start cycle', asy
   const firstBotIdentity = firstStart.json?.request?.botIdentity;
   assert.ok(firstBotIdentity, `missing first bot identity: ${firstStart.text}`);
 
-  // Wait for the bot to actually join the LiveKit room before deleting. If we
-  // delete before it connects, the bot joins a non-existent room, which
-  // LiveKit --dev auto-creates, causing the subsequent createRoom to 409.
-  // Once the bot is in the room, deleteRoom sends it a terminal ROOM_DELETED
-  // disconnect, which the LiveKit SDK does not retry.
+  // Wait until the bot has finished joining: listed AND its audio track published (the
+  // last step of Pipecat's LiveKit connect()). A bot is listed as soon as LiveKit marks it
+  // active, while connect() is still publishing; a ROOM_DELETED arriving in that window
+  // (CI, 2026-10-27, twice: 33 ms and 50 ms after "participant active") makes the LiveKit
+  // client rejoin 15-18 ms later, which auto-creates the room again. The rejoined bot,
+  // already stopped, leaves ~20 s later and the room's 20 s departure timeout outlasts
+  // waitForRoomGone. Once connected, ROOM_DELETED is terminal and nothing rejoins.
   await waitFor(
     async () => {
       const { response, json } = await jsonRequest(
         `/api/concierge/rooms/${encodeURIComponent(roomName)}/bots`
       );
-      return response.status === 200 && json?.bots?.some((b) => b.identity === firstBotIdentity);
+      return (
+        response.status === 200 &&
+        json?.bots?.some((b) => b.identity === firstBotIdentity && b.trackCount > 0)
+      );
     },
     // Bots are containers locally and in CI (BOT_DISPATCHER=docker, #106): a fresh
     // Python process loading its models, which on a 2-vCPU CI runner can pass 15 s.

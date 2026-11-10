@@ -30,6 +30,7 @@ as the row itself is written a moment later).
 | `floor.deny` | baton | They joined the line |
 | `floor.release` | both | A person let go, or left, holding or in line |
 | `floor.timeout` | both | 15 s of silence: a baton taken, or a ptt hold no longer blocking the bot. `who` may be the bot |
+| `floor.sentence_end` | baton | The bot was heard to the end of a sentence. `who` is the bot |
 
 ### Group start links
 

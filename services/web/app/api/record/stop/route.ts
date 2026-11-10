@@ -10,9 +10,9 @@ export async function GET(req: NextRequest) {
     return new NextResponse('Missing roomName parameter', { status: 400, headers: noStoreHeaders() });
   }
 
-  const { botRunnerUrl, botRunnerSecret, livekitApiSecret } = getServerConfig();
+  const { botRunnerUrl, botRunnerSecret, consoleSessionSecret } = getServerConfig();
   // F10: only a logged-in console session (lib/record-auth.ts).
-  if (!livekitApiSecret || !(await mayControlRecording(req, livekitApiSecret))) {
+  if (!consoleSessionSecret || !(await mayControlRecording(req, consoleSessionSecret))) {
     return new NextResponse('Unauthorized', { status: 401, headers: noStoreHeaders() });
   }
   if (!botRunnerUrl) {

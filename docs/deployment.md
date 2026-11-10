@@ -11,6 +11,7 @@ steps a **person** has to do because the pipeline is deliberately not allowed to
 |---|---|
 | **Production** | <https://meet.wwbp.org>: the console at `/`, rooms at `/rooms/<name>` |
 | **Console login** | SSM parameter `/meetlab-v2/prod/CONSOLE_PASSWORD` |
+| **Console session key** | SSM parameter `/meetlab-v2/prod/CONSOLE_SESSION_SECRET`: signs the login cookie (its own key: bots and LiveKit Cloud hold `LIVEKIT_API_SECRET`) |
 | **Logs** | CloudWatch, `/meetlab-v2/prod/<meet\|agent-runner\|bot\|stt-cpu>` |
 | **Secrets** | SSM `/meetlab-v2/prod/*`, never in the repo or Terraform state |
 | **Code** | `main`; v1 is the tag `v1.0.0` (archive branch `v1`, never merge into it) |
@@ -112,6 +113,19 @@ Terraform or in the repo. Production's are in place; to fill a fresh environment
 ```bash
 infra/seed-secrets.sh prod
 ```
+
+**A new secret, before releasing it.** When a release adds a parameter to a task (the first
+was `CONSOLE_SESSION_SECRET`), create it **before** pushing the release tag, or ECS can't start
+meet's tasks. Re-running `infra/seed-secrets.sh prod` does it: it keeps every parameter that
+exists and generates the missing ones (random 32 bytes, SecureString). By hand:
+
+```bash
+aws ssm put-parameter --region us-east-1 --name /meetlab-v2/prod/CONSOLE_SESSION_SECRET \
+  --type SecureString --value "$(openssl rand -hex 32)"
+```
+
+After that release, everyone logs in to the console again once (old cookies were signed with
+the previous key).
 
 ### 3. The video-recording key for LiveKit
 

@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 beforeEach(() => {
   delete (globalThis as Record<string, unknown>)['__meetlab_rate_limit__'];
   vi.stubEnv('CONSOLE_PASSWORD', 'right-password');
-  vi.stubEnv('LIVEKIT_API_SECRET', 'secret');
+  vi.stubEnv('CONSOLE_SESSION_SECRET', 'secret');
 });
 afterEach(() => {
   vi.unstubAllEnvs();

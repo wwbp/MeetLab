@@ -177,6 +177,7 @@ services:
     environment:
       - BOT_RUNNER_URL=http://agent-runner:7860/
       - BOT_RUNNER_SECRET=${BOT_RUNNER_SECRET:-changeme}
+      - CONSOLE_SESSION_SECRET=${CONSOLE_SESSION_SECRET:-dev-console-session}
     volumes:
       - ../services/web:/app:cached
       # The runner contract lib/matchmaking-client.test.ts reads (same relative path as on the host).

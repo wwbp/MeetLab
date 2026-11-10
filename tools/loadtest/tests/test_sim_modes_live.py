@@ -4,12 +4,13 @@ import array
 import asyncio
 import contextlib
 import http.server
+import io
 import threading
 import unittest
 
 from meetlab_loadtest.sim_modes import IDLE_S, LONG_HOLD_S, cells, hold_timing, run_list, verdict
 from meetlab_loadtest.conversation_script import CONVERSATIONS
-from meetlab_loadtest.sim_modes_live import (MATRIX_ATTEMPTS, PLAYS, Run, _one, attempt_usd, budget, clip_pcm, line_for,
+from meetlab_loadtest.sim_modes_live import (MATRIX_ATTEMPTS, PLAYS, Run, _one, _print_result, attempt_usd, budget, clip_pcm, line_for,
                                              refuse_unless_local, rerun_until_valid, stt_down)
 
 GENERATING_S, SENTENCE_S, REPLY_S = 1.2, 2.0, 5.0
@@ -433,3 +434,13 @@ class SttDown(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PrintResult(unittest.TestCase):
+    def test_invalid_says_which_infrastructure_signal(self):
+        # A single run keeps nothing on disk, so the printout is the only record of why it was invalid.
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            _print_result({"status": "invalid", "scenario": "turn_taking", "people": 1, "mode": "ptt",
+                           "problems": [], "timeline": {"infra": ["lag"]}})
+        self.assertIn("lag", out.getvalue())

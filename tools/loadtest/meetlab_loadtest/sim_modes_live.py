@@ -506,7 +506,9 @@ async def _attempt(run) -> dict:
 
 
 def _print_result(result):
-    print(f"[sim-modes] {result['status'].upper()} {result['scenario']} {result['people']}p {result['mode']}", flush=True)
+    infra = result.get("timeline", {}).get("infra")
+    why = f" ({', '.join(infra)})" if result["status"] == "invalid" and infra else ""
+    print(f"[sim-modes] {result['status'].upper()}{why} {result['scenario']} {result['people']}p {result['mode']}", flush=True)
     for problem in result["problems"]:
         print(f"  {problem}", flush=True)
 

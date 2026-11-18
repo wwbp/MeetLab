@@ -12,13 +12,26 @@ from meetlab_core.turns import BotReply, Turn, assistant_message, user_message
 DEATHS = ("silent", "crashed")    # sessions.ENDS events where the bot died, not ended
 WINDOW = timedelta(minutes=2)     # a death older than this is history, not an outage
 MAX_REJOINS = 3                   # a bot that keeps dying stops being restarted
+ARRIVAL_GRACE = timedelta(minutes=15)  # how long a group link's people are awaited: as long as
+                                       # a bot waits for the first one (BOT_ARRIVAL_GRACE_SECONDS)
 
 
-def rejoin_due(row, chain_length: int, humans: int, room_running: bool, now) -> bool:
-    """Should this ended session's room get a new bot that continues it?"""
+def awaited_until(match, now):
+    """Until when a group link's room (its Match; None for any other room) still expects its
+    people: from the match forming, through the ready check and countdown, to ARRIVAL_GRACE
+    after they were sent to the room (starts_at). None once the match is closed."""
+    if match is None or match.closed_at is not None:
+        return None
+    return (match.starts_at or now) + ARRIVAL_GRACE
+
+
+def rejoin_due(row, chain_length: int, humans: int, room_running: bool, now, awaited_until=None) -> bool:
+    """Should this ended session's room get a new bot that continues it? Someone must be in the
+    room, or still be on the way to it (awaited_until, above)."""
     return ((row.meta or {}).get("ended_by") in DEATHS
             and row.ended_at is not None and now - row.ended_at <= WINDOW
-            and humans > 0 and not room_running
+            and (humans > 0 or (awaited_until is not None and now <= awaited_until))
+            and not room_running
             and chain_length <= MAX_REJOINS)
 
 
@@ -43,7 +56,9 @@ def context_messages(turns, names: dict) -> list[dict]:
 
 async def load_resume(db, row) -> dict | None:
     """For a session that resumes a dead one: the conversation so far as LLM messages, and the
-    seconds since the conversation began (the session-limit clock keeps running). None otherwise."""
+    seconds since the conversation began (the session-limit clock keeps running). None otherwise,
+    and when nothing was said yet (a bot that died before its group arrived): the new bot
+    starts fresh, with its greeting."""
     from datetime import datetime, timezone
 
     from sqlalchemy import select
@@ -57,6 +72,8 @@ async def load_resume(db, row) -> dict | None:
     ids = chain(rows, row.id)[:-1]  # the dead sessions before this one
     turns = (await db.execute(select(Utterance).where(Utterance.conv_id.in_(ids))
                               .order_by(Utterance.ts))).scalars().all()
+    if not turns:
+        return None
     speakers = (await db.execute(select(Speaker).where(
         Speaker.id.in_({t.speaker_id for t in turns})))).scalars().all()
     names = {s.id: (s.meta or {}).get("display_name") for s in speakers}

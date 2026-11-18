@@ -7,7 +7,9 @@ import unittest
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace as Row
 
-from meetlab_core.rejoin import MAX_REJOINS, WINDOW, chain, context_messages, rejoin_due  # noqa: E402
+from meetlab_core.rejoin import (  # noqa: E402
+    ARRIVAL_GRACE, MAX_REJOINS, WINDOW, awaited_until, chain, context_messages, rejoin_due,
+)
 from meetlab_core.turns import BotReply, Turn, assistant_message, user_message
 
 NOW = datetime(2026, 10, 5, 12, 0, tzinfo=timezone.utc)
@@ -36,6 +38,22 @@ class TestDue(unittest.TestCase):
 
     def test_an_old_death_is_left_alone(self):
         self.assertFalse(rejoin_due(session("s1", ago=WINDOW + timedelta(seconds=1)), 1, 2, False, NOW))
+
+    def test_a_group_still_on_its_way_gets_its_bot_back_before_anyone_arrives(self):
+        # A group link's bot starts when the match forms; one that dies before the people
+        # arrive (ready check, countdown, microphone page) is replaced while they are awaited.
+        later, earlier = NOW + timedelta(seconds=1), NOW - timedelta(seconds=1)
+        self.assertTrue(rejoin_due(session("s1", "crashed"), 1, humans=0, room_running=False, now=NOW, awaited_until=later))
+        self.assertFalse(rejoin_due(session("s1", "crashed"), 1, humans=0, room_running=False, now=NOW, awaited_until=earlier))
+        self.assertFalse(rejoin_due(session("s1", "stopped"), 1, 0, False, NOW, awaited_until=later))
+        self.assertFalse(rejoin_due(session("s1"), MAX_REJOINS + 1, 0, False, NOW, awaited_until=later))
+
+    def test_a_group_is_awaited_from_its_match_until_the_arrival_grace_after_its_start(self):
+        start = NOW - timedelta(minutes=5)
+        self.assertEqual(awaited_until(Row(closed_at=None, starts_at=None), NOW), NOW + ARRIVAL_GRACE)  # ready check
+        self.assertEqual(awaited_until(Row(closed_at=None, starts_at=start), NOW), start + ARRIVAL_GRACE)
+        self.assertIsNone(awaited_until(Row(closed_at=NOW, starts_at=start), NOW))  # the match is over
+        self.assertIsNone(awaited_until(None, NOW))  # not a group link's room
 
     def test_a_bot_that_keeps_dying_stops_being_restarted(self):
         self.assertTrue(rejoin_due(session("s1"), MAX_REJOINS, 2, False, NOW))

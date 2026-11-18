@@ -9,7 +9,7 @@ from types import SimpleNamespace
 
 from meetlab_api.matchmaker import (
     CreateMatch, Event, MatchState, StopRoom, TicketState, UpdateMatch, UpdateTicket,
-    pick_setting, step, ticket_view,
+    SETUP_GIVE_UP_S, pick_setting, step, ticket_view,
 )
 
 T0 = datetime(2026, 11, 2, 15, 0, tzinfo=timezone.utc)
@@ -237,6 +237,34 @@ class PlacedRuleTest(unittest.TestCase):
     def test_size_one_found_ticket_is_placed(self):
         changes = run(link(1, delay_s=0), [ticket("a", "found", room="r0")], [match("r0", starts_at=T0, session_id="s")])
         self.assertEqual(ticket_updates(changes), {"a": {"state": "placed", "placed_at": T0}})
+
+
+class SetupLimitRuleTest(unittest.TestCase):
+    """A room still not set up SETUP_GIVE_UP_S after its start: the group is told, not left on
+    "Setting up the room…" for ever."""
+
+    def test_a_setup_that_keeps_failing_ends_the_match(self):
+        tickets = [ticket("a", "ready", room="r0"), ticket("b", "ready", room="r0")]
+        now = T0 + s(SETUP_GIVE_UP_S)
+        changes = run(link(2), tickets, [match("r0", starts_at=T0)], now=now)
+        self.assertEqual(ticket_updates(changes), {"a": {"state": "expired"}, "b": {"state": "expired"}})
+        self.assertIn(UpdateMatch("r0", {"closed_at": now}), changes)
+        self.assertIn(StopRoom("r0"), changes)  # a setup still under way must not leave a bot behind
+        self.assertIn(Event("match_setup_failed", {"room": "r0", "tickets": ["a", "b"]}, "error"), changes)
+        view = ticket_view(ticket("a", "expired", room="r0"), None, 0, link(2), now)
+        self.assertEqual(view, {"kind": "expired"})  # a view the waiting page already has
+
+    def test_not_before_the_limit_and_never_a_room_that_was_set_up(self):
+        tickets = [ticket("a", "ready", room="r0"), ticket("b", "ready", room="r0")]
+        self.assertEqual(run(link(2), tickets, [match("r0", starts_at=T0)], now=T0 + s(SETUP_GIVE_UP_S - 1)), [])
+        changes = run(link(2), tickets, [match("r0", starts_at=T0, session_id="s1")], now=T0 + s(SETUP_GIVE_UP_S))
+        self.assertEqual(ticket_updates(changes), {"a": {"state": "placed", "placed_at": T0},
+                                                   "b": {"state": "placed", "placed_at": T0}})
+
+    def test_the_ready_check_is_not_cut_short(self):
+        tickets = [ticket("a", "ready", room="r0"), ticket("b", "found", room="r0")]
+        m = match("r0", deadline=T0 + s(600))
+        self.assertEqual(run(link(2), tickets, [m], now=T0 + s(599)), [])
 
 
 class DoneRuleTest(unittest.TestCase):

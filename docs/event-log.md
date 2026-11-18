@@ -33,18 +33,20 @@ as the row itself is written a moment later).
 
 ### Group start links
 
-The matchmaker (`services/api/meetlab_api/matchmaker.py`, `links.py`) records four events of
-its own. The warnings are signs a study is stuck; researchers read them in
-`docs/study-support.md` §4.
+The matchmaker (`services/api/meetlab_api/matchmaker.py`, `links.py`) records five events of
+its own. The warnings are signs a study is stuck, the error is a group that lost its meeting;
+researchers read the warnings in `docs/study-support.md` §4.
 
 | Event | Severity | When | Payload |
 |---|---|---|---|
 | `match_formed` | info | A link put enough waiting participants together: a new room | `room`, `size` (people in it), `scope` (its bot setting), `tickets` (their ticket IDs) |
 | `ready_failed` | **warning** | A group's time to confirm ran out with someone not ready; the room is closed | `room`, `removed` (tickets that missed it), `requeued` (tickets back in line, place kept) |
+| `match_setup_failed` | **error** | A group's room was still not set up 60 seconds after its start (the bot could not be started); the group is closed and its members see "We could not form a group in time" | `room`, `tickets` (the members' ticket IDs) |
 | `ticket_expired` | **warning** | A participant waited the link's full max wait with no group | `ticket` |
 | `link_stopped` | **warning** | A link stopped itself: a bot setting in its pool no longer exists | `link_id`, `missing` (the setting names) |
 
-`match_formed` and `ready_failed` carry the room, so the console's room filter finds them;
+`match_formed`, `ready_failed` and `match_setup_failed` carry the room, so the console's room
+filter finds them;
 the other two have none. A ticket ID joins to `tickets.id` (who it was: `participant_id`).
 
 The last row of the first table is the important one: it is a *catch-all*. Nobody has to remember to

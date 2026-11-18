@@ -16,6 +16,7 @@ recordings/
 
 # soak run artifacts
 soak-results-*.json
+sim-modes-results.jsonl
 
 # The conversation load harness's speech (tools/loadtest/meetlab_loadtest/generate_conversation_audio.py) is
 # committed: every load test, on every stack, must hear exactly the same audio.

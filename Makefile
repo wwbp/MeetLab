@@ -18,7 +18,7 @@ ALEMBIC = alembic -c packages/core/alembic.ini
 # cross-service integration and system tests from the repo root.
 UNIT_SUITES = packages/core services/api services/bot tools/loadtest
 
-.PHONY: test-static test-config-parity up down start stop logs migrate migration test test-unit test-integration test-infra test-stt-cpu test-image test-dead-code scan scan-agent-runner scan-meet sim-attribution sim-group sim-modes-check sim-modes sim-modes-matrix
+.PHONY: test-static test-config-parity up down start stop logs migrate migration test test-unit test-integration test-infra test-stt-cpu test-image test-dead-code scan scan-agent-runner scan-meet sim-attribution sim-group sim-modes-check sim-modes sim-modes-matrix sim-modes-stack
 
 up:
 	$(COMPOSE) build bot tests
@@ -164,15 +164,27 @@ sim-group:
 	$(COMPOSE) up -d --wait transport-server agent-runner
 	$(COMPOSE) run --rm --no-deps -T -e GROUP_LINK=1 tests python -m meetlab_loadtest.sim_attribution
 
-# Audio modes (docs/audio-modes-test-plan.md, Simulations). Verdicts on handwritten timelines: $0,
-# seconds, no stack; standard library, so on the host. test-unit runs the same tests (discovery).
+# Audio modes (docs/audio-modes-test-plan.md, Simulations). Verdicts on handwritten timelines and the
+# driver on a pretend room: $0, seconds, no stack; standard library, so on the host. test-unit runs
+# the same tests (discovery).
 sim-modes-check:
-	cd tools/loadtest && python3 -m unittest tests.test_sim_modes
+	cd tools/loadtest && python3 -m unittest tests.test_sim_modes tests.test_sim_modes_live
 
-# Refuse until the live driver exists (sim_modes.py's docstring says what it needs).
+# PAID: real LLM and voice. The driver says what to expect before it starts; refusals spend nothing.
 sim-modes:
-	@echo "sim-modes: refused, nothing ran. No live driver yet: it waits for the bot and room-page wiring."; exit 1
+	@[ -n "$(MODE)" ] && [ -n "$(SCENARIO)" ] && [ -n "$(PEOPLE)" ] || { echo "sim-modes: refused, nothing ran. Needs MODE= SCENARIO= PEOPLE= [REPEAT=]: docs/audio-modes-test-plan.md."; exit 1; }
+	$(MAKE) sim-modes-stack
+	$(COMPOSE) run --rm --no-deps -T -e MODE=$(MODE) -e SCENARIO=$(SCENARIO) -e PEOPLE=$(PEOPLE) -e REPEAT=$(REPEAT) tests python -m meetlab_loadtest.sim_modes_live
 
 sim-modes-matrix:
 	@[ -n "$(COST_OK)" ] || { echo "sim-modes-matrix: refused, nothing ran. Needs COST_OK=<usd>: estimated \$$4-10 with OpenAI voice, \$$6-50 with ElevenLabs, ~6.5 h."; exit 1; }
-	@echo "sim-modes-matrix: refused, nothing ran. No live driver yet: it waits for the bot and room-page wiring."; exit 1
+	$(MAKE) sim-modes-stack
+	$(COMPOSE) run --rm --no-deps -T -e COST_OK=$(COST_OK) tests python -m meetlab_loadtest.sim_modes_live
+
+# Bots and the tests container read the repo through their mounts; the runner needs a restart to.
+sim-modes-stack:
+	$(COMPOSE) build bot tests
+	$(COMPOSE) up -d --wait transport-server agent-runner
+	$(COMPOSE) restart agent-runner
+	$(COMPOSE) up -d --wait agent-runner
+	$(COMPOSE) exec -T agent-runner $(ALEMBIC) upgrade head

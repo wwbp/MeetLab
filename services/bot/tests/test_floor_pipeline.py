@@ -811,6 +811,31 @@ class FloorRoomTest(golden.NormalRoomTest):
             ("floor.timeout", "bob"),
         ])
 
+    async def test_baton_logs_where_the_bots_sentences_end(self):
+        """When a sentence has been heard to its end: the next word, or the bot stopping. The
+        simulation holds "finishes its sentence, then yields" to this."""
+        async def meeting():
+            await self._reply_begins(1.0, '{"reply": "One two. ')
+            await self._say_words("One")
+            await self._at(1.2, self._say_words, "two.")
+            self.assertNotIn("floor.sentence_end", self._event_types(), "that word is still playing")
+            await self._at(1.5, self._say_words, "Three")
+            self.assertEqual(self._event_types().count("floor.sentence_end"), 1)
+            await self._at(1.7, self._say_words, "four.")
+            await self._at(2.0, self._play, BotStoppedSpeakingFrame())
+            self.assertEqual(self._event_types().count("floor.sentence_end"), 2)
+
+        await self._meet_in("baton", meeting)
+        self.assertEqual({e[3]["who"] for e in self.events if e[0] == "floor.sentence_end"}, {"bot_r1"})
+
+    async def test_ptt_logs_no_sentence_ends(self):
+        async def meeting():
+            await self._reply_begins(1.0, '{"reply": "One. ')
+            await self._say_words("One.", "Two")
+
+        await self._meet_in("ptt", meeting)
+        self.assertNotIn("floor.sentence_end", self._event_types())
+
     async def test_a_late_release_from_nobody_logs_nothing(self):
         async def meeting():
             await self._release(1.0, ALICE)

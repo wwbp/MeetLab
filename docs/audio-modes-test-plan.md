@@ -1,6 +1,6 @@
 # Audio modes: test and simulation plan
 
-Status: proposal. The page's gate is in the room (`services/web/lib/room-floor.ts`); parts of the bot's side are on unmerged branches. Three modes, built test-first:
+Status: proposal. The page's gate is in the room (`services/web/lib/room-floor.ts`), the bot's in `services/bot/meetlab_bot/floor_room.py`; both still closed to real rooms. Three modes, built test-first:
 
 | Mode | Who may speak | Bot speaks when |
 |---|---|---|
@@ -145,7 +145,7 @@ Local stack, stubbed LLM and TTS, no paid services:
 
 The same script runs in each mode, so mode is the only variable. A pure
 `verdict(mode, scenario, timeline)`, shaped like `sim_attribution.py:verdict`, is unit-tested on
-handwritten timelines. Live, normal passes today; ptt and baton fail until built.
+handwritten timelines. The live driver is `sim_modes_live.py`; no paid run has been made yet.
 
 ### Scenarios (28 cells)
 
@@ -198,14 +198,21 @@ pilot chooses among the survivors.
 
 | Command | Does | Spend (estimate) | Time |
 |---|---|---|---|
-| `make sim-modes-check` | Unit verdicts | $0 | Seconds |
-| `make sim-modes MODE= SCENARIO= PEOPLE=` | One live run | Under $0.10 | ~3 min |
+| `make sim-modes-check` | Unit verdicts, and the driver on a pretend room | $0 | Seconds |
+| `make sim-modes MODE= SCENARIO= PEOPLE= [REPEAT=]` | One live run | Under $0.10 with OpenAI voice; up to ~$0.40 with ElevenLabs (the matrix's estimate over its attempts) | ~3 min |
 | `make sim-modes-matrix COST_OK=<usd>` | Full matrix, refuses without the flag | $4–10 with OpenAI voice; $6–50 with ElevenLabs | ~6.5 h serial |
-| `make sim-modes-report [JUDGE=1]` | Offline report; judging ~$2 | $0 | Minutes |
+| `make sim-modes-report [JUDGE=1]` | Not built. The matrix prints `report()` when it finishes; judging ~$2 | $0 | Minutes |
+
+The driver (`sim_modes_live.py`) runs against the local stack only and refuses any other. The modes
+stay closed to real rooms: it writes the room's `audio_mode` to the local database itself, as the
+runner still refuses it. A run says what it expects to cost before it starts. The matrix keeps every
+attempt in `sim-modes-results.jsonl`, reruns invalid ones, carries on from that file, and stops before
+an attempt that could pass `COST_OK`, counting the top of the estimate.
 
 Prices are list or third-party, not checked against our bills. Participant audio is pre-recorded;
 speech-to-text and LiveKit run locally. Local 3-speaker runs have been noisy below 8 GB of Docker
-memory, and this machine has 7.75 GiB, so reserve memory for `stt-cpu` before the matrix.
+memory, and this machine has 7.75 GiB, so compose reserves 2 GiB for `stt-cpu` (it used 1.3-1.9). Keep the machine awake: a laptop that
+sleeps during a run makes that run invalid (`lag`), and a closed lid beats `caffeinate`.
 
 ## Decisions (2026-11-05)
 

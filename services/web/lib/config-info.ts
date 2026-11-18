@@ -41,7 +41,7 @@ export const SECTIONS: { id: string; label: string; about: string; fields: strin
     id: 'session',
     label: 'Session limit',
     about: 'How long a session runs, and what the bot says when time is up.',
-    fields: ['session_limit_minutes', 'closing_message'],
+    fields: ['session_limit_minutes', 'closing_message', 'closing_grace_seconds'],
   },
 ];
 
@@ -157,6 +157,11 @@ export const CONFIG_INFO: Record<string, Info> = {
     about: 'Session length; a shared countdown from the first join.',
     default: '0 (no limit)',
     results: [{ text: 'Checked after every deploy: a 1-minute room hears its closing message after 61 s.', source: 'live check session_limit' }],
+  },
+  closing_grace_seconds: {
+    title: 'Seconds before the room closes',
+    about: 'After the closing message, how long people have before the room closes and each sees their completion code.',
+    default: '30',
   },
   closing_message: {
     title: 'Closing message',

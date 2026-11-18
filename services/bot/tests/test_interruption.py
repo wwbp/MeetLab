@@ -209,5 +209,35 @@ class TestInterruptionTracker(unittest.TestCase):
         self.assertAlmostEqual(s["talkover_ms_max"], 800.0, places=3)
 
 
+class HoldingTheFloor(unittest.TestCase):
+    """At the session limit the bot's last reply and its closing line play out: nobody's
+    speech makes it yield, but who is talking is still known (session_end.py waits for a pause)."""
+
+    def test_no_yield_while_holding(self):
+        t = InterruptionTracker(min_bot_speech_ms=0)
+        t.holding = True
+        t.bot_started(0.0)
+        self.assertFalse(t.user_onset(1.0, "ana"))
+        t.bot_stopped(2.0)
+        self.assertFalse(t.bot_started(2.1))
+
+    def test_still_knows_who_is_talking(self):
+        t = InterruptionTracker(min_bot_speech_ms=0)
+        t.holding = True
+        self.assertFalse(t.someone_talking(0.0))
+        t.user_onset(1.0, "ana")
+        self.assertTrue(t.someone_talking(1.5))
+        t.user_offset(2.0, "ana")
+        self.assertFalse(t.someone_talking(2.5))
+
+    def test_bot_audio_is_visible(self):
+        t = InterruptionTracker(min_bot_speech_ms=0)
+        self.assertFalse(t.bot_audio_on)
+        t.bot_started(0.0)
+        self.assertTrue(t.bot_audio_on)
+        t.bot_stopped(1.0)
+        self.assertFalse(t.bot_audio_on)
+
+
 if __name__ == "__main__":
     unittest.main()

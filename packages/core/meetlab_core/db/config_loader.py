@@ -24,6 +24,8 @@ class EffectiveBotConfig:
     # Advisory session cap in minutes, measured from the first human join; 0 = unlimited.
     # Defaulted so callers predating the field keep the old (uncapped) behaviour.
     session_limit_minutes: int = 0
+    # After the closing line, seconds before the room closes (session_end.py).
+    closing_grace_seconds: int = 30
     # The wait after the transcript (see stt_endpointing_ms above): 50 ms since B4.
     user_speech_timeout_ms: int = 50
     # Spoken when the session limit elapses. Only used when a limit is set.
@@ -74,6 +76,7 @@ async def load_bot_config(room_name: str | None = None) -> EffectiveBotConfig:
                 user_speech_timeout_ms=50,
                 auto_record=False,
                 session_limit_minutes=0,
+                closing_grace_seconds=30,
                 closing_message=CLOSING_MESSAGE,
                 audio_mode="normal",
             )
@@ -93,6 +96,7 @@ async def load_bot_config(room_name: str | None = None) -> EffectiveBotConfig:
             user_speech_timeout_ms=int(getattr(row, "user_speech_timeout_ms", 50) or 50),
             auto_record=bool(getattr(row, "auto_record", False)),
             session_limit_minutes=int(getattr(row, "session_limit_minutes", 0) or 0),
+            closing_grace_seconds=int(row.closing_grace_seconds),
             closing_message=getattr(row, "closing_message", None) or CLOSING_MESSAGE,
             audio_mode=row.audio_mode,
         )

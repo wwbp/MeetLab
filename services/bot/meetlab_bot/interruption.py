@@ -100,6 +100,8 @@ class InterruptionTracker:
         self._speaking: dict[str, float] = {}
         self.interruptions = 0
         self.talkovers_ms: list[float] = []
+        # Set at the session limit (session_end.py): the last reply and the closing line play out.
+        self.holding = False
 
     def _open_response(self) -> None:
         """Open the response window, if it isn't already.
@@ -167,7 +169,7 @@ class InterruptionTracker:
         self._open_response()
         if self._response_audio_start is None:
             self._response_audio_start = t
-        if not self._floor_spent(t):
+        if self.holding or not self._floor_spent(t):
             return False
         speaker = self._current_speaker(t)
         if speaker is not None and self._arm(t, speaker):
@@ -188,6 +190,13 @@ class InterruptionTracker:
             # this same response is still recognised as talking over the bot.
             self._overlap_start = None
         self._bot_audio_on = False
+
+    @property
+    def bot_audio_on(self) -> bool:
+        return self._bot_audio_on
+
+    def someone_talking(self, t: float) -> bool:
+        return self._current_speaker(t) is not None
 
     def idle(self, t: float) -> bool:
         """Nobody is talking — not the bot, not a participant.
@@ -219,7 +228,7 @@ class InterruptionTracker:
         """
         if sid is not None:
             self._speaking[sid] = t
-        if not self._floor_spent(t):
+        if self.holding or not self._floor_spent(t):
             # Either the bot has not made a sound yet, or it is inside the floor.
             # Recorded as speaking above, so bot_started can still act on it.
             return False

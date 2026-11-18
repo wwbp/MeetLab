@@ -57,6 +57,7 @@ export default function ConfigPage() {
         stt_delay: data.stt_delay ?? null,
         auto_record: data.auto_record ?? false,
         session_limit_minutes: data.session_limit_minutes ?? 0,
+        closing_grace_seconds: data.closing_grace_seconds ?? 30,
         closing_message: data.closing_message ?? '',
         audio_mode: data.audio_mode ?? 'normal',
       });
@@ -367,7 +368,7 @@ export default function ConfigPage() {
 
           {/* ── Session limit ── */}
           <Section id="session">
-            <Field name="session_limit_minutes" label="Length, minutes (0 = no limit)" help="Session length; the browser counts down and the bot says the closing message at the end.">
+            <Field name="session_limit_minutes" label="Length, minutes (0 = no limit)" help="Session length; the browser counts down, the bot finishes its reply and says the closing message, then the room closes.">
               <input
                 type="number"
                 step="1"
@@ -392,6 +393,23 @@ export default function ConfigPage() {
                 value={form.closing_message}
                 onChange={(e) => setForm((f) => ({ ...f, closing_message: e.target.value }))}
                 rows={3}
+                className={inp}
+                required
+              />
+            </Field>
+            <Field name="closing_grace_seconds" label="Seconds before the room closes" help="After the closing message, how long people have before the room closes for everyone and each sees their completion code.">
+              <input
+                type="number"
+                step="1"
+                min="0"
+                max="600"
+                value={form.closing_grace_seconds}
+                onChange={(e) =>
+                  setForm((f) => ({
+                    ...f,
+                    closing_grace_seconds: Math.max(0, Math.min(600, Math.floor(Number(e.target.value) || 0))),
+                  }))
+                }
                 className={inp}
                 required
               />

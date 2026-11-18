@@ -86,5 +86,28 @@ class TestContext(unittest.TestCase):
         ])
 
 
+
+class TestElapsed(unittest.TestCase):
+    """The session-limit clock a replacement bot carries on with. It starts when people do, not
+    when the first bot was dispatched: a group's bot starts before the ready check and countdown,
+    and counting from there would close the room that much early."""
+
+    def test_counts_from_the_first_words_not_the_dispatch(self):
+        from meetlab_core.rejoin import elapsed_s
+        started = 1_000_000.0
+        self.assertEqual(elapsed_s(first_ts=started + 90, started_at=started, now=started + 300), 210)
+
+    def test_falls_back_to_the_start_without_a_usable_time(self):
+        from meetlab_core.rejoin import elapsed_s
+        started = 1_000_000.0
+        self.assertEqual(elapsed_s(first_ts=None, started_at=started, now=started + 300), 300)
+        # A time before the session began is not this session's clock.
+        self.assertEqual(elapsed_s(first_ts=1.0, started_at=started, now=started + 300), 300)
+
+    def test_never_negative(self):
+        from meetlab_core.rejoin import elapsed_s
+        self.assertEqual(elapsed_s(first_ts=2_000_000.0, started_at=1_000_000.0, now=1_000_300.0), 0)
+
+
 if __name__ == "__main__":
     unittest.main()

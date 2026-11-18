@@ -18,6 +18,7 @@ from pipecat.frames.frames import (
     BotStoppedSpeakingFrame,
     InterruptionFrame,
     InterruptionTaskFrame,
+    LLMFullResponseStartFrame,
     MetricsFrame,
     TranscriptionFrame,
     TTSAudioRawFrame,
@@ -28,6 +29,7 @@ from pipecat.frames.frames import (
 )
 from pipecat.metrics.metrics import TextAggregationMetricsData, TTFBMetricsData
 from pipecat.observers.base_observer import BaseObserver, FramePushed
+from pipecat.turns.user_mute import BaseUserMuteStrategy
 from pipecat.observers.loggers.metrics_log_observer import MetricsLogObserver
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.pipeline.pipeline import Pipeline
@@ -63,6 +65,7 @@ from meetlab_core.turns import (
 from meetlab_bot.floor_room import FloorRoom
 from meetlab_bot.interruption import InterruptionTracker
 from meetlab_bot.study_support import closing_due, speaker_meta
+from meetlab_bot.session_end import PlaybackClock, SessionEnd, after_limit_utterance, close_with_retries
 from meetlab_bot.multi_speaker_stt import MultiSpeakerSTT, SpeakerLabelInjector
 from meetlab_bot.speech_onset_vad import build_speech_onset_silero
 from meetlab_bot.runner_types import LiveKitRunnerArguments
@@ -125,10 +128,6 @@ _SELF_ECHO_SIMILARITY = float(os.getenv("STT_SELF_ECHO_SIMILARITY", "0.65"))
 # How many recent bot utterances to compare incoming user transcripts against.
 _RECENT_BOT_TEXT_WINDOW = 5
 
-# How long the closing message waits for a gap in the conversation before saying
-# itself anyway. Long enough to outlast a normal turn, short enough that the
-# participant hears it before they wander off.
-_CLOSING_QUIET_WAIT_S = 20
 
 _WORD_RE = re.compile(r"[a-z0-9]+")
 
@@ -272,7 +271,7 @@ def make_speech_onset_handler(tracker, enqueue_frame):
     return _on_speech_onset
 
 
-def build_user_aggregator_params(bot_config=None):
+def build_user_aggregator_params(bot_config=None, session_end=None):
     """User-turn aggregation params — how the bot decides you have finished talking.
 
     This is the single most consequential setting in the pipeline. Getting it
@@ -322,7 +321,19 @@ def build_user_aggregator_params(bot_config=None):
             )],
         ),
         user_turn_stop_timeout=1.5,
+        # From the session limit on, nobody starts a new reply or cuts one off (session_end.py).
+        user_mute_strategies=[_SessionEndMute(session_end)] if session_end else [],
     )
+
+
+class _SessionEndMute(BaseUserMuteStrategy):
+    def __init__(self, session_end):
+        super().__init__()
+        self._end = session_end
+
+    async def process_frame(self, frame) -> bool:
+        await super().process_frame(frame)
+        return self._end.muted
 
 
 def _build_parakeet_chain(bot_config, vad_handlers=None):
@@ -479,6 +490,22 @@ async def first_join(*, start_close, greet, humans_present, expected, now=time.m
     while not greeting_due(humans_present(), expected, joined, now()):
         await sleep(1)
     await greet()
+
+
+async def _close_room(room_name: str) -> None:
+    """End the meeting for everyone: each page sees ROOM_DELETED and shows the completion code."""
+    from livekit import api as lkapi
+
+    cfg = load_config()
+    url = require(cfg.livekit_url, "LIVEKIT_URL").replace("wss://", "https://").replace("ws://", "http://")
+
+    async def delete():
+        async with lkapi.LiveKitAPI(url=url, api_key=require(cfg.livekit_api_key, "LIVEKIT_API_KEY"),
+                                    api_secret=require(cfg.livekit_api_secret, "LIVEKIT_API_SECRET")) as lk:
+            await lk.room.delete_room(lkapi.DeleteRoomRequest(room=room_name))
+
+    if not await close_with_retries(delete, sleep=asyncio.sleep):
+        logger.error(f"could not close room {room_name} after the session limit")
 
 
 async def bot(runner_args: LiveKitRunnerArguments):
@@ -655,9 +682,16 @@ async def _bot(runner_args: LiveKitRunnerArguments):
     # people in the room, rejoin.py) starts from the conversation so far.
     resume = runner_args.resume
     context = LLMContext(messages=list(resume["messages"]) if resume else None)
+    # How a timed session ends (session_end.py); None when the room has no limit.
+    session_end = SessionEnd(
+        grace_s=bot_config.closing_grace_seconds,
+        has_closing=bool((bot_config.closing_message or "").strip()),
+    ) if bot_config.session_limit_minutes > 0 else None
+    _reply_open = [False]  # an LLM reply has started and its turn hasn't stopped
+    playback = PlaybackClock()  # how long the audio sent so far really plays
     context_aggregator = LLMContextAggregatorPair(
         context,
-        user_params=build_user_aggregator_params(bot_config),
+        user_params=build_user_aggregator_params(bot_config, session_end=session_end),
         assistant_params=_assistant_params(_build_llm(openai_api_key, bot_config, structured=False)),
     )
     _write_turns_as_user_message(context_aggregator.user())
@@ -743,6 +777,16 @@ async def _bot(runner_args: LiveKitRunnerArguments):
             elif isinstance(frame, BotStoppedSpeakingFrame):
                 self._seen.add(frame.id)
                 interruptions.bot_stopped(time.monotonic())
+            elif isinstance(frame, LLMFullResponseStartFrame):
+                self._seen.add(frame.id)
+                _reply_open[0] = True
+            elif isinstance(frame, TTSAudioRawFrame):
+                # Once per frame, where it reaches the room; ids aren't kept (thousands a minute).
+                if data.destination is transport.output():
+                    playback.sent(time.monotonic(),
+                                  len(frame.audio) / (2 * frame.sample_rate * frame.num_channels))
+            elif isinstance(frame, InterruptionFrame):
+                playback.cut(time.monotonic())
 
     class _AudioTimestampRecorder(FrameProcessor):
         """Records the monotonic time of each participant's last audio frame.
@@ -758,6 +802,17 @@ async def _bot(runner_args: LiveKitRunnerArguments):
                 if frame.user_id:
                     _last_audio_times[frame.user_id] = time.monotonic()
             await self.push_frame(frame, direction)
+
+    async def _store_after_limit(frame) -> None:
+        said = after_limit_utterance(frame.text, frame.user_id, _sid_to_identity)
+        if not said:
+            return
+        try:
+            async with AsyncSessionLocal() as db, db.begin():
+                db.add(Utterance(id=_new_id(), conv_id=runner_args.session_id, reply_to=_last_bot_utt_id[0],
+                                 ts=time.time(), **said))
+        except Exception as e:
+            logger.warning(f"could not store speech after the limit for session {runner_args.session_id}: {e}")
 
     class _SpeakerTracker(FrameProcessor):
         """Records the SID of whoever sent the most recent TranscriptionFrame.
@@ -784,6 +839,11 @@ async def _bot(runner_args: LiveKitRunnerArguments):
                     last_ts = _last_audio_times.get(frame.user_id)
                     if last_ts is not None:
                         _turn_timing["last_audio_ts"] = last_ts
+                if session_end and session_end.muted:
+                    # Muted for the bot from the limit (the aggregator drops this frame), kept
+                    # for the transcript. ponytail: words transcribed just before the limit in
+                    # a turn not yet closed are lost; store open turns at the limit if it matters.
+                    await _store_after_limit(frame)
             await self.push_frame(frame, direction)
 
     class _TTSFirstTimer(FrameProcessor):
@@ -997,6 +1057,7 @@ async def _bot(runner_args: LiveKitRunnerArguments):
         # inter-sentence gap was ignored (BOT_VAD_STOP_SECS), so interruption
         # worked only intermittently. See interruption.py.
         interruptions.assistant_turn_stopped(time.monotonic())
+        _reply_open[0] = False
         # This turn's addressees, taken even when nothing is stored so a later spoken line
         # (the closing message) can't inherit them. None: no model reply (a spoken line).
         addressed_to, _addressed_to[0] = _addressed_to[0], None
@@ -1095,8 +1156,13 @@ async def _bot(runner_args: LiveKitRunnerArguments):
         must copy their completion code into the survey, or the run is unpaid
         work.
 
-        Polls rather than sleeping once so the decision stays in the tested pure
-        function, matching how the browser derives the same deadline.
+        Then (session_end.py): people are muted and the bot holds the floor, so its reply
+        plays out and nobody cuts the closing line; it waits for a pause, speaks the line,
+        and closes the room closing_grace_seconds after it, for everyone at once. Closing
+        the room is what shows each person their completion code (lib/join.ts endsStudy).
+
+        Polls rather than sleeping once so the decisions stay in the tested pure
+        functions, matching how the browser derives the same deadline.
         """
         while not closing_due(
             joined_at=joined_at,
@@ -1104,15 +1170,27 @@ async def _bot(runner_args: LiveKitRunnerArguments):
             limit_minutes=bot_config.session_limit_minutes,
         ):
             await asyncio.sleep(1)
-        # Speak into a gap: anything started while someone is mid-sentence gets
-        # interrupted away by design (see interruption.py). Bounded, because a
-        # participant who never stops talking still has to hear the instructions.
-        for _ in range(_CLOSING_QUIET_WAIT_S):
-            if interruptions.idle(time.monotonic()):
-                break
-            await asyncio.sleep(1)
-        logger.info("Session limit reached — speaking the closing message")
-        await say(bot_config.closing_message)
+        sid = runner_args.session_id
+        session_end.limit_reached(time.monotonic())
+        interruptions.holding = True
+        logger.info(f"Session limit reached for session {sid}: finishing the reply, then the closing message")
+        heard_logged = False
+        while True:
+            t = time.monotonic()
+            action = session_end.tick(t, bot_busy=interruptions.bot_audio_on or _reply_open[0] or playback.playing(t),
+                                      someone_talking=interruptions.someone_talking(t))
+            if session_end.closing_heard and not heard_logged:
+                heard_logged = True
+                logger.info(f"closing message heard for session {sid}")
+            if action == "say_closing":
+                logger.info(f"Session limit: speaking the closing message for session {sid}")
+                await say(bot_config.closing_message)
+            elif action == "close_room":
+                # Logged first: deleting the room disconnects this bot and ends this task.
+                logger.info(f"room closed for session {sid}, {bot_config.closing_grace_seconds} s after the closing message")
+                await _close_room(runner_args.room_name)
+                return
+            await asyncio.sleep(0.25)
 
     async def _register(p) -> None:
         """Know a person by name and keep their speaker record (name, Prolific ID), whether

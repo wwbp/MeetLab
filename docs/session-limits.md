@@ -4,9 +4,9 @@ A meeting can be given a time budget — "you get 30 minutes, then wrap up and m
 on". Participants see a countdown in the corner of the call and get warnings as the
 end approaches, in the style Zoom uses for its meeting limit.
 
-The limit is **advisory**: nobody is disconnected. At zero the countdown says the
-time is up and offers a Leave button, but the call keeps working. See
-[Enforcement](#enforcement-what-this-does-not-do) below.
+The limit is **enforced**: when time is up the assistant says a closing message, and
+a short while later the room closes for everyone. See
+[How a session ends](#how-a-session-ends) below.
 
 ## Setting it
 
@@ -56,17 +56,41 @@ Two consequences worth knowing:
   just has no limit that time. Joining a meeting never depends on the limit lookup
   succeeding.
 
-## Enforcement: what this does *not* do
+## How a session ends
 
-Nothing forces anyone out. The countdown and warnings are the whole feature: it
-tells people their time is up and trusts them to leave.
+When the limit is reached, in this order:
 
-Two other things it deliberately does not do:
+1. **Nobody can start or cut off the assistant any more.** What people say from here on
+   no longer reaches the assistant, so it does not begin a new answer and cannot be
+   interrupted.
+2. **The assistant finishes the answer it is giving**, all of it (given up on after 30 s).
+3. **It waits for a pause** if a participant is talking, for at most 10 s.
+4. **It says the closing message** (Bot settings → Session limit → *Closing message*).
+5. **The room closes for everyone** a set time after the closing message ends: Bot
+   settings → *Seconds before the room closes*, 30 by default, 0 to 600.
 
-- The assistant never *speaks* about the time — no spoken "five minutes remaining"
-  cutting across the conversation.
-- Recording, transcripts, and the assistant itself are unaffected. They stop the way
-  they always have: when everybody has left the room.
+Closing the room is what shows each participant the "Thank you for taking part" screen
+with their completion code, all at the same moment.
+
+What people say after the limit is still stored in the transcript (marked `after_limit`)
+and still counts towards their completion code; the assistant just no longer answers it.
+
+If closing the room fails, it is tried three times.
+
+**Push-to-talk and baton rooms are not covered yet:** someone holding the floor can block
+the closing message, and the room then closes without it. Use Normal mode with a limit.
+
+If the closing message produces no sound within 20 s (for example the voice service is
+down), the room still closes after the buffer.
+
+Why it works this way: on 2026-11-18 a participant spoke just as the limit was reached,
+which threw away the closing message before it was heard, and nothing ended the meeting.
+
+Still true:
+
+- The assistant never speaks about the time *before* the limit: no spoken "five
+  minutes remaining" cutting across the conversation.
+- Recording and transcripts stop when the room closes, as they do when everybody leaves.
 
 ## Where it lives, for engineers
 
@@ -80,14 +104,16 @@ Two other things it deliberately does not do:
 | All the logic (pure, unit-tested) | `services/web/lib/session-limit.ts` |
 | Countdown pill + notifications | `services/web/lib/SessionTimer.tsx` |
 
-There is no stored deadline anywhere and no timer on the server. The browser derives
+The browser's countdown has no stored deadline: it derives
 everything each second from three values: the configured limit, the earliest
 `joinedAt` LiveKit reports for a non-bot participant, and the current time. That is
 why late joiners share one countdown with no extra machinery — and also why an empty
 room resets the clock.
 
-Adding real enforcement later would mean one scheduled `remove_participant` call in
-`services/bot/meetlab_bot/bot.py` at the deadline; nothing in the current design would change.
+The assistant keeps its own clock from the first join (`closing_due` in
+`services/bot/meetlab_bot/study_support.py`), and the end of the session is decided in
+`services/bot/meetlab_bot/session_end.py` (pure, unit-tested); `bot.py` (`_announce_close`)
+acts on it and deletes the LiveKit room.
 
 Tests, all under `make test-unit`:
 
@@ -101,4 +127,9 @@ Tests, all under `make test-unit`:
 - `services/api/tests/test_runner_start.py` — validation (including `True`, which is
   an `int` in Python), the 0 and 1440 bounds, and that a room set to `0` overrides a
   global limit instead of inheriting it.
-- `packages/core/tests/test_defaults.py` — the column defaults to `0`.
+- `packages/core/tests/test_defaults.py` — the column defaults to `0`; the buffer to `30`.
+- `services/bot/tests/test_session_end.py` — the order above, each wait's limit, the
+  buffer counted from the real end of the closing message, and the room closed once.
+- Live, after every release (`session_limit` in `tests/system/acceptance.py`): a 1-minute
+  room hears its closing message and is closed with the reason the page needs to show
+  the completion code.

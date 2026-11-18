@@ -528,7 +528,7 @@ class RunnerStartApiTests(unittest.TestCase):
             "stt_endpointing_ms", "user_speech_timeout_ms",
             "llm_model", "tts_voice", "tts_provider",
             "stt_model", "stt_delay", "auto_record",
-            "session_limit_minutes", "audio_mode",
+            "session_limit_minutes", "audio_mode", "closing_grace_seconds",
         ):
             self.assertIn(key, body, f"GET /config response missing field: {key}")
         self.assertEqual(body["scope"], "global")
@@ -695,6 +695,22 @@ class RunnerStartApiTests(unittest.TestCase):
             ],
             25,
         )
+
+    def test_config_put_closing_grace_seconds_roundtrip(self):
+        for v in (0, 30, 600):
+            with self.subTest(v=v):
+                response = self.client.put(
+                    "/config", json={"scope": "test-runner-scope", "closing_grace_seconds": v})
+                self.assertEqual(response.status_code, 200, response.text)
+                self.assertEqual(response.json().get("closing_grace_seconds"), v)
+
+    def test_config_put_closing_grace_seconds_rejects_bad_values(self):
+        for bad in (-1, 601, True, 1.5, "30", None):
+            with self.subTest(bad=bad):
+                response = self.client.put(
+                    "/config", json={"scope": "test-runner-scope", "closing_grace_seconds": bad})
+                self.assertEqual(response.status_code, 400, f"{bad!r} was accepted")
+                self.assertIn("closing_grace_seconds", response.json().get("error", ""))
 
     def test_config_put_session_limit_minutes_rejects_bad_values(self):
         # bool is a subclass of int in Python — True must NOT sneak through as 1.

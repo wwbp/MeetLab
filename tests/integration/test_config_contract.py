@@ -100,7 +100,7 @@ class FallbackDefaultsTests(unittest.TestCase):
     the bot behaves.
     """
 
-    BEHAVIOURAL_FIELDS = ("stt_endpointing_ms", "user_speech_timeout_ms", "auto_record", "audio_mode")
+    BEHAVIOURAL_FIELDS = ("stt_endpointing_ms", "user_speech_timeout_ms", "auto_record", "audio_mode", "closing_grace_seconds")
 
     def test_the_empty_table_fallback_matches_the_column_defaults(self):
         import inspect

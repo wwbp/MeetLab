@@ -79,4 +79,13 @@ async def load_resume(db, row) -> dict | None:
     names = {s.id: (s.meta or {}).get("display_name") for s in speakers}
     began = rows[ids[0]].started_at if ids else row.started_at
     return {"messages": context_messages(turns, names),
-            "elapsed_s": (datetime.now(timezone.utc) - began).total_seconds()}
+            "elapsed_s": elapsed_s(first_ts=turns[0].ts, started_at=began.timestamp(),
+                                   now=datetime.now(timezone.utc).timestamp())}
+
+
+def elapsed_s(*, first_ts: float | None, started_at: float, now: float) -> float:
+    """Seconds of the session limit already used. The bot's clock starts at the first join, which
+    is when it greets, so the first words stored mark it; the session's start (its dispatch) can
+    be a ready check and a countdown earlier, and would close a group's room that much early."""
+    began = first_ts if first_ts is not None and first_ts >= started_at else started_at
+    return max(0.0, now - began)

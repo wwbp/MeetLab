@@ -16,6 +16,7 @@ export type BotConfig = {
   stt_delay: string | null;
   auto_record: boolean;
   session_limit_minutes: number;
+  closing_grace_seconds: number;
   closing_message: string;
   audio_mode: string;
 };
@@ -35,6 +36,7 @@ export const EMPTY_CONFIG: Omit<BotConfig, 'scope'> = {
   stt_delay: null,
   auto_record: false,
   session_limit_minutes: 0,
+  closing_grace_seconds: 30,
   closing_message: '',
   audio_mode: 'normal',
 };

@@ -33,6 +33,13 @@ class TestBotConfigDefaults(unittest.TestCase):
         self.assertEqual(str(col.server_default.arg), "0")
         self.assertFalse(col.nullable)
 
+    def test_closing_grace_seconds_default_is_30(self):
+        """After the closing line, 30 s to read the completion code before the room closes."""
+        col = BotConfig.__table__.c.closing_grace_seconds
+        self.assertEqual(col.default.arg, 30)
+        self.assertEqual(str(col.server_default.arg), "30")
+        self.assertFalse(col.nullable)
+
     def test_audio_mode_default_is_normal(self):
         """An unconfigured room keeps today's open mic (docs/audio-modes-test-plan.md)."""
         col = BotConfig.__table__.c.audio_mode

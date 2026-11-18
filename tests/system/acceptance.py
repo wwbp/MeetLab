@@ -720,23 +720,33 @@ async def scenario_group_link():
 
 
 async def scenario_session_limit():
-    """D2: a room limited to 1 minute: the bot speaks the room's closing message when time is up."""
+    """D2: a room limited to 1 minute: when time is up the bot speaks the room's closing message
+    (heard: its audio played, not only stored, prod 2026-11-18), and the room closes for everyone
+    closing_grace_seconds after it, which is what shows each person their completion code."""
     room, closing = f"accept-{uuid.uuid4().hex[:6]}", f"Time is up, thank you. Code check {uuid.uuid4().hex[:4]}."
+    grace = 5
     _post("/api/console/login", {"password": os.environ["CONSOLE_PASSWORD"]})
-    _post("/api/console/config", {"scope": room, "session_limit_minutes": 1, "closing_message": closing}, method="PUT")
+    _post("/api/console/config", {"scope": room, "session_limit_minutes": 1, "closing_message": closing,
+                                  "closing_grace_seconds": grace}, method="PUT")
     _post("/api/concierge/rooms", {"name": room})
     details = _join_as_participant(room, "Ana", uuid.uuid4().hex[:24])
     if details.get("sessionLimitSeconds") != 60:
         raise Fail(f"the browser was told {details.get('sessionLimitSeconds')} s, expected 60")
-    person = rtc.Room()
+    person, gone = rtc.Room(), {}
+    person.on("disconnected", lambda reason: gone.setdefault("reason", reason))
     await person.connect(os.environ["LIVEKIT_URL"], details["participantToken"])
     try:
         session = _post(f"/api/concierge/rooms/{room}/bots", {})["request"]["runnerSessionId"]
         await _until(lambda: any(p.identity.startswith("bot_") for p in person.remote_participants.values()), 420, "bot in the room")
         joined = time.time()
-        await _until(lambda: any(u["bot"] and u["text"] == closing for u in _meeting_get(session, "utterances")),
-                              180, "the bot's closing message")
-        return f"closing message spoken {time.time() - joined:.0f} s after the bot joined (limit 60 s; browser told 60 s)"
+        bot_log = lambda: _log_lines(f"{LOGS}/bot", session, joined - 60)
+        await _until(lambda: any("closing message heard" in l for l in bot_log()), 180, "the closing message heard")
+        heard = time.time() - joined
+        await _until(lambda: "reason" in gone, grace + 30, f"the room closed {grace} s after the closing message")
+        closed = time.time() - joined
+        if gone["reason"] != rtc.DisconnectReason.ROOM_DELETED:
+            raise Fail(f"left with {gone['reason']}, not ROOM_DELETED: the page would offer Rejoin, not the code")
+        return f"closing message heard {heard:.0f} s after the bot joined (limit 60 s), room closed at {closed:.0f} s"
     finally:
         await person.disconnect()
 

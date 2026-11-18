@@ -233,6 +233,11 @@ class BotConfig(Base):
     session_limit_minutes: Mapped[int] = mapped_column(
         BigInteger, default=0, server_default="0", nullable=False
     )
+    # After the closing line ends, how long before the room closes for everyone (which shows
+    # each participant their completion code). Only reached when a limit is set.
+    closing_grace_seconds: Mapped[int] = mapped_column(
+        BigInteger, default=30, server_default="30", nullable=False
+    )
     # Spoken once, when session_limit_minutes elapses, to tell the participant the
     # study is over and what to do next. Only reached when a limit is set.
     closing_message: Mapped[str] = mapped_column(

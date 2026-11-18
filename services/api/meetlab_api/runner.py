@@ -228,6 +228,7 @@ class BotConfigAdmin(ModelView, model=BotConfig):
         BotConfig.turn_detection,
         BotConfig.smart_turn_wait_ms,
         BotConfig.session_limit_minutes,
+        BotConfig.closing_grace_seconds,
         BotConfig.updated_at,
     ]
     form_overrides = {
@@ -794,6 +795,7 @@ async def get_config(room: str | None = None, _=Depends(verify_api_key)):
         "user_speech_timeout_ms": cfg.user_speech_timeout_ms,
         "auto_record": cfg.auto_record,
         "session_limit_minutes": cfg.session_limit_minutes,
+        "closing_grace_seconds": cfg.closing_grace_seconds,
         "closing_message": cfg.closing_message,
         "audio_mode": cfg.audio_mode,
     }
@@ -902,6 +904,12 @@ async def update_config(request: Request, _=Depends(verify_api_key)):
                 status_code=400,
             )
         fields["session_limit_minutes"] = v
+    if "closing_grace_seconds" in body:
+        v = body["closing_grace_seconds"]
+        if isinstance(v, bool) or not isinstance(v, int) or not 0 <= v <= 600:
+            return JSONResponse(
+                {"error": "closing_grace_seconds must be an integer between 0 and 600"}, status_code=400)
+        fields["closing_grace_seconds"] = v
     if "closing_message" in body:
         if not isinstance(body["closing_message"], str):
             return JSONResponse({"error": "closing_message must be a string"}, status_code=400)
@@ -931,6 +939,7 @@ async def update_config(request: Request, _=Depends(verify_api_key)):
         "user_speech_timeout_ms": cfg.user_speech_timeout_ms,
         "auto_record": cfg.auto_record,
         "session_limit_minutes": cfg.session_limit_minutes,
+        "closing_grace_seconds": cfg.closing_grace_seconds,
         "closing_message": cfg.closing_message,
         "audio_mode": cfg.audio_mode,
     }

@@ -13,7 +13,7 @@ from datetime import datetime, timedelta
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 from loguru import logger
-from sqlalchemy import exists, func, or_, select
+from sqlalchemy import and_, exists, func, or_, select
 
 from meetlab_api.links import ensure_legacy_link, stop_if_missing_settings, verify_password
 from meetlab_core.db.engine import AsyncSessionLocal
@@ -23,6 +23,7 @@ from meetlab_core.event_log import record_event
 TICKET_LIVE_S = 90   # a searching ticket polled within this is live (matchable)
 DONE_AFTER_S = 120   # a placed ticket is done once its room has had no running session this long
 SETUP_CLAIM_S = 30   # a setup claim older than this may be retried (runner.setup_match)
+SETUP_GIVE_UP_S = 60  # a room still not set up this long after its start: the match fails
 
 router = APIRouter()
 
@@ -58,9 +59,9 @@ class StopRoom:
 
 @dataclass(frozen=True)
 class Event:
-    name: str  # match_formed | ready_failed | ticket_expired | link_stopped (record_event)
+    name: str  # match_formed | ready_failed | match_setup_failed | ticket_expired | link_stopped (record_event)
     payload: dict = field(default_factory=dict)
-    severity: str = "info"  # warning: a sign a study is stuck (the Events page)
+    severity: str = "info"  # warning: a sign a study is stuck; error: a group lost its meeting
 
 
 # step()'s inputs. The link is any object with size, min_size, delay_s, max_wait_s, ready_check_s
@@ -130,6 +131,14 @@ def step(link, tickets: list[TicketState], matches: list[MatchState], now: datet
             starts_at = now + _s(link.delay_s)
             out.append(UpdateMatch(m.room_name, {"starts_at": starts_at}))
         started = starts_at is not None and starts_at <= now
+        # 2b. Still no room SETUP_GIVE_UP_S after the start (setup was tried since the match
+        #     formed): members are told to go back to the survey, not left on "Setting up…".
+        if started and m.session_id is None and starts_at <= now - _s(SETUP_GIVE_UP_S):
+            for t in group:
+                update(t, state="expired")
+            out += [UpdateMatch(m.room_name, {"closed_at": now}), StopRoom(m.room_name),
+                    Event("match_setup_failed", {"room": m.room_name, "tickets": [t.id for t in group]}, "error")]
+            continue
         # 3. Started and set up: members are in the room, sent there at starts_at (a later
         #    step, e.g. the background loop's, records when they went, not when it noticed).
         if started and m.session_id is not None:
@@ -224,10 +233,12 @@ async def _step(db, link: StartLink, now: datetime) -> list:
         matches[m.room_name] = m
         states.append(MatchState(m.room_name, m.ready_deadline, m.starts_at, m.session_id,
                                  None if m.session_id is None or is_running else ended_at))
-    # Balanced assignment counts the link's matches, except those a failed ready check closed (R42).
+    # Balanced assignment counts the link's matches, except those a failed ready check or a
+    # failed setup closed (R42): no meeting was held.
     counts = dict((await db.execute(
         select(Match.bot_config_scope, func.count())
-        .where(Match.link_id == link.link_id, or_(Match.closed_at.is_(None), Match.starts_at.is_not(None)))
+        .where(Match.link_id == link.link_id, or_(Match.closed_at.is_(None),
+                                                   and_(Match.starts_at.is_not(None), Match.session_id.is_not(None))))
         .group_by(Match.bot_config_scope))).all())
 
     def new_match():
@@ -286,7 +297,7 @@ async def _after(hooks, changes: list) -> None:
             try:
                 await hooks.stop_room(c.room_name)
             except Exception as e:
-                logger.error(f"stopping room {c.room_name} after a failed ready check failed: {e}")
+                logger.error(f"stopping room {c.room_name} of a closed match failed: {e}")
         else:
             await record_event(c.name, severity=c.severity, room_name=c.payload.get("room"), payload=c.payload)
 

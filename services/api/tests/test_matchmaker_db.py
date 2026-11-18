@@ -185,6 +185,34 @@ class MatchmakerDbTest(_DbCase):
         [after] = self._matches(link_id)
         self.assertEqual((after.bot_config_scope, after.session_id), (m.bot_config_scope, conv.id))
 
+    def test_a_setup_that_keeps_failing_ends_the_match_and_tells_the_group(self):
+        """Dispatch that never succeeds: the group is not left on "Setting up the room…"."""
+        link_id, room, [a, b] = self._formed_match(pool=("global", "other-scope"))
+        self.run_bot.side_effect = DispatchError("no capacity")
+        try:
+            self._ready(a)
+            self._ready(b)  # delay 0: the start is now
+            self.assertEqual(self._poll(a)["view"], {"kind": "starting", "room": None, "starts_in_ms": 0})
+            self._sql("UPDATE matches SET starts_at = now() - make_interval(secs => :s) WHERE room_name = :r",
+                      r=room, s=matchmaker.SETUP_GIVE_UP_S + 1)
+            self._call(matchmaker.step_open_links, self.hooks)  # the background loop, nobody polling
+        finally:
+            self.run_bot.side_effect = None
+        self.assertEqual(self._poll(a)["view"], {"kind": "expired"})
+        self.assertEqual(self._poll(b)["view"], {"kind": "expired"})
+        [m] = self._matches(link_id)
+        self.assertIsNotNone(m.closed_at)
+        self.assertEqual(self._conversations(room, running_only=True), [])  # and no later poll set it up
+        events = self._sql("SELECT type, severity FROM events WHERE room_name = :r", r=room).all()
+        self.assertIn(("match_setup_failed", "error"), events)
+        # No meeting was held, so it does not count in the balanced assignment: the next
+        # two groups still get one setting each.
+        hooks = self._no_setup()
+        for _ in range(4):
+            self._create(link_id, _pid(), hooks=hooks)
+        later = sorted(x.bot_config_scope for x in self._matches(link_id) if x.closed_at is None)
+        self.assertEqual(later, ["global", "other-scope"])
+
     def test_failed_ready_check_stops_the_room_and_requeues(self):
         link_id, room, [a, b] = self._formed_match()
         self._poll(a)  # sets the room up

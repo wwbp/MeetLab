@@ -37,6 +37,11 @@ relationships…), from [DailyDialog](https://huggingface.co/datasets/ConvLab/da
 | 2 | 30% | each person speaks one side |
 | 3 | 20% | they take the lines in turn |
 
+That is the default mix (`study`). The others: `equal` (a third each of 1, 2 and 3), `group`
+(rooms of 3 and 4, half each, as the group study plans them) and a number, `3` or `4`, for that
+many people in every room. Four people take the lines in turn exactly as three do. Rooms of 4
+are built and unit-tested but **have not been run** (see [planned measurements](#planned-measurements-not-run)).
+
 Each dialogue side has its own voice, one of 20 English voices (US and UK, women and men,
 Kokoro), so the bot hears different people. About 1 line in 8 has a natural 0.8-second pause
 in the middle (after a comma, between two sentences or before "and/but/so"), the kind of pause
@@ -47,6 +52,80 @@ Its sources, licences, checksums and the steps to rebuild it: [data/](https://gi
 The library is built once (`tools/loadtest/meetlab_loadtest/build_conversation_library.py`) and kept in
 the media bucket (`loadtests/library/v1/`), not in the repository. The workflow's `library`
 input chooses it (`v1`, the default) or the original 5 scripts with one person (`none`).
+
+## Entering through a group start link (built, not run)
+
+In every test so far the test itself opened each room from the console. A group study does not
+work that way: people open a **group start link**, wait until enough others are there, confirm
+within a time limit with their Prolific ID (the "ready check"), and only then get a room, which
+the system sets up with its bot at that moment (`study-support.md` §4). The part that forms the
+groups (the "matchmaker") handles one link's requests one at a time and sets the room up while
+a waiting page is asking for news, so it is the part most likely to slow down when a whole
+study arrives at once. The ledger asks for exactly this to be load-tested.
+
+With **mix = link-3** or **link-4** the test goes in the participants' way (the driver's own
+settings are `ENTRY=group_link` and `GROUP_SIZE`, 2 to 8):
+
+1. The run creates one group start link of that room size, on the profile's bot settings,
+   with no countdown.
+2. Each simulated person asks for a place in line (a "ticket"), then asks for news every 2
+   seconds, as the waiting page does.
+3. When their group is found they confirm with their own Prolific ID (24 characters, different
+   for everyone, the same every run).
+4. When the room is ready they join it and the conversation runs as in any other test. The
+   link is stopped when the run ends.
+
+Besides the usual numbers, each step then reports, over everyone who entered in it (typical
+and worst 1 in 20):
+
+| Measure | From | To |
+|---|---|---|
+| **Time to match** | the ticket is taken | their group is found |
+| **Ready to room** | their Ready is accepted | the room is handed to them (the others' Ready, then setting up the room and starting the bot) |
+| **Room to bot** | the room is handed to them | they see the bot in it |
+
+It also counts people sent back in line because someone else missed the ready check, and
+Prolific IDs refused as already in the line (the test then tries another). Someone whose
+ticket expires, who misses the ready check, or whose group lands in two rooms counts as a
+start error, with the reason.
+
+!!! warning "This has never been run, not even locally"
+    The steps above are tested only against a stand-in for meet (`tools/loadtest/tests/test_group_link.py`),
+    which answers with the runner's own recorded replies. Before the first real run:
+
+    - **Rehearse it locally** with 2 rooms (below, with `-e ENTRY=group_link -e GROUP_SIZE=3`).
+    - **The join limit will refuse a spike.** meet allows 5 × the room size new tickets a minute
+      from one address on one link (20 a minute for rooms of 4). Real participants each have
+      their own address; the load generators share one or two. A run of more than 5 rooms a
+      minute is refused (the result says `join refused (429)`) until `START_LINK_MAX_PER_MINUTE`
+      is raised on meet for the test and put back after. That is a production setting: a
+      decision for a person, by PR.
+    - **How many rooms of 4 one generator can run is not measured.** It ran about 75 rooms of the
+      study mix (roughly 130 microphones); at 4 people a room that suggests about 30 rooms a
+      generator, an estimate only. Each generator makes its own link, so with 2 generators the
+      people are split over 2 links.
+    - **The report page does not show the three new measures yet.** They are in the result file
+      (each step's `entry`); `load_report.py` needs a few lines to print them.
+    - A room's people take their tickets one after another, so that the people the script
+      expects end up in the same room. Asking for news, confirming and room setup, which is
+      where the load is, all happen at once as in a study. One group failing its ready check
+      shifts every later group, and those rooms then fail as "split".
+
+## Planned measurements (not run)
+
+Needed to size the group study. None has been run, none is scheduled, and each needs a cost
+stated and a yes first.
+
+| Measurement | How | What it answers | Status |
+|---|---|---|---|
+| A spike at study size through a group link | `shape=spike`, `mix=link-4`, `target` = the study's rooms | Do groups form and rooms open in time when everyone arrives within 30 seconds? Time to match, ready to room, room to bot | **Not run.** Needs the join limit raised and a local rehearsal first |
+| Every room reaching the session limit at once | the same spike with `overrides={"session_limit_minutes": N}` and a hold longer than N minutes | Do all bots say the closing message and all sessions close when every room ends in the same minute? | **Not run.** The test does not yet check the closing message per room; today it would only show sessions left running |
+| Rooms of 4 on CPU speech-to-text | `mix=4` (console entry), `shape=breakpoint`, with the GPU speech service off | How many 4-person rooms the shared CPU speech server carries before replies slow past 2 seconds: the CPU/GPU switch point for the group study | **Not run** |
+
+What a run costs, from what is already measured: a load generator is about $0.20 an hour at 4
+vCPU and $0.80 at 16, and each GPU of our own models $0.805 an hour while on; a spike is about
+15 minutes of preparing, 5 minutes held and 2 minutes of closing. LiveKit Cloud's minutes for
+the simulated people and any paid vendor in the profile come on top and are not estimated here.
 
 ## The six standard tests ("shapes")
 
@@ -147,7 +226,9 @@ point, and run the big shapes on `ours`.
    ```bash
    gh workflow run loadtest.yml --ref main -f profile=ours -f shape=smoke -f target=10
    ```
-   `hold_s=60` shortens every step for a quick rehearsal.
+   `hold_s=60` shortens every step for a quick rehearsal. `-f mix=4` puts 4 people in every
+   room; `-f mix=link-4` brings them in through a group start link
+   ([built, not run](#entering-through-a-group-start-link-built-not-run)).
 3. **Read it.** The run's summary page shows one row per step and the verdict; the full
    result (JSON) is saved in the media bucket under `loadtests/`.
 4. **Switch things back off** with a PR. GPUs cost $0.805/hour each while on.
@@ -180,6 +261,7 @@ The report reads production's CloudWatch (`MEETLAB_ENV`, default `prod`), so loc
 | Quality scores (pure, unit-tested) | `tools/loadtest/meetlab_loadtest/quality.py`, `tools/loadtest/tests/test_quality.py` |
 | The answer judge: rubric, sampling, parsing (unit-tested; the model call is one function) | `tools/loadtest/meetlab_loadtest/judge.py`, `tools/loadtest/tests/test_judge.py` |
 | Voice scores: which turns are recorded, matching clips to replies (unit-tested) | `tools/loadtest/meetlab_loadtest/quality.py` (`record_turn`, `reply_for`, `voice`) |
+| Entering through a group start link: ticket, polling, ready check, timings (unit-tested against a stand-in for meet) | `tools/loadtest/meetlab_loadtest/group_link.py`, `tools/loadtest/tests/test_group_link.py` |
 | The conversation library: dialogue choice, people per room, voices, pauses (unit-tested) | `tools/loadtest/meetlab_loadtest/conversation_library.py`, `tools/loadtest/tests/test_conversation_library.py` |
 | Building the library's audio (once) | `tools/loadtest/meetlab_loadtest/build_conversation_library.py` |
 | A conversation's turns as data | runner `GET /conversations/{id}/utterances`, console `/api/meetings/{id}/utterances` |

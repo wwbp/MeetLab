@@ -176,5 +176,25 @@ class TestShards(unittest.TestCase):
         self.assertEqual((ans["judged"], ans["dropped"], ans["answers"], ans["overall"], ans["context"]), (4, 1, 3.5, 3.5, 3.0))
 
 
+class TestGroupLinkEntry(unittest.TestCase):
+    """ENTRY=group_link: each participant's way in (group_link.to_room, then the bot seen in the
+    room) is an "entry" event; a step reports them together."""
+
+    def entry(self, t, match_s, ready_to_room_s, bot_s, requeues=0):
+        return ("entry", t, 0, {"match_s": match_s, "ready_to_room_s": ready_to_room_s, "bot_s": bot_s,
+                                "requeues": requeues, "id_retries": 0})
+
+    def test_a_step_reports_time_to_match_ready_to_room_and_to_the_bot(self):
+        steps, bounds = [Step(1, 100), Step(0, 120)], [(0, 100), (100, 220)]
+        events = [self.entry(10, 1.0, 3.0, 0.5), self.entry(11, 2.0, 4.0, 1.5, requeues=1),
+                  self.entry(12, 9.0, 5.0, 2.5), self.entry(150, 99.0, 99.0, 99.0)]  # the last: another step
+        self.assertEqual(judge_step(0, steps[0], events, bounds)["entry"], {
+            "people": 3, "match_p50_s": 2.0, "match_p95_s": 9.0, "ready_to_room_p50_s": 4.0,
+            "ready_to_room_p95_s": 5.0, "bot_p50_s": 1.5, "bot_p95_s": 2.5, "requeues": 1, "id_retries": 0})
+
+    def test_a_console_started_step_has_no_entry_measures(self):
+        self.assertNotIn("entry", judge_step(0, Step(1, 100), [("turn", 10, 0, 900.0)], [(0, 100)]))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -57,6 +57,26 @@ class TestRooms(unittest.TestCase):
         plan = room_plan(3, lib)  # room 3: three people
         self.assertEqual([p for p, _ in plan][:6], [0, 1, 2, 0, 1, 2])
 
+    def test_four_people_take_the_lines_in_turn(self):
+        lib = select([dialogue(1)], n=1)
+        plan = room_plan(0, lib, mix="4")
+        self.assertEqual([p for p, _ in plan], [0, 1, 2, 3] * 2)
+        self.assertEqual([line for _, line in plan], lib[0]["lines"])  # the whole dialogue, in order
+        self.assertEqual(plan, room_plan(0, lib, mix="4"))  # the same every run
+
+    def test_four_people_all_speak_even_in_the_shortest_dialogue(self):
+        lib = select([dialogue(1, turns=6)], n=1)  # select()'s minimum
+        self.assertEqual({p for p, _ in room_plan(0, lib, mix="4")}, {0, 1, 2, 3})
+
+    def test_the_group_study_mix_is_half_rooms_of_three_half_of_four(self):
+        self.assertEqual(Counter(participants_for(i, "group") for i in range(100)), {3: 50, 4: 50})
+        self.assertEqual({participants_for(i, "4") for i in range(10)}, {4})
+
+    def test_rooms_of_three_and_four_do_not_share_a_dialogue(self):
+        lib = select([dialogue(i) for i in range(8)], n=8)
+        plans = [room_plan(r, lib, mix="group") for r in range(8)]
+        self.assertEqual(len({id(plan[0][1]) for plan in plans}), 8)
+
 
 class TestVoicesAndPauses(unittest.TestCase):
     def test_a_dialogue_side_always_has_the_same_voice_and_sides_differ(self):

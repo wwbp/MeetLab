@@ -147,6 +147,13 @@ def judge_step(k: int, step: Step, events: list, bounds: list) -> dict:
                        disconnects=sum(e[0] == "disconnect" for e in mine))
     m["harness_lag_ms"] = max([e[3] for e in mine if e[0] == "lag"], default=0)
     m["errors"] = [e[3] for e in mine if e[0] == "start_error"][:5]
+    entries = [e[3] for e in mine if e[0] == "entry"]  # ENTRY=group_link: one per participant (group_link.py)
+    if entries:
+        m["entry"] = {"people": len(entries), "requeues": sum(e["requeues"] for e in entries),
+                      "id_retries": sum(e["id_retries"] for e in entries)}
+        for name, field in (("match", "match_s"), ("ready_to_room", "ready_to_room_s"), ("bot", "bot_s")):
+            for q in (50, 95):
+                m["entry"][f"{name}_p{q}_s"] = _pct([e[field] for e in entries], q / 100)
     m["pass"], m["why"] = verdict(m)
     return m
 

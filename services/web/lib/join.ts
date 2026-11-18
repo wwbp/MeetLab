@@ -37,6 +37,33 @@ export function endsStudy(reason?: DisconnectReason): boolean {
   return reason === DisconnectReason.CLIENT_INITIATED || reason === DisconnectReason.ROOM_DELETED;
 }
 
+/**
+ * How long to wait before asking for the completion code again after this many
+ * failed attempts, or null to stop and show the failure text. The participant's
+ * only turn may still be being stored when they leave, so one refusal is not final.
+ */
+export function codeRetryDelayMs(failures: number): number | null {
+  return failures < 5 ? 2000 : null;
+}
+
+/** The completion code from `ask`, retried per `codeRetryDelayMs`; null once it gives up. */
+export async function completionCodeWithRetries(
+  ask: () => Promise<string>,
+  wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)),
+): Promise<string | null> {
+  for (let failures = 1; ; failures++) {
+    try {
+      const code = await ask();
+      if (code) return code;
+    } catch {
+      // counted as a failed attempt below
+    }
+    const delay = codeRetryDelayMs(failures);
+    if (delay === null) return null;
+    await wait(delay);
+  }
+}
+
 /** Plain copy for a camera/microphone or connection error. */
 export function mediaErrorMessage(error: Error): string {
   if (error.name === 'NotAllowedError' || /permission denied/i.test(error.message)) {

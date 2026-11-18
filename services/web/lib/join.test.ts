@@ -5,6 +5,7 @@ import {
   PRE_JOIN_DEFAULTS,
   botNotice,
   carryQuery,
+  codeRetryDelayMs,
   endsStudy,
   mediaErrorMessage,
   readConnectionDetails,
@@ -103,5 +104,12 @@ describe('botNotice', () => {
 
   it('only counts identities that start with bot_', () => {
     expect(botNotice(['robot_x', 'xbot_'], false)).toMatch(/is joining/);
+  });
+});
+
+describe('codeRetryDelayMs', () => {
+  it('waits 2 s after each of the first four failures, then gives up', () => {
+    expect([1, 2, 3, 4].map(codeRetryDelayMs)).toEqual([2000, 2000, 2000, 2000]);
+    expect(codeRetryDelayMs(5)).toBeNull();
   });
 });

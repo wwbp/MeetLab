@@ -707,12 +707,23 @@ class RunnerStartApiTests(unittest.TestCase):
                 self.assertEqual(response.status_code, 400, f"{bad!r} was accepted")
                 self.assertIn("session_limit_minutes", response.json().get("error", ""))
 
-    def test_put_rejects_a_mode_that_is_not_built_yet(self):
-        """A room set to one would claim a mode and silently run normal."""
+    def test_global_scope_refuses_ptt_and_baton(self):
+        """Every room without its own row would change mode at once: one room at a time, for now."""
         for mode in ("ptt", "baton"):
             with self.subTest(mode=mode):
-                response = self.client.put("/config", json={"scope": "test-runner-scope", "audio_mode": mode})
-                self.assertEqual(response.status_code, 400, f"{mode} was accepted")
+                response = self.client.put("/config", json={"scope": "global", "audio_mode": mode})
+                self.assertEqual(response.status_code, 400, f"{mode} was accepted for global")
+                self.assertIn("audio_mode", response.json().get("error", ""))
+        self.assertEqual(self.client.get("/config").json()["audio_mode"], "normal")
+
+    def test_room_scope_accepts_ptt_and_baton(self):
+        for mode in ("ptt", "baton"):
+            with self.subTest(mode=mode):
+                room = _room(f"test-audio-{mode}")
+                response = self.client.put("/config", json={"scope": room, "audio_mode": mode})
+                self.assertEqual(response.status_code, 200, response.text)
+                self.assertEqual(self.client.get(f"/config?room={room}").json()["audio_mode"], mode)
+        self.assertEqual(self.client.get("/config").json()["audio_mode"], "normal")
 
     def test_put_rejects_unknown_audio_mode(self):
         for bad in ("open", "PTT", "", None, 1, ["ptt"]):

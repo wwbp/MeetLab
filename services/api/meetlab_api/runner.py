@@ -1367,10 +1367,12 @@ async def _humans_in_room(room_name: str) -> int:
 
 
 async def rejoin_dead_sessions() -> list[str]:
-    """A room whose bot died (rejoin.DEATHS) with people still in it gets a new bot that resumes
-    the conversation (rejoin.py). Only a room's latest session counts, so a chain grows one link
-    per death and stops at rejoin.MAX_REJOINS. Returns the new session IDs."""
-    from meetlab_core.rejoin import DEATHS, WINDOW, chain, rejoin_due
+    """A room whose bot died (rejoin.DEATHS) with people still in it, or still on their way to
+    it (a group start link's match, rejoin.awaited_until), gets a new bot that resumes the
+    conversation (rejoin.py). Only a room's latest session counts, so a chain grows one link
+    per death and stops at rejoin.MAX_REJOINS. One room's failure (LiveKit no longer has it)
+    is logged and leaves the other rooms their rejoin. Returns the new session IDs."""
+    from meetlab_core.rejoin import DEATHS, WINDOW, awaited_until, chain, rejoin_due
 
     now = datetime.now(timezone.utc)
     async with AsyncSessionLocal() as db:
@@ -1379,19 +1381,25 @@ async def rejoin_dead_sessions() -> list[str]:
             Conversation.meta["ended_by"].astext.in_(DEATHS)))).scalars().all()
         started = []
         for room in {d.room_name for d in dead}:
-            rows = {r.id: r for r in (await db.execute(
-                select(Conversation).where(Conversation.room_name == room))).scalars()}
-            latest = max(rows.values(), key=lambda r: r.started_at)
-            if latest.status == "running" or latest.meta.get("ended_by") not in DEATHS:
-                continue  # it has a bot, or its last session ended on purpose
-            if not rejoin_due(latest, len(chain(rows, latest.id)), await _humans_in_room(room), False, now):
-                continue
-            meta = {k: v for k, v in latest.meta.items() if k != "ended_by"} | {"resumes": latest.id}
-            identity = f"bot_{_room_slug(room)}_{uuid.uuid4().hex[:10]}"
-            result = await _start_session(room, identity, meta, os.environ.get("BOT_DISPATCHER", ""))
-            if isinstance(result, dict) and not result.get("already_running"):
-                logger.warning(f"rejoin: the bot of session {latest.id} died; session {result['session_id']} resumes it")
-                started.append(result["session_id"])
+            try:
+                rows = {r.id: r for r in (await db.execute(
+                    select(Conversation).where(Conversation.room_name == room))).scalars()}
+                latest = max(rows.values(), key=lambda r: r.started_at)
+                if latest.status == "running" or latest.meta.get("ended_by") not in DEATHS:
+                    continue  # it has a bot, or its last session ended on purpose
+                awaited = awaited_until(await db.get(Match, room) if latest.meta.get("link_id") else None, now)
+                # An awaited room is not asked for its roster: LiveKit closes a room its bot left empty.
+                humans = 0 if awaited and now <= awaited else await _humans_in_room(room)
+                if not rejoin_due(latest, len(chain(rows, latest.id)), humans, False, now, awaited):
+                    continue
+                meta = {k: v for k, v in latest.meta.items() if k != "ended_by"} | {"resumes": latest.id}
+                identity = f"bot_{_room_slug(room)}_{uuid.uuid4().hex[:10]}"
+                result = await _start_session(room, identity, meta, os.environ.get("BOT_DISPATCHER", ""))
+                if isinstance(result, dict) and not result.get("already_running"):
+                    logger.warning(f"rejoin: the bot of session {latest.id} died; session {result['session_id']} resumes it")
+                    started.append(result["session_id"])
+            except Exception as e:
+                logger.warning(f"rejoin: room {room} skipped this tick: {e}")
     return started
 
 

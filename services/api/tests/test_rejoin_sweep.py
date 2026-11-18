@@ -31,14 +31,26 @@ class RejoinSweepTest(unittest.TestCase):
                 await engine.dispose()
         return asyncio.run(fresh())
 
-    async def _dead(self, ended_by):
+    async def _dead(self, ended_by, room=None, **meta):
         from meetlab_core.db.engine import AsyncSessionLocal
         from meetlab_core.db.models import Conversation
         sid = str(uuid.uuid4())
         async with AsyncSessionLocal() as db, db.begin():
-            db.add(Conversation(id=sid, room_name=self.room, bot_identity="bot_x", status="error",
-                                ended_at=datetime.now(timezone.utc), meta={"ended_by": ended_by, "agent_name": "a"}))
+            db.add(Conversation(id=sid, room_name=room or self.room, bot_identity="bot_x", status="error",
+                                ended_at=datetime.now(timezone.utc),
+                                meta={"ended_by": ended_by, "agent_name": "a", **meta}))
         return sid
+
+    async def _match(self, **fields):
+        """This room as a group start link's match (the bot starts when the match forms)."""
+        from meetlab_core.db.engine import AsyncSessionLocal
+        from meetlab_core.db.models import Match, StartLink
+        link_id = uuid.uuid4().hex[:22]
+        async with AsyncSessionLocal() as db, db.begin():
+            db.add(StartLink(link_id=link_id, name="test", pool=["global"], size=2, min_size=2))
+            await db.flush()
+            db.add(Match(room_name=self.room, link_id=link_id, bot_config_scope="global", size=2, **fields))
+        return link_id
 
     async def _room_sessions(self):
         from sqlalchemy import select
@@ -48,8 +60,10 @@ class RejoinSweepTest(unittest.TestCase):
             return list((await db.execute(select(Conversation).where(Conversation.room_name == self.room))).scalars())
 
     def _sweep(self, humans=2):
+        """humans: how many people every room has, or a function of the room name."""
+        roster = mock.AsyncMock(side_effect=humans) if callable(humans) else mock.AsyncMock(return_value=humans)
         with mock.patch.dict(os.environ, {"BOT_DISPATCHER": "docker"}), \
-             mock.patch.object(runner, "_humans_in_room", new=mock.AsyncMock(return_value=humans)), \
+             mock.patch.object(runner, "_humans_in_room", new=roster), \
              mock.patch.object(runner, "run_bot_container", return_value="meetlab-bot-x") as run, \
              mock.patch.object(runner, "_docker_api"):
             self._run(runner.rejoin_dead_sessions())
@@ -79,6 +93,46 @@ class RejoinSweepTest(unittest.TestCase):
         self._run(self._dead("crashed"))
         self._sweep(humans=0)
         self.assertEqual(self._running(), [])
+
+    def test_a_group_links_bot_that_died_before_anyone_arrived_is_replaced(self):
+        # Ready check + countdown + the microphone page can outlast the bot that started with
+        # the match: the group must not walk into a room with no bot.
+        link_id = self._run(self._match())
+        dead = self._run(self._dead("crashed", link_id=link_id, expected_humans=2))
+
+        def roster(room):  # LiveKit closes a room its bot left empty
+            if room == self.room:
+                raise RuntimeError("requested room does not exist")
+            return 0
+        self._sweep(humans=roster)
+        [new] = self._running()
+        self.assertEqual((new.meta.get("resumes"), new.meta.get("link_id")), (dead, link_id))
+
+    def test_a_closed_match_is_not_awaited(self):
+        link_id = self._run(self._match(closed_at=datetime.now(timezone.utc)))
+        self._run(self._dead("crashed", link_id=link_id))
+        self._sweep(humans=0)
+        self.assertEqual(self._running(), [])
+
+    def test_a_room_that_fails_does_not_stop_another_rooms_rejoin(self):
+        gone = f"{self.room}-gone"
+        self._run(self._dead("silent", room=gone))
+        self._run(self._dead("silent"))
+
+        def roster(room):
+            if room == gone:
+                raise RuntimeError("requested room does not exist")
+            return 2
+        with self.assertLogs("rejoin-test", "WARNING") as logs:
+            import logging
+            from loguru import logger
+            sink = logger.add(lambda m: logging.getLogger("rejoin-test").warning(m), level="WARNING")
+            try:
+                self._sweep(humans=roster)
+            finally:
+                logger.remove(sink)
+        self.assertEqual(len(self._running()), 1)
+        self.assertTrue(any(gone in line for line in logs.output), logs.output)  # the warning names the room
 
 
 class LoadResumeTest(unittest.TestCase):
@@ -113,6 +167,23 @@ class LoadResumeTest(unittest.TestCase):
         self.assertEqual(resumed["messages"], [assistant_message(BotReply("Hello!", [])),
                                                user_message([Turn(ana, "Ana", "Hi, I'm Ana.")])])
         self.assertAlmostEqual(resumed["elapsed_s"], 240, delta=5)
+
+    def test_a_bot_that_resumes_a_session_where_nothing_was_said_starts_fresh(self):
+        # A bot that died before the group arrived never greeted: its replacement must
+        # (bot.py greets only when there is nothing to resume).
+        async def scenario():
+            from meetlab_core.db.engine import AsyncSessionLocal
+            from meetlab_core.db.models import Conversation
+            from meetlab_core.rejoin import load_resume
+            first, second = str(uuid.uuid4()), str(uuid.uuid4())
+            async with AsyncSessionLocal() as db, db.begin():
+                db.add_all([Conversation(id=first, room_name=self.room, bot_identity="bot_x", status="error",
+                                         ended_at=datetime.now(timezone.utc), meta={"ended_by": "crashed"}),
+                            Conversation(id=second, room_name=self.room, bot_identity="bot_x", status="running",
+                                         meta={"resumes": first})])
+            async with AsyncSessionLocal() as db:
+                return await load_resume(db, await db.get(Conversation, second))
+        self.assertIsNone(self._run(scenario()))
 
 
 if __name__ == "__main__":

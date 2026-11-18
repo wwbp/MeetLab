@@ -277,16 +277,16 @@ export default function ConfigPage() {
                   required
                 />
               </Field>
-              {/* Disabled until they do something: a researcher must not pick a mode that silently does nothing. */}
-              <Field name="audio_mode" label="Audio mode" help="Who may speak when. Only Normal works today; push-to-talk and baton aren’t built yet.">
+              {/* Push-to-talk and baton: one room at a time (scope a room name); global refuses them. */}
+              <Field name="audio_mode" label="Audio mode" help="Who may speak when. Push-to-talk and baton: set them for one room (scope = the room name), not global.">
                 <select
                   value={form.audio_mode}
                   onChange={(e) => setForm((f) => ({ ...f, audio_mode: e.target.value }))}
                   className={sel}
                 >
                   <option value="normal">Normal: open mic (default)</option>
-                  <option value="ptt" disabled>Push-to-talk (not built yet)</option>
-                  <option value="baton" disabled>Baton (not built yet)</option>
+                  <option value="ptt">Push-to-talk: hold to speak (one room only)</option>
+                  <option value="baton">Baton: one speaker at a time (one room only)</option>
                 </select>
               </Field>
             </div>

@@ -164,7 +164,7 @@ export const CONFIG_INFO: Record<string, Info> = {
   },
   audio_mode: {
     title: 'Audio mode',
-    about: 'Who may speak when. Only Normal (open mic) works today: push-to-talk and baton aren’t built yet, so they can’t be chosen.',
+    about: 'Who may speak when. Normal is an open mic. Push-to-talk and baton are set for one room at a time (scope = the room name); the global settings stay Normal.',
     default: 'Normal',
   },
 };

@@ -241,8 +241,8 @@ class BotConfig(Base):
         server_default=CLOSING_MESSAGE,
         nullable=False,
     )
-    # "normal" (open mic) | "ptt" | "baton" (docs/audio-modes-test-plan.md). Only stored and served
-    # so far: nothing acts on it, so the console offers only normal.
+    # "normal" (open mic) | "ptt" | "baton" (docs/audio-modes-test-plan.md). ptt and baton for a
+    # room's own row only: PUT /config refuses them for global.
     audio_mode: Mapped[str] = mapped_column(
         String, default="normal", server_default="normal", nullable=False
     )

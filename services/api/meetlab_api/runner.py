@@ -248,7 +248,7 @@ class BotConfigAdmin(ModelView, model=BotConfig):
         "tts_provider": {"choices": [("elevenlabs", "ElevenLabs — paid service: ElevenLabs (default)"), ("openai", "OpenAI voices — paid service: OpenAI"), ("kokoro", "Kokoro — our own server (staging only)")]},
         "tts_aggregation_mode": {"choices": [("sentence", "sentence (default)"), ("clause", "first clause, then sentences"), ("token", "token (lower latency)")]},
         "turn_detection": {"choices": [("silence", "after a silence (default)"), ("smart_turn", "when the speaker sounds finished (smart turn)")]},
-        # Not ptt or baton: nothing acts on them yet, so nobody should pick them here.
+        # ptt and baton are chosen per room on the Bot settings page, where PUT checks the scope.
         "audio_mode": {"choices": [("normal", "normal: open mic (default)")]},
         # These two ADD together to form the turn-end window; 450+300=750ms is
         # calibrated against real pilot audio (tests/integration/test_turn_calibration.py).
@@ -749,7 +749,9 @@ async def _handle_egress_event(body: dict) -> None:
         logger.warning(f"_handle_egress_event failed for {egress_id}: {exc}")
 
 
-_AUDIO_MODES_BUILT = ("normal",)
+_AUDIO_MODES_BUILT = ("normal", "ptt", "baton")
+# ponytail: ptt and baton per room only; open global once a pilot has chosen a mode.
+_AUDIO_MODES_GLOBAL = ("normal",)
 
 
 @app.get("/configs")
@@ -905,10 +907,10 @@ async def update_config(request: Request, _=Depends(verify_api_key)):
             return JSONResponse({"error": "closing_message must be a string"}, status_code=400)
         fields["closing_message"] = body["closing_message"]
     if "audio_mode" in body:
-        # ptt and baton join this when the bot and the room page act on them. Until then, storing
-        # one would be a room that claims a mode and silently runs normal.
-        if body["audio_mode"] not in _AUDIO_MODES_BUILT:
-            return JSONResponse({"error": f"audio_mode must be one of {list(_AUDIO_MODES_BUILT)}"}, status_code=400)
+        allowed = _AUDIO_MODES_GLOBAL if scope == "global" else _AUDIO_MODES_BUILT
+        if body["audio_mode"] not in allowed:
+            where = "the global settings" if scope == "global" else "a room"
+            return JSONResponse({"error": f"audio_mode for {where} must be one of {list(allowed)}"}, status_code=400)
         fields["audio_mode"] = body["audio_mode"]
 
     await _save_config(scope, fields)

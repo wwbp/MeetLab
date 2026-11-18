@@ -28,10 +28,18 @@ on:
         description: "Seconds per step; 0 = the shape's own (a rehearsal uses ~60)"
         default: "0"
       mix:
-        description: "People per room: study (1:2:3 = 50:30:20) or equal (a third each)"
+        description: "People per room: study (1:2:3 = 50:30:20), equal (a third each), group (3 and 4, half each), or 3 / 4 in every room"
         type: choice
-        options: [study, equal]
+        options: [study, equal, group, "3", "4"]
         default: study
+      entry:
+        description: "How people get into rooms: console (the run starts each room) or group_link (one group start link: ticket, ready check with a Prolific ID, then the room; never run yet, see docs/load-testing.md)"
+        type: choice
+        options: [console, group_link]
+        default: console
+      group_size:
+        description: "With entry = group_link: people per room (2-8); replaces mix"
+        default: "4"
       library:
         description: "Conversations: v1 = 100 everyday dialogues in 20 voices, rooms of 1-3 people (docs/load-testing.md); none = the 5 original scripts, 1 person"
         type: choice
@@ -96,6 +104,8 @@ jobs:
           OVERRIDES: ${{ inputs.overrides }}
           PEOPLE_MIX: ${{ inputs.mix }}
           VIDEO: ${{ inputs.video && '1' || '0' }}
+          ENTRY: ${{ inputs.entry }}
+          GROUP_SIZE: ${{ inputs.group_size }}
         run: |
           set -euo pipefail
           account="$(aws sts get-caller-identity --query Account --output text)"
@@ -116,12 +126,14 @@ jobs:
               --arg p "$PROFILE" --arg s "$SHAPE" --arg t "$TARGET" --arg h "$HOLD_S" \
               --arg r "s3://$bucket/$key" --arg g "$GITHUB_SHA" --arg w "$((CPU / 1024))" --arg l "$library" \
               --arg sh "$i/$GENERATORS" --arg t0 "$t0" --arg id "$run_id" --arg o "$OVERRIDES" --arg mx "$PEOPLE_MIX" --arg v "$VIDEO" \
+              --arg en "$ENTRY" --arg gs "$GROUP_SIZE" \
               '{cpu: $cpu, memory: $mem, containerOverrides: [{name: "loadgen", environment: [
                 {name: "PROFILE", value: $p}, {name: "SHAPE", value: $s}, {name: "TARGET", value: $t},
                 {name: "HOLD_S", value: $h}, {name: "RESULTS", value: $r}, {name: "GIT_SHA", value: $g},
                 {name: "WORKERS", value: $w}, {name: "LIBRARY", value: $l},
                 {name: "SHARD", value: $sh}, {name: "T0", value: $t0}, {name: "RUN_ID", value: $id},
-                {name: "OVERRIDES", value: $o}, {name: "PEOPLE_MIX", value: $mx}, {name: "VIDEO", value: $v}]}]}')"
+                {name: "OVERRIDES", value: $o}, {name: "PEOPLE_MIX", value: $mx}, {name: "VIDEO", value: $v},
+                {name: "ENTRY", value: $en}, {name: "GROUP_SIZE", value: $gs}]}]}')"
             task="$(aws ecs run-task --cluster "$CLUSTER" --task-definition meetlab-v2-prod-loadgen \
               --launch-type FARGATE --started-by loadtest --network-configuration "$network" \
               --overrides "$overrides" --query 'tasks[0].taskArn' --output text)"

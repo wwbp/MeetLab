@@ -1,6 +1,6 @@
 """The load test's conversation library (load-test readiness L6): everyday dialogues from
 DailyDialog (Li et al., 2017; ConvLab's mirror; CC BY-NC-SA 4.0, research use), spoken in
-varied voices, in rooms of 1 to 3 people, as studies have them.
+varied voices, in rooms of 1 to 4 people, as studies have them.
 
 Pure and deterministic, so every run speaks the same lines in the same voices:
 tools/loadtest/tests/test_conversation_library.py. The audio is made once by
@@ -47,12 +47,14 @@ def select(dialogues: list[dict], n: int = 100) -> list[dict]:
 MIXES = {
     "study": [1, 2, 1, 3, 1, 2, 1, 2, 1, 3],  # every 10 rooms: five of 1, three of 2, two of 3 (the user's study mix)
     "equal": [1, 2, 3],                       # as many of each (the 100-room spike, 2026-10-05)
+    "group": [3, 4],                          # the group study: rooms of 3 and 4, half each
 }
 
 
 def participants_for(room: int, mix: str = "study") -> int:
-    """People in a room, interleaved so even a small run has every size."""
-    sizes = MIXES[mix]
+    """People in a room, interleaved so even a small run has every size. A number as the mix
+    ("4") is that many in every room."""
+    sizes = MIXES.get(mix) or [int(mix)]
     return sizes[room % len(sizes)]
 
 
@@ -60,7 +62,7 @@ def room_plan(room: int, library: list[dict], per_room: int = 1, mix: str = "stu
     """(participant, line) in speaking order, through the room's own dialogues back to back (no two
     rooms share one while the library lasts). One person speaks one side and the bot answers in
     place of the other, so they get twice the dialogues to fill the same time; two speak the two
-    sides; three take the lines in turn."""
+    sides; three or four take the lines in turn."""
     def need(r):
         return per_room * (2 if participants_for(r, mix) == 1 else 1)
     start = sum(need(r) for r in range(room))

@@ -18,6 +18,12 @@ waits for the machines, so the run measures load, not cold starts; Stop preparin
 Rooms are spread over WORKERS processes (one interpreter cannot pace many real-time
 microphones); a worker whose event loop falls behind marks the run's numbers as the
 harness's, not the stack's. PREPARE=0 skips Prepare for study (local stack: no pool).
+
+ENTRY=group_link [GROUP_SIZE=4]: nobody starts the rooms from the console. The run makes one
+group start link; each room's people take a ticket on it, wait to be matched, answer the
+ready check with their own Prolific ID and join the room the matchmaker gives them
+(group_link.py), so the run also measures the waiting room: time to match, Ready to room,
+room to the bot being there. Never run yet (docs/load-testing.md).
 """
 import asyncio
 import json
@@ -119,6 +125,16 @@ class Console:
         with self.web.open(req, timeout=60) as r:
             return json.loads(r.read() or b"{}")
 
+    def post(self, path: str, body: dict) -> tuple[int, dict]:
+        """A participant's POST to a public route, where a refusal (409, 429) is an answer."""
+        try:
+            return 200, self.call("POST", path, body)
+        except urllib.error.HTTPError as e:
+            try:
+                return e.code, json.loads(e.read() or b"{}")
+            except ValueError:
+                return e.code, {}
+
 
 async def _sleep_until(t: float, abort) -> bool:
     while time.time() < t:
@@ -145,7 +161,56 @@ async def _camera(source, offset: int, stop):
         await asyncio.sleep(1 / CAMERA_FPS)
 
 
-async def run_room(i: int, run_id: str, steps, t0: float, profile: dict, console: Console, q, abort):
+async def _bot_in(room, since: float, abort) -> float:
+    """Seconds from `since` until this participant sees the bot in the room."""
+    while not any(p.identity.startswith("bot_") for p in room.remote_participants.values()):
+        if time.time() - since > 600 or abort.is_set():
+            raise TimeoutError("the bot did not join within 10 min")
+        await asyncio.sleep(0.5)
+    return time.time() - since
+
+
+async def _enter(console: Console, via, run_id: str, i: int, people: int) -> list[dict]:
+    """ENTRY=group_link: this room's people each take a ticket on the run's link and are driven
+    to their room (group_link.py). One entry per person: the room, timings, and when they got it."""
+    from meetlab_loadtest.group_link import prolific_id, take_ticket, to_room
+    link, lock = via
+
+    async def post(path, body):
+        return await asyncio.to_thread(console.post, path, body)
+
+    # ponytail: a room's tickets are taken one after another under a lock shared by this
+    # generator's workers, so the matchmaker (first come, first served) groups the people this
+    # room's script expects; polls, Ready and room setup stay concurrent. Ceiling: ticket
+    # creation is never a thundering herd (the link's row lock serialises it in Postgres anyway),
+    # and one requeue shifts every later group ("the group was split"). Past that: regroup
+    # people by the room they were given.
+    while not lock.acquire(block=False):
+        await asyncio.sleep(0.05)
+    try:
+        taken = [(await take_ticket(post, link, prolific_id(run_id, i, p)), time.time()) for p in range(people)]
+    finally:
+        lock.release()
+
+    async def one(p, reply, at):
+        e = await to_room(reply, post, lambda n: prolific_id(run_id, i, p, n), asyncio.sleep, time.time, taken_at=at)
+        return {**e, "at": time.time()}
+    entries = await asyncio.gather(*(one(p, reply, at) for p, (reply, at) in enumerate(taken)))
+    if len({e["room"] for e in entries}) != 1:
+        raise RuntimeError(f"the group was split: {sorted({e['room'] for e in entries})}")
+    return entries
+
+
+def _session_in(console: Console, room: str) -> str:
+    """The session the matchmaker started in a room (the console started none to ask).
+    ponytail: looks at the newest 200 meetings; page it for a run past 200 rooms."""
+    for c in console.call("GET", "/api/meetings?limit=200")["conversations"]:
+        if c["room_name"] == room and c["status"] == "running":
+            return c["id"]
+    raise RuntimeError(f"no running session in {room}")
+
+
+async def run_room(i: int, run_id: str, steps, t0: float, profile: dict, console: Console, q, abort, via=None):
     from meetlab_loadtest.conversation_soak import BotListener, load_turn_audio
 
     from meetlab_loadtest.conversation_library import participants_for, room_plan
@@ -153,7 +218,7 @@ async def run_room(i: int, run_id: str, steps, t0: float, profile: dict, console
 
     library = _library()
     mix = os.getenv("PEOPLE_MIX", "study")  # "equal": as many rooms of 1, 2 and 3 (the 100-room spike)
-    people = participants_for(i, mix) if library else 1  # 1-3 people, as in studies (library runs)
+    people = participants_for(i, mix) if library or via else 1  # 1-4 people, as in studies (library runs)
     # Each room its own share of the library, back to back: a long hold hears whole conversations,
     # not one repeated (280 Topical-Chat conversations over 100 rooms: 2 each, 4 for one person, ~10 min).
     per_room = max(1, len(library) // (max(s.rooms for s in steps) * 4 // 3)) if library else 1  # a third of rooms take double
@@ -182,9 +247,15 @@ async def run_room(i: int, run_id: str, steps, t0: float, profile: dict, console
 
     try:
         from meetlab_loadtest._sim_common import token
-        await asyncio.to_thread(console.call, "POST", "/api/concierge/rooms", {"name": name})
-        if profile:
-            await asyncio.to_thread(console.call, "PUT", "/api/console/config", {"scope": name, **profile})
+        entries = []
+        if via:  # the matchmaker names the room, sets it up on the link's settings and starts its bot
+            entries = await _enter(console, via, run_id, i, people)
+            name = entries[0]["room"]
+            q.put(("room", time.time(), i, name))
+        else:
+            await asyncio.to_thread(console.call, "POST", "/api/concierge/rooms", {"name": name})
+            if profile:
+                await asyncio.to_thread(console.call, "PUT", "/api/console/config", {"scope": name, **profile})
         sources = []
         for p, r in enumerate(rooms):
             who = f"load_{i:03d}" if people == 1 else f"load_{i:03d}_{p}"
@@ -197,13 +268,16 @@ async def run_room(i: int, run_id: str, steps, t0: float, profile: dict, console
                                                         rtc.TrackPublishOptions(source=rtc.TrackSource.SOURCE_CAMERA))
                 cameras.append(asyncio.create_task(_camera(camera, 7 * i + p, lambda: closing["intentional"] or abort.is_set())))
         asked = time.time()
-        started = await asyncio.to_thread(console.call, "POST", f"/api/concierge/rooms/{name}/bots", {})
-        q.put(("session", asked, i, started["request"]["runnerSessionId"]))  # its stored turns, for quality
-        while not any(p.identity.startswith("bot_") for p in room.remote_participants.values()):
-            if time.time() - asked > 600 or abort.is_set():
-                raise TimeoutError("the bot did not join within 10 min")
-            await asyncio.sleep(0.5)
-        q.put(("join", asked, i, time.time() - asked))
+        if via:
+            session = await asyncio.to_thread(_session_in, console, name)
+        else:
+            started = await asyncio.to_thread(console.call, "POST", f"/api/concierge/rooms/{name}/bots", {})
+            session = started["request"]["runnerSessionId"]
+        q.put(("session", asked, i, session))  # its stored turns, for quality
+        q.put(("join", asked, i, await _bot_in(room, asked, abort)))
+        for e, r in zip(entries, rooms):  # each person: from being given the room to the bot being there
+            at = e.pop("at")
+            q.put(("entry", at, i, {**e, "bot_s": await _bot_in(r, at, abort)}))
     except Exception as e:
         q.put(("start_error", time.time(), i, f"{name}: {e!r}"[:300]))
         closing["intentional"] = True
@@ -263,12 +337,12 @@ async def _lag_monitor(worker: int, q, abort):
             q.put(("lag", time.time(), worker, lag_ms))
 
 
-def _worker(worker: int, rooms: list[int], run_id, steps, t0, profile, q, abort):
+def _worker(worker: int, rooms: list[int], run_id, steps, t0, profile, q, abort, via=None):
     async def main():
         console = Console(os.environ["MEET_URL"], os.environ["CONSOLE_PASSWORD"])
         lag = asyncio.create_task(_lag_monitor(worker, q, abort))
         for i, outcome in zip(rooms, await asyncio.gather(
-                *(run_room(i, run_id, steps, t0, profile, console, q, abort) for i in rooms), return_exceptions=True)):
+                *(run_room(i, run_id, steps, t0, profile, console, q, abort, via) for i in rooms), return_exceptions=True)):
             if isinstance(outcome, BaseException):  # a harness fault must never pass silently
                 print(f"room {i}: harness error {outcome!r}", flush=True)
                 q.put(("start_error", time.time(), i, f"harness: {outcome!r}"[:300]))
@@ -294,6 +368,13 @@ def main() -> int:
     shard, of = (int(x) for x in os.getenv("SHARD", "0/1").split("/"))
     run_id = os.getenv("RUN_ID") or uuid.uuid4().hex[:6]
     rooms = shard_rooms(peak, shard, of)
+    entry, link = os.getenv("ENTRY") or "console", None
+    if entry not in ("console", "group_link"):
+        raise SystemExit("ENTRY must be console or group_link")
+    if entry == "group_link":  # every room is one full group: the link's size is the mix
+        from meetlab_loadtest.group_link import link_settings
+        os.environ["PEOPLE_MIX"] = os.getenv("GROUP_SIZE") or "4"  # the workers read it (spawned after this)
+        link = link_settings(run_id, int(os.environ["PEOPLE_MIX"]))
     if os.getenv("LIBRARY"):  # fetched once, before the workers start: they read it from disk
         _fetch_library(os.environ["LIBRARY"])
         print(f"conversation library: {len(_library())} dialogues", flush=True)
@@ -325,7 +406,14 @@ def main() -> int:
         result["bounds"] = bounds  # load_report.py reads the environment's side of each step by these
         ctx = mp.get_context("spawn")
         q, abort = ctx.Queue(), ctx.Event()
-        procs = [ctx.Process(target=_worker, args=(w, rooms[w::workers], run_id, steps, t0, profile, q, abort),
+        via = None
+        if link:  # one link per generator, on the profile's settings; stopped in the finally below
+            console.call("PUT", "/api/console/config", {"scope": link["pool"][0], **profile})
+            token = console.call("POST", "/api/console/start-link", link)["token"]
+            via = (token, ctx.Lock())
+            result["entry"] = {"via": "group_link", "link": token, "size": link["size"]}
+            print(f"group start link {token}: rooms of {link['size']}", flush=True)
+        procs = [ctx.Process(target=_worker, args=(w, rooms[w::workers], run_id, steps, t0, profile, q, abort, via),
                              daemon=True) for w in range(workers)]
         for p in procs:
             p.start()
@@ -355,9 +443,9 @@ def main() -> int:
             time.sleep(steps[-1].hold_s)  # the rooms left at the abort: give the bots the closing step's time
         for p in procs:
             p.join(timeout=60)
-        still = []
+        still, named = [], {e[2]: e[3] for e in events if e[0] == "room"}  # group links: the matchmaker's names
         for i in rooms:
-            name = f"load-{run_id}-{i:03d}"
+            name = named.get(i, f"load-{run_id}-{i:03d}")
             try:
                 if console.call("GET", f"/api/concierge/rooms/{name}/bots").get("assignedBotIdentity"):
                     still.append(name)
@@ -411,6 +499,8 @@ def main() -> int:
             print("HARNESS OVERLOADED: its microphones fell behind; add WORKERS or a bigger machine before trusting this run")
         print(f"VERDICT: {'PASS' if result['pass'] else 'FAIL'}", flush=True)
     finally:
+        if result.get("entry"):
+            console.call("PATCH", f"/api/console/start-link/{result['entry']['link']}", {"active": False})
         if prepare:
             console.call("DELETE", "/api/concierge/capacity")  # never leave the pool warm
         _save(result)

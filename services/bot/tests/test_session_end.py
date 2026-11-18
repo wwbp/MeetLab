@@ -198,5 +198,53 @@ class PlaybackClockTest(unittest.TestCase):
         self.assertFalse(c.playing(11.0))
 
 
+class ClosesTheRoom(unittest.TestCase):
+    """A close that fails once must not leave people in a room with a muted bot."""
+
+    def _run(self, outcomes):
+        import asyncio
+
+        from meetlab_bot.session_end import close_with_retries
+        calls, sleeps = [], []
+
+        async def delete():
+            calls.append(1)
+            o = outcomes[len(calls) - 1]
+            if o:
+                raise o
+
+        async def sleep(s):
+            sleeps.append(s)
+
+        return asyncio.run(close_with_retries(delete, sleep=sleep)), len(calls), sleeps
+
+    def test_closes_at_once_when_it_works(self):
+        self.assertEqual(self._run([None]), (True, 1, []))
+
+    def test_tries_again_after_a_failure(self):
+        ok, calls, sleeps = self._run([RuntimeError("503"), None])
+        self.assertEqual((ok, calls, len(sleeps)), (True, 2, 1))
+
+    def test_gives_up_after_three(self):
+        ok, calls, _ = self._run([RuntimeError("x")] * 3)
+        self.assertEqual((ok, calls), (False, 3))
+
+
+class SpeechAfterTheLimit(unittest.TestCase):
+    """People are muted for the bot from the limit, but what they say is still research data
+    and still counts towards their completion code."""
+
+    def test_stored_under_the_speaker(self):
+        from meetlab_bot.session_end import after_limit_utterance
+        self.assertEqual(after_limit_utterance(" Thanks, bye. ", "sid1", {"sid1": "ana__x1"}),
+                         {"speaker_id": "ana__x1", "text": "Thanks, bye.", "meta": {"source": "speech", "after_limit": True}})
+
+    def test_nothing_for_silence_or_a_stranger(self):
+        from meetlab_bot.session_end import after_limit_utterance
+        self.assertIsNone(after_limit_utterance("  ", "sid1", {"sid1": "ana__x1"}))
+        self.assertIsNone(after_limit_utterance("hello", "sid9", {"sid1": "ana__x1"}))
+        self.assertIsNone(after_limit_utterance("hello", None, {"sid1": "ana__x1"}))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -92,3 +92,25 @@ class PlaybackClock:
 
     def playing(self, t: float) -> bool:
         return t < self._until
+
+
+async def close_with_retries(delete, *, sleep, attempts: int = 3, wait_s: float = 2.0) -> bool:
+    """Close the room; a close that fails once must not leave people with a muted bot."""
+    for i in range(attempts):
+        try:
+            await delete()
+            return True
+        except Exception:
+            if i < attempts - 1:
+                await sleep(wait_s)
+    return False
+
+
+def after_limit_utterance(text: str, user_id: str | None, sid_to_identity: dict) -> dict | None:
+    """What someone said after the limit, to store: the bot no longer hears it (muted), but it is
+    still data and still counts towards a completion code. None for silence or an unknown speaker."""
+    text = (text or "").strip()
+    speaker = sid_to_identity.get(user_id) if user_id else None
+    if not text or not speaker:
+        return None
+    return {"speaker_id": speaker, "text": text, "meta": {"source": "speech", "after_limit": True}}

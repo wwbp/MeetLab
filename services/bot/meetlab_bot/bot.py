@@ -65,7 +65,7 @@ from meetlab_core.turns import (
 from meetlab_bot.floor_room import FloorRoom
 from meetlab_bot.interruption import InterruptionTracker
 from meetlab_bot.study_support import closing_due, speaker_meta
-from meetlab_bot.session_end import PlaybackClock, SessionEnd
+from meetlab_bot.session_end import PlaybackClock, SessionEnd, after_limit_utterance, close_with_retries
 from meetlab_bot.multi_speaker_stt import MultiSpeakerSTT, SpeakerLabelInjector
 from meetlab_bot.speech_onset_vad import build_speech_onset_silero
 from meetlab_bot.runner_types import LiveKitRunnerArguments
@@ -498,12 +498,14 @@ async def _close_room(room_name: str) -> None:
 
     cfg = load_config()
     url = require(cfg.livekit_url, "LIVEKIT_URL").replace("wss://", "https://").replace("ws://", "http://")
-    try:
+
+    async def delete():
         async with lkapi.LiveKitAPI(url=url, api_key=require(cfg.livekit_api_key, "LIVEKIT_API_KEY"),
                                     api_secret=require(cfg.livekit_api_secret, "LIVEKIT_API_SECRET")) as lk:
             await lk.room.delete_room(lkapi.DeleteRoomRequest(room=room_name))
-    except Exception as e:
-        logger.warning(f"could not close room {room_name}: {e}")
+
+    if not await close_with_retries(delete, sleep=asyncio.sleep):
+        logger.error(f"could not close room {room_name} after the session limit")
 
 
 async def bot(runner_args: LiveKitRunnerArguments):
@@ -801,6 +803,17 @@ async def _bot(runner_args: LiveKitRunnerArguments):
                     _last_audio_times[frame.user_id] = time.monotonic()
             await self.push_frame(frame, direction)
 
+    async def _store_after_limit(frame) -> None:
+        said = after_limit_utterance(frame.text, frame.user_id, _sid_to_identity)
+        if not said:
+            return
+        try:
+            async with AsyncSessionLocal() as db, db.begin():
+                db.add(Utterance(id=_new_id(), conv_id=runner_args.session_id, reply_to=_last_bot_utt_id[0],
+                                 ts=time.time(), **said))
+        except Exception as e:
+            logger.warning(f"could not store speech after the limit for session {runner_args.session_id}: {e}")
+
     class _SpeakerTracker(FrameProcessor):
         """Records the SID of whoever sent the most recent TranscriptionFrame.
 
@@ -826,6 +839,11 @@ async def _bot(runner_args: LiveKitRunnerArguments):
                     last_ts = _last_audio_times.get(frame.user_id)
                     if last_ts is not None:
                         _turn_timing["last_audio_ts"] = last_ts
+                if session_end and session_end.muted:
+                    # Muted for the bot from the limit (the aggregator drops this frame), kept
+                    # for the transcript. ponytail: words transcribed just before the limit in
+                    # a turn not yet closed are lost; store open turns at the limit if it matters.
+                    await _store_after_limit(frame)
             await self.push_frame(frame, direction)
 
     class _TTSFirstTimer(FrameProcessor):

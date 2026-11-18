@@ -72,6 +72,14 @@ When the limit is reached, in this order:
 Closing the room is what shows each participant the "Thank you for taking part" screen
 with their completion code, all at the same moment.
 
+What people say after the limit is still stored in the transcript (marked `after_limit`)
+and still counts towards their completion code; the assistant just no longer answers it.
+
+If closing the room fails, it is tried three times.
+
+**Push-to-talk and baton rooms are not covered yet:** someone holding the floor can block
+the closing message, and the room then closes without it. Use Normal mode with a limit.
+
 If the closing message produces no sound within 20 s (for example the voice service is
 down), the room still closes after the buffer.
 

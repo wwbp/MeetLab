@@ -63,10 +63,11 @@ groups (the "matchmaker") handles one link's requests one at a time and sets the
 a waiting page is asking for news, so it is the part most likely to slow down when a whole
 study arrives at once. The ledger asks for exactly this to be load-tested.
 
-With **entry = group_link** the test goes in the participants' way:
+With **mix = link-3** or **link-4** the test goes in the participants' way (the driver's own
+settings are `ENTRY=group_link` and `GROUP_SIZE`, 2 to 8):
 
-1. The run creates one group start link of the chosen room size (`group_size`, 2 to 8, default
-   4), on the profile's bot settings, with no countdown.
+1. The run creates one group start link of that room size, on the profile's bot settings,
+   with no countdown.
 2. Each simulated person asks for a place in line (a "ticket"), then asks for news every 2
    seconds, as the waiting page does.
 3. When their group is found they confirm with their own Prolific ID (24 characters, different
@@ -117,7 +118,7 @@ stated and a yes first.
 
 | Measurement | How | What it answers | Status |
 |---|---|---|---|
-| A spike at study size through a group link | `shape=spike`, `entry=group_link`, `group_size=4`, `target` = the study's rooms | Do groups form and rooms open in time when everyone arrives within 30 seconds? Time to match, ready to room, room to bot | **Not run.** Needs the join limit raised and a local rehearsal first |
+| A spike at study size through a group link | `shape=spike`, `mix=link-4`, `target` = the study's rooms | Do groups form and rooms open in time when everyone arrives within 30 seconds? Time to match, ready to room, room to bot | **Not run.** Needs the join limit raised and a local rehearsal first |
 | Every room reaching the session limit at once | the same spike with `overrides={"session_limit_minutes": N}` and a hold longer than N minutes | Do all bots say the closing message and all sessions close when every room ends in the same minute? | **Not run.** The test does not yet check the closing message per room; today it would only show sessions left running |
 | Rooms of 4 on CPU speech-to-text | `mix=4` (console entry), `shape=breakpoint`, with the GPU speech service off | How many 4-person rooms the shared CPU speech server carries before replies slow past 2 seconds: the CPU/GPU switch point for the group study | **Not run** |
 
@@ -226,7 +227,7 @@ point, and run the big shapes on `ours`.
    gh workflow run loadtest.yml --ref main -f profile=ours -f shape=smoke -f target=10
    ```
    `hold_s=60` shortens every step for a quick rehearsal. `-f mix=4` puts 4 people in every
-   room; `-f entry=group_link -f group_size=4` brings them in through a group start link
+   room; `-f mix=link-4` brings them in through a group start link
    ([built, not run](#entering-through-a-group-start-link-built-not-run)).
 3. **Read it.** The run's summary page shows one row per step and the verdict; the full
    result (JSON) is saved in the media bucket under `loadtests/`.

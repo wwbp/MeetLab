@@ -29,6 +29,8 @@ room-gone cleanup can never be what closes a session and hide a failure.
   group_link       a size-2 start link: two participants join, both press Ready, reach one room with
                    one bot, and each speaker record keeps their ticket's Prolific ID
   session_limit    a room's time limit: the bot speaks its closing message when time is up   (D2)
+  group_limit      a size-2 start link with a time limit: the room closes for both people and
+                   each gets their own completion code
   our_models       a room configured for our LLM (vLLM) and voice (Kokoro): the bot hears,
                    answers and speaks on them (waits for cold models first)          (L3)
   turn_relay       a participant's browser (Chromium) allowed no direct path (relay-only) joins
@@ -673,6 +675,33 @@ async def ticket_to_room(reply: dict, post, timeout: float, sleep=asyncio.sleep,
         reply = post("/api/start-link/status", {"ticket": reply["ticket"]})
 
 
+async def _group_of_two(link: str, people: list, on_join=lambda i, person: None):
+    """Ana and Ben through a size-2 start link into its room, as their browsers go: a ticket each
+    with their own Prolific ID, Ready, the room page. Their connections are appended to people
+    (the caller disconnects them). Returns the room, its one bot session and the two tickets."""
+    pids = [uuid.uuid4().hex[:24] for _ in range(2)]
+    joined = [_post("/api/start-link", {"token": link, "participant_id": pid}) for pid in pids]
+    for j, pid in zip(joined, pids):
+        if j.get("participant_id") != pid:
+            raise Fail(f"ticket {j.get('ticket')} carries {j.get('participant_id')!r}, expected {pid}")
+    rooms = await asyncio.gather(*(ticket_to_room(j, _post, 240) for j in joined))
+    if rooms[0] != rooms[1]:
+        raise Fail(f"the group was split: {rooms}")
+    room = rooms[0]
+    for i, (name, j) in enumerate(zip(("Ana", "Ben"), joined)):  # the room page, with the ticket's ID (lib/waiting.ts roomUrl)
+        person = rtc.Room()
+        on_join(i, person)
+        await person.connect(os.environ["LIVEKIT_URL"], _join_as_participant(room, name, j["participant_id"])["participantToken"])
+        people.append(person)
+    bots = lambda: [p for p in people[0].remote_participants.values() if p.identity.startswith("bot_")]  # noqa: E731
+    await _until(bots, 420, "the bot in the group's room")
+    running = [c for c in json.loads(_web.open(f"{MEET}/api/meetings?limit=200", timeout=30).read())["conversations"]
+               if c["room_name"] == room and c["status"] == "running"]
+    if len(running) != 1 or len(bots()) != 1:
+        raise Fail(f"{len(running)} running session(s) and {len(bots())} bot(s) in {room}, expected one of each")
+    return room, running[0]["id"], joined
+
+
 async def scenario_group_link():
     """Group start links: a size-2 link with no start delay; two participants with their own
     Prolific IDs join, both press Ready, and both reach the same room with one bot. Each says
@@ -684,26 +713,7 @@ async def scenario_group_link():
                                              "min_size": 2, "delay_s": 0, "max_wait_s": 120, "ready_check_s": 60})["token"]
     people = []
     try:
-        pids = [uuid.uuid4().hex[:24] for _ in range(2)]
-        joined = [_post("/api/start-link", {"token": link, "participant_id": pid}) for pid in pids]
-        for j, pid in zip(joined, pids):
-            if j.get("participant_id") != pid:
-                raise Fail(f"ticket {j.get('ticket')} carries {j.get('participant_id')!r}, expected {pid}")
-        rooms = await asyncio.gather(*(ticket_to_room(j, _post, 240) for j in joined))
-        if rooms[0] != rooms[1]:
-            raise Fail(f"the group was split: {rooms}")
-        room = rooms[0]
-        for name, j in zip(("Ana", "Ben"), joined):  # the room page, with the ticket's ID (lib/waiting.ts roomUrl)
-            person = rtc.Room()
-            await person.connect(os.environ["LIVEKIT_URL"], _join_as_participant(room, name, j["participant_id"])["participantToken"])
-            people.append(person)
-        bots = lambda: [p for p in people[0].remote_participants.values() if p.identity.startswith("bot_")]  # noqa: E731
-        await _until(bots, 420, "the bot in the group's room")
-        running = [c for c in json.loads(_web.open(f"{MEET}/api/meetings?limit=200", timeout=30).read())["conversations"]
-                   if c["room_name"] == room and c["status"] == "running"]
-        if len(running) != 1 or len(bots()) != 1:
-            raise Fail(f"{len(running)} running session(s) and {len(bots())} bot(s) in {room}, expected one of each")
-        session = running[0]["id"]
+        room, session, joined = await _group_of_two(link, people)
         await asyncio.sleep(5)  # the greeting
         for person in people:
             await _play_wav(person, SPEECH, 8)
@@ -749,6 +759,38 @@ async def scenario_session_limit():
         return f"closing message heard {heard:.0f} s after the bot joined (limit 60 s), room closed at {closed:.0f} s"
     finally:
         await person.disconnect()
+
+
+async def scenario_group_limit():
+    """A paid group study's ending: two people from a size-2 start link whose room is limited to
+    1 minute. Both speak; at the limit the room closes for both (ROOM_DELETED, which is what shows
+    the completion screen), and each then gets their own completion code."""
+    scope, grace = f"accept-{uuid.uuid4().hex[:6]}", 5
+    _post("/api/console/login", {"password": os.environ["CONSOLE_PASSWORD"]})
+    _post("/api/console/config", {"scope": scope, "session_limit_minutes": 1, "closing_message": "Time is up, thank you.",
+                                  "closing_grace_seconds": grace}, method="PUT")
+    link = _post("/api/console/start-link", {"name": f"acceptance {scope}", "pool": [scope], "size": 2,
+                                             "min_size": 2, "delay_s": 0, "max_wait_s": 120, "ready_check_s": 60})["token"]
+    people, gone = [], {}
+    try:
+        room, _, joined = await _group_of_two(
+            link, people, lambda i, person: person.on("disconnected", lambda reason: gone.setdefault(i, reason)))
+        t0 = time.time()
+        await asyncio.sleep(5)  # the greeting
+        for person in people:
+            await _play_wav(person, SPEECH, 8)
+        await _until(lambda: len(gone) == 2, 240, "the room closed for both people")
+        if set(gone.values()) != {rtc.DisconnectReason.ROOM_DELETED}:
+            raise Fail(f"left with {gone}, not ROOM_DELETED: the page would offer Rejoin, not the code")
+        for name, j in zip(("Ana", "Ben"), joined):
+            want = completion_code(room, j["participant_id"], os.environ["LIVEKIT_API_SECRET"])
+            if (got := _completion_code(room, j["participant_id"])) != want:
+                raise Fail(f"{name}'s completion code is {got}, expected {want}")
+        return f"the room ({room}) closed for both {time.time() - t0:.0f} s after the bot joined (limit 60 s); each got their own completion code"
+    finally:
+        for person in people:
+            await person.disconnect()
+        _post(f"/api/console/start-link/{link}", {"active": False}, method="PATCH")
 
 
 OUR_LLM = "Qwen/Qwen2.5-7B-Instruct"  # infra/stack/models.tf
@@ -884,6 +926,7 @@ SCENARIOS = {"start": scenario_start, "stoptask": scenario_stoptask, "removed": 
              "transcript": scenario_transcript, "two_humans": scenario_two_humans, "refresh": scenario_refresh,
              "chat": scenario_chat, "auto_record": scenario_auto_record, "our_models": scenario_our_models, "record_auth": scenario_record_auth,
              "study_prolific": scenario_study_prolific, "group_link": scenario_group_link, "session_limit": scenario_session_limit,
+             "group_limit": scenario_group_limit,
              "turn_relay": scenario_turn_relay, "bot_ready": scenario_bot_ready, "smart_turn": scenario_smart_turn, "transcript_file": scenario_transcript_file,
              "prewarm": scenario_prewarm}  # last: its Stop preparing cools the pool the run prepared
 

@@ -132,4 +132,5 @@ Tests, all under `make test-unit`:
   buffer counted from the real end of the closing message, and the room closed once.
 - Live, after every release (`session_limit` in `tests/system/acceptance.py`): a 1-minute
   room hears its closing message and is closed with the reason the page needs to show
-  the completion code.
+  the completion code. `group_limit` does the same for two people from a size-2 start link,
+  and checks each then gets their own completion code.

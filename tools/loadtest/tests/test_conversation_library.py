@@ -68,6 +68,11 @@ class TestRooms(unittest.TestCase):
         lib = select([dialogue(1, turns=6)], n=1)  # select()'s minimum
         self.assertEqual({p for p, _ in room_plan(0, lib, mix="4")}, {0, 1, 2, 3})
 
+    def test_the_2_3_mix_is_half_rooms_of_two_half_of_three(self):
+        # The study as sized 2026-11-19: rooms of 2-3 people, 100 at once.
+        from meetlab_loadtest.conversation_library import participants_for
+        self.assertEqual([participants_for(r, "2-3") for r in range(6)], [2, 3, 2, 3, 2, 3])
+
     def test_the_group_study_mix_is_half_rooms_of_three_half_of_four(self):
         self.assertEqual(Counter(participants_for(i, "group") for i in range(100)), {3: 50, 4: 50})
         self.assertEqual({participants_for(i, "4") for i in range(10)}, {4})

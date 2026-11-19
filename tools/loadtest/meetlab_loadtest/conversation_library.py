@@ -47,6 +47,7 @@ def select(dialogues: list[dict], n: int = 100) -> list[dict]:
 MIXES = {
     "study": [1, 2, 1, 3, 1, 2, 1, 2, 1, 3],  # every 10 rooms: five of 1, three of 2, two of 3 (the user's study mix)
     "equal": [1, 2, 3],                       # as many of each (the 100-room spike, 2026-10-05)
+    "2-3": [2, 3],                            # the study as sized 2026-11-19: rooms of 2 and 3, half each
     "group": [3, 4],                          # the group study: rooms of 3 and 4, half each
 }
 

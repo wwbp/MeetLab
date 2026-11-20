@@ -89,11 +89,14 @@ jobs:
         run: |
           set -euo pipefail
           terraform init -input=false -backend-config=key=v2/prod/terraform.tfstate
-          terraform plan -input=false -no-color -lock-timeout=5m -out=tfplan -var="image_tag=$GITHUB_REF_NAME"
+          # session.tfvars: sizes for one test window, on top of the profile; say so when any is on.
+          on=$(grep -vE '^[[:space:]]*(#|$)' session.tfvars || true)
+          [ -z "$on" ] || { echo "::warning::Session switches are ON (infra/stack/session.tfvars), costing money until a release removes them"; printf '### Session switches ON\n\n```\n%s\n```\n' "$on" >> "$GITHUB_STEP_SUMMARY"; }
+          terraform plan -input=false -no-color -lock-timeout=5m -out=tfplan -var-file=session.tfvars -var="image_tag=$GITHUB_REF_NAME"
           terraform apply -input=false -no-color tfplan
       - name: Verify no drift after apply
         working-directory: infra/stack
-        run: terraform plan -input=false -no-color -lock-timeout=5m -detailed-exitcode -var="image_tag=$GITHUB_REF_NAME"
+        run: terraform plan -input=false -no-color -lock-timeout=5m -detailed-exitcode -var-file=session.tfvars -var="image_tag=$GITHUB_REF_NAME"
       - name: LiveKit for the live tests
         id: livekit
         working-directory: infra/stack

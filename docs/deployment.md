@@ -173,7 +173,9 @@ Enterprise licence (ledger).
 
 Production's sizes and switches are its profile in `infra/stack/profiles.tf`. Every change is
 a PR, a merge, then a **release** (a merge alone deploys nothing). Never change the defaults in
-`variables.tf` for this. What to switch, and when, is the decision matrix in
+`variables.tf` for this. For one test window (a load test), put the settings in
+`infra/stack/session.tfvars` instead: the release applies that file on top of the profile and
+warns while anything in it is on; a second release with the lines removed scales back down. What to switch, and when, is the decision matrix in
 [infrastructure.md](infrastructure.md).
 
 | Switch | Profile setting | Notes |

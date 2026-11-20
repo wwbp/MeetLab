@@ -37,7 +37,8 @@ relationships…), from [DailyDialog](https://huggingface.co/datasets/ConvLab/da
 | 2 | 30% | each person speaks one side |
 | 3 | 20% | they take the lines in turn |
 
-That is the default mix (`study`). The others: `equal` (a third each of 1, 2 and 3), `group`
+That is the default mix (`study`). The others: `equal` (a third each of 1, 2 and 3), `2-3`
+(rooms of 2 and 3, half each: the study as sized 2026-11-19, 100 rooms at once), `group`
 (rooms of 3 and 4, half each, as the group study plans them) and a number, `3` or `4`, for that
 many people in every room. Four people take the lines in turn exactly as three do. Rooms of 4
 are built and unit-tested but **have not been run** (see [planned measurements](#planned-measurements-not-run)).

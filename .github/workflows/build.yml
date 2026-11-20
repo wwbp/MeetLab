@@ -72,7 +72,7 @@ jobs:
           set -euo pipefail
           terraform init -input=false -backend-config=key=v2/prod/terraform.tfstate
           terraform plan -input=false -no-color -lock=false -out=tfplan \
-            -var=env=prod -var=hostname_suffix= -var="image_tag=${{ github.event.pull_request.head.sha }}"
+            -var-file=session.tfvars -var=env=prod -var=hostname_suffix= -var="image_tag=${{ github.event.pull_request.head.sha }}"
           terraform show -no-color tfplan > plan.txt
       - name: Post plan on the PR
         env:

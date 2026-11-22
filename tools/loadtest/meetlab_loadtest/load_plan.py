@@ -108,7 +108,8 @@ def step_of(t: float, bounds: list[tuple[float, float]]) -> int | None:
     return next((k for k, (a, b) in enumerate(bounds) if a <= t < b), None)
 
 
-STAGES = ("latency_ms", "stt_ms", "llm_ttft_ms", "sentence_agg_ms", "tts_ttfb_ms")
+STAGES = ("latency_ms", "stt_ms", "llm_ttft_ms", "sentence_agg_ms", "tts_ttfb_ms",
+          "stt_ttfb_ms", "user_bot_latency_ms")  # Pipecat's two (bot: turn_latency.py)
 
 
 def parse_reply(line: str) -> dict | None:

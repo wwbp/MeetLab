@@ -128,6 +128,12 @@ class TestServerSide(unittest.TestCase):
         self.assertEqual(s["replies"], 20)
         self.assertNotIn("tts_ttfb_ms", s)
 
+    def test_stage_summary_has_pipecats_two_measures(self):
+        # Speech-to-text time and user-bot latency (turn_latency.py): without them the report
+        # showed 0.9 s of stages for replies heard after 2.2 s (prod, 2026-11-22).
+        s = stage_summary([{"latency_ms": 700.0, "stt_ttfb_ms": 575.0, "user_bot_latency_ms": 1571.0}])
+        self.assertEqual((s["stt_ttfb_ms"]["p50"], s["user_bot_latency_ms"]["p95"]), (575.0, 1571.0))
+
     def test_the_wait_for_the_first_sentence_is_reported(self):
         # The LLM's first sentence, before the voice can start: logged by the bot, missing from
         # the report until 2026-10-05 (B4: ~700 ms of the reply time was unaccounted for).

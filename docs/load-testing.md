@@ -222,10 +222,11 @@ point, and run the big shapes on `ours`.
 1. **Switch on what the profile needs.** For `ours`: `model_services = ["llm", "tts"]` and
    `stt_nim_enabled = true` (see `deployment.md`). Beyond about 6 rooms, also raise
    `bot_pool_max` (each bot machine holds about 3 sessions; default 2 machines).
-2. **Start it** from GitHub → Actions → *Load test* → *Run workflow* on branch `main`,
+2. **Start it** from GitHub → Actions → *Load test* → *Run workflow* on the latest release tag
+   (the `production` gate refuses a run from `main`: 2026-11-20),
    or from a terminal:
    ```bash
-   gh workflow run loadtest.yml --ref main -f profile=ours -f shape=smoke -f target=10
+   gh workflow run loadtest.yml --ref v2.1.16 -f profile=ours -f shape=smoke -f target=10
    ```
    `hold_s=60` shortens every step for a quick rehearsal. `-f mix=4` puts 4 people in every
    room; `-f mix=link-4` brings them in through a group start link

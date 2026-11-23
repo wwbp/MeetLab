@@ -49,7 +49,8 @@ Each runs on staging, configured as production (`docs/load-testing.md`: how to r
 | **Capacity** | the most it takes within its objectives | `breakpoint` | +step every few minutes until an SLO breaks | rooms at once, within every SLO |
 | **Scalability** | growing to meet future load | `capacity_model.py`, checked by stress and spike runs | machines per part, per study size | what to add, and when |
 
-Latency is reported inside every run, per stage (turn-end wait, LLM first token, first sentence,
+Latency is reported inside every run, per stage (user-bot latency and speech-to-text time as
+Pipecat counts them: from the moment a person stopped speaking; turn-end wait, LLM first token, first sentence,
 voice first audio), and quality too (word error rate, judged replies, voice naturalness): so a
 performance test also says *why* a reply was slow and whether it was still good.
 

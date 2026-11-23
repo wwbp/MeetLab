@@ -142,15 +142,15 @@ def markdown(r: dict) -> str:
                      f"{_ms(m['p99_ms'])} | {_ms(m['join_p95_s'])} | {verdict} |")
     if any("server" in m for m in r["steps"]):
         lines += ["", f"**Inside {ENV}** (p95 of the bot's own stage timings; maximum CPU/memory %)", "",
-                  "| step | rooms | turn-end wait ms | LLM first token ms | first sentence ms | TTS first audio ms | meet CPU/mem | runner CPU/mem | "
+                  "| step | rooms | user-bot latency p50 / p95 ms | speech-to-text ms | turn-end wait ms | LLM first token ms | first sentence ms | TTS first audio ms | meet CPU/mem | runner CPU/mem | "
                   "LiveKit CPU | bot machines CPU | heaviest bot task CPU units / MB (reserved 512 / 1024) | "
                   "LLM / TTS / STT GPU / STT CPU machine CPU | recording machines CPU | DB CPU / connections |",
-                  "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
+                  "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
         for k, m in enumerate(r["steps"]):
             s, x = m.get("server", {}).get("stages", {}), m.get("server", {}).get("max", {})
             p95 = lambda st: _ms(s.get(st, {}).get("p95"))  # noqa: E731
             g = lambda key: "-" if key not in x else f"{x[key]:.0f}"  # noqa: E731
-            lines.append(f"| {k} | {m['rooms']} | {p95('stt_ms')} | {p95('llm_ttft_ms')} | {p95('sentence_agg_ms')} | {p95('tts_ttfb_ms')} | "
+            lines.append(f"| {k} | {m['rooms']} | {_ms(s.get('user_bot_latency_ms', {}).get('p50'))} / {p95('user_bot_latency_ms')} | {p95('stt_ttfb_ms')} | {p95('stt_ms')} | {p95('llm_ttft_ms')} | {p95('sentence_agg_ms')} | {p95('tts_ttfb_ms')} | "
                          f"{g('meet_cpu')}/{g('meet_mem')} | {g('agent-runner_cpu')}/{g('agent-runner_mem')} | "
                          f"{g('livekit_hosts_cpu')} | {g('bots_hosts_cpu')} | {g('bot_task_cpu')} / {g('bot_task_mem')} | "
                          f"{g('llm_hosts_cpu')} / {g('tts_hosts_cpu')} / {g('stt-nim_hosts_cpu')} / {g('stt-cpu_hosts_cpu')} | {g('egress_hosts_cpu')} | "

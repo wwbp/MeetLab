@@ -65,6 +65,7 @@ from meetlab_core.turns import (
 from meetlab_bot.floor_room import FloorRoom
 from meetlab_bot.interruption import InterruptionTracker
 from meetlab_bot.study_support import closing_due, speaker_meta
+from meetlab_bot.turn_latency import TurnLatency
 from meetlab_bot.session_end import PlaybackClock, SessionEnd, after_limit_utterance, close_with_retries
 from meetlab_bot.multi_speaker_stt import MultiSpeakerSTT, SpeakerLabelInjector
 from meetlab_bot.speech_onset_vad import build_speech_onset_silero
@@ -625,6 +626,7 @@ async def _bot(runner_args: LiveKitRunnerArguments):
         await _yield_to_onset(sid)
 
     async def _on_speech_offset(sid: str) -> None:
+        turn_latency.speech_stopped(sid, time.monotonic())
         if floor:
             floor.quiet(sid)
         # Clears the speaker so bot_started's already-speaking check stays honest.
@@ -705,6 +707,7 @@ async def _bot(runner_args: LiveKitRunnerArguments):
     # Used to compute real STT latency: last audio frame → transcript committed.
     # Covers endpointing silence wait + transcription + network roundtrip.
     _last_audio_times: dict[str, float] = {}
+    turn_latency = TurnLatency()  # speech-to-text time and user-bot latency, as Pipecat counts them
     # Recent bot TTS texts, for the self-echo heuristic in on_user_turn_stopped.
     _recent_bot_texts: list[str] = []
 
@@ -839,6 +842,9 @@ async def _bot(runner_args: LiveKitRunnerArguments):
                     last_ts = _last_audio_times.get(frame.user_id)
                     if last_ts is not None:
                         _turn_timing["last_audio_ts"] = last_ts
+                    stt_ttfb = turn_latency.transcript(frame.user_id, time.monotonic())
+                    if stt_ttfb is not None:
+                        _turn_timing["stt_ttfb_ms"] = stt_ttfb
                 if session_end and session_end.muted:
                     # Muted for the bot from the limit (the aggregator drops this frame), kept
                     # for the transcript. ponytail: words transcribed just before the limit in
@@ -851,8 +857,12 @@ async def _bot(runner_args: LiveKitRunnerArguments):
 
         async def process_frame(self, frame, direction):
             await super().process_frame(frame, direction)
-            if direction == FrameDirection.DOWNSTREAM and isinstance(frame, TTSAudioRawFrame):
-                _turn_timing.setdefault("tts_first", time.monotonic())
+            if direction == FrameDirection.DOWNSTREAM and isinstance(frame, TTSAudioRawFrame) \
+                    and "tts_first" not in _turn_timing:
+                now = _turn_timing["tts_first"] = time.monotonic()
+                user_bot = turn_latency.bot_started(now)
+                if user_bot is not None:
+                    _turn_timing["user_bot_latency_ms"] = user_bot
             await self.push_frame(frame, direction)
 
     async def _on_reply(reply: BotReply) -> None:
@@ -945,8 +955,9 @@ async def _bot(runner_args: LiveKitRunnerArguments):
         _turn_timing["stt_done"] = stt_done_time
         _turn_timing.pop("tts_first", None)
         _metrics_data.clear()
-        # Real STT latency: last audio packet → transcript committed.
-        # Covers endpointing silence wait + transcription + network roundtrip.
+        # NOT speech-to-text time, despite the name: audio packets never stop arriving (silence
+        # is audio), so this is only transcript -> turn committed. The transcription itself is
+        # stt_ttfb_ms (turn_latency.py). Kept under its name for the reports that compare it.
         last_audio_ts = _turn_timing.pop("last_audio_ts", None)
         if last_audio_ts is not None:
             _turn_timing["stt_ms"] = (stt_done_time - last_audio_ts) * 1000
@@ -1090,6 +1101,9 @@ async def _bot(runner_args: LiveKitRunnerArguments):
         for key in ("llm_ttft_ms", "sentence_agg_ms", "tts_ttfb_ms"):
             if key in m:
                 timing[key] = round(m[key], 1)
+        for key in ("stt_ttfb_ms", "user_bot_latency_ms"):  # Pipecat's two (turn_latency.py)
+            if key in t:
+                timing[key] = round(t[key], 1)
         # Post-STT E2E: stt_done → tts_first (transcript committed → first TTS audio chunk).
         if "stt_done" in t and "tts_first" in t:
             meta["latency_ms"] = round((t["tts_first"] - t["stt_done"]) * 1000, 1)

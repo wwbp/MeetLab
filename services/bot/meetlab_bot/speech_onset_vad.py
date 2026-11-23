@@ -57,6 +57,17 @@ def speech_edge(prev: VADState, cur: VADState) -> str | None:
     return None
 
 
+def pause_edge(prev: VADState, cur: VADState) -> str | None:
+    """"paused" when speech goes silent (SPEAKING -> STOPPING), "resumed" when it comes
+    back before the silence wait runs out. The STT starts transcribing at the pause
+    instead of after the wait (nemotron_stt.py)."""
+    if prev != VADState.STOPPING and cur == VADState.STOPPING:
+        return "paused"
+    if prev == VADState.STOPPING and cur == VADState.SPEAKING:
+        return "resumed"
+    return None
+
+
 class SpeechOnsetMixin:
     """Adds onset/offset reporting to a VADAnalyzer without changing its behaviour.
 
@@ -80,9 +91,21 @@ class SpeechOnsetMixin:
         self._on_detected = on_detected
         self._on_cleared = on_cleared
 
+    _on_paused: Callable[[], Any] | None = None
+    _on_resumed: Callable[[], Any] | None = None
+
+    def set_pause_handlers(self, *, on_paused=None, on_resumed=None) -> None:
+        self._on_paused = on_paused
+        self._on_resumed = on_resumed
+
     async def analyze_audio(self, buffer: bytes) -> VADState:
         prev = self._vad_state
         state = await super().analyze_audio(buffer)
+        pause = pause_edge(prev, state)
+        if pause == "paused":
+            await self._fire(self._on_paused, "paused")
+        elif pause == "resumed":
+            await self._fire(self._on_resumed, "resumed")
         edge = speech_edge(prev, state)
         if edge == "detected":
             await self._fire(self._on_detected, "detected")

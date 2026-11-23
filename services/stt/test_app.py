@@ -45,6 +45,12 @@ class ServerTest(unittest.TestCase):
     def test_the_bots_fields_are_accepted_as_the_nim_takes_them(self):
         self.assertEqual(self.post(clip("Thanks, that helps.")).status_code, 200)
 
+    def test_each_request_logs_its_audio_length_its_time_and_how_many_ran_beside_it(self):
+        """What a slow reply needs to be explained: a long clip, a slow machine, or a queue."""
+        with self.assertLogs("stt", level="INFO") as logs:
+            self.post(clip("Thanks, that helps."))
+        self.assertRegex(logs.output[-1], r"transcribed audio_s=\d+\.\d ms=\d+ at_once=1$")
+
     def test_silence_is_empty_text_not_an_error(self):
         buf = io.BytesIO()
         sf.write(buf, np.zeros(16000, dtype="float32"), 16000, format="WAV")

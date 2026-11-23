@@ -21,7 +21,7 @@ import unittest
 
 from pipecat.audio.vad.vad_analyzer import VADState
 
-from meetlab_bot.speech_onset_vad import SpeechOnsetMixin, speech_edge
+from meetlab_bot.speech_onset_vad import SpeechOnsetMixin, pause_edge, speech_edge
 
 
 class TestSpeechEdge(unittest.TestCase):
@@ -55,6 +55,39 @@ class TestSpeechEdge(unittest.TestCase):
     def test_no_change_is_no_edge(self):
         for s in VADState:
             self.assertIsNone(speech_edge(s, s))
+
+
+class TestPauseEdge(unittest.TestCase):
+    """A pause is the first silence after speech: the moment transcription can start early."""
+
+    def test_speech_going_silent_is_a_pause(self):
+        self.assertEqual(pause_edge(VADState.SPEAKING, VADState.STOPPING), "paused")
+
+    def test_speech_coming_back_within_the_wait_is_a_resume(self):
+        self.assertEqual(pause_edge(VADState.STOPPING, VADState.SPEAKING), "resumed")
+
+    def test_the_wait_running_out_is_neither(self):
+        """STOPPING -> QUIET is the end of the segment; the STT hears that as a frame."""
+        self.assertIsNone(pause_edge(VADState.STOPPING, VADState.QUIET))
+
+    def test_nothing_else_is_a_pause(self):
+        self.assertIsNone(pause_edge(VADState.STOPPING, VADState.STOPPING))
+        self.assertIsNone(pause_edge(VADState.QUIET, VADState.STARTING))
+        self.assertIsNone(pause_edge(VADState.STARTING, VADState.SPEAKING))
+
+
+class TestPauseHandlers(unittest.TestCase):
+    def test_pause_and_resume_reach_their_handlers(self):
+        vad = _OnsetVAD([VADState.SPEAKING, VADState.STOPPING, VADState.SPEAKING, VADState.STOPPING])
+        seen = []
+        vad.set_pause_handlers(on_paused=lambda: seen.append("paused"),
+                               on_resumed=lambda: seen.append("resumed"))
+
+        async def run():
+            for _ in range(4):
+                await vad.analyze_audio(b"")
+        asyncio.run(run())
+        self.assertEqual(seen, ["paused", "resumed", "paused"])
 
 
 class _FakeBase:

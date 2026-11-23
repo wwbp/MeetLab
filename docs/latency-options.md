@@ -83,6 +83,10 @@ add a voice GPU before anything else when rooms go past ~80.
 - **Our default:** a turn splits after 450 ms of silence (calibrated on pilot audio); the bot
   then waits 50 ms after the transcript before answering. That wait was 300 ms until B4
   (2026-10-05) measured that it only delays the reply: 50 ms was 0.24 s faster, splitting unchanged.
+- **Transcribing during the wait** (our own speech server only): 150 ms into a pause the bot
+  already sends the audio to be transcribed. If the person stays silent for the full 450 ms,
+  that answer is used; if they speak again, it is thrown away. The wait and the transcription
+  used to run one after the other; now they overlap, at the cost of one extra request per pause.
 - **Pipecat's default:** 200 ms of silence plus 600 ms.
 - **Smart turn:** Pipecat's Smart Turn v3 needs exactly 200 ms of silence. On our pilot audio it
   kept 73% of mid-thought pauses open, but 41% of real turn ends waited for its 3 s backstop.

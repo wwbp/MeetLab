@@ -198,7 +198,7 @@ class _OpenAIRealtimeSTT(OpenAIRealtimeSTTService):
         })
 
 
-def _build_vad_processor(bot_config, vad_handlers=None):
+def _build_vad_processor(bot_config, vad_handlers=None, pause_handlers=None):
     """Per-participant Silero VADProcessor for segmented STT chains.
 
     stop_secs mirrors Deepgram's endpointing_ms so stt_ms numbers stay
@@ -217,6 +217,9 @@ def _build_vad_processor(bot_config, vad_handlers=None):
     if vad_handlers is not None:
         on_detected, on_cleared = vad_handlers
         analyzer.set_onset_handlers(on_detected=on_detected, on_cleared=on_cleared)
+    if pause_handlers is not None:
+        on_paused, on_resumed = pause_handlers
+        analyzer.set_pause_handlers(on_paused=on_paused, on_resumed=on_resumed)
     return VADProcessor(vad_analyzer=analyzer)
 
 
@@ -344,8 +347,9 @@ def _build_parakeet_chain(bot_config, vad_handlers=None):
     our CPU server (stt-cpu) or the GPU NIM (infra/stack/runner.tf)."""
     from meetlab_bot.nemotron_stt import NemotronHTTPSTTService, nemotron_stt_url
 
-    vad = _build_vad_processor(bot_config, vad_handlers)
     stt = NemotronHTTPSTTService(base_url=nemotron_stt_url(), model=bot_config.stt_model)
+    # The pause starts the transcription; the silence wait then runs alongside it.
+    vad = _build_vad_processor(bot_config, vad_handlers, (stt.speech_paused, stt.speech_resumed))
     return _link_chain(bot_config, vad, stt)
 
 

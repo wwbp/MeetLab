@@ -109,5 +109,113 @@ class TestNemotronHTTPSTTService(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(svc.base_url, f"http://127.0.0.1:{self.port}")
 
 
+class TestTranscribingDuringThePause(unittest.IsolatedAsyncioTestCase):
+    """The silence wait (450 ms) and the transcription used to run one after the other.
+    Now transcription starts when the person pauses; if they stay silent, the segment that
+    the VAD closes reuses that answer instead of asking again."""
+
+    def _svc(self, texts=("early",)):
+        svc = NemotronHTTPSTTService(base_url="http://unused", model="parakeet-tdt-0.6b-v2",
+                                     sample_rate=16000, speculate_after_secs=0)
+        svc._sample_rate = 16000
+        svc.calls = []
+        answers = iter(texts)
+
+        async def fake(wav):
+            svc.calls.append(wav)
+            return next(answers)
+        svc._transcribe = fake
+        for name in ("start_processing_metrics", "start_ttfb_metrics",
+                     "stop_ttfb_metrics", "stop_processing_metrics"):
+            setattr(svc, name, unittest.mock.AsyncMock())
+        return svc
+
+    def _segment(self, svc, extra=b""):
+        """What SegmentedSTTService hands run_stt when the VAD closes the segment."""
+        from pipecat.audio.utils import pcm_to_wav
+        return pcm_to_wav(bytes(svc._audio_buffer) + extra + svc._trailing_silence(), 16000)
+
+    async def _texts(self, svc, wav):
+        return [f.text async for f in svc.run_stt(wav)]
+
+    async def test_a_pause_that_ends_the_turn_is_transcribed_once(self):
+        svc = self._svc()
+        svc._audio_buffer += b"\x01\x00" * 8000
+        svc.speech_paused()
+        await asyncio.sleep(0)                       # the early request goes out
+        self.assertEqual(len(svc.calls), 1)
+        wav = self._segment(svc, extra=bytes(14400))  # 450 ms more silence, then the VAD closes
+        svc.segment_closed()
+        self.assertEqual(await self._texts(svc, wav), ["early"])
+        self.assertEqual(len(svc.calls), 1)
+
+    async def test_speaking_again_throws_the_early_answer_away(self):
+        svc = self._svc(texts=("early", "whole sentence"))
+        svc._audio_buffer += b"\x01\x00" * 8000
+        svc.speech_paused()
+        await asyncio.sleep(0)
+        svc.speech_resumed()
+        wav = self._segment(svc, extra=b"\x02\x00" * 8000)
+        svc.segment_closed()
+        self.assertEqual(await self._texts(svc, wav), ["whole sentence"])
+
+    async def test_a_resume_inside_the_delay_sends_nothing(self):
+        svc = self._svc()
+        svc._speculate_after_secs = 0.05
+        svc._audio_buffer += b"\x01\x00" * 8000
+        svc.speech_paused()
+        svc.speech_resumed()
+        await asyncio.sleep(0.1)
+        self.assertEqual(svc.calls, [])
+
+    async def test_an_early_answer_for_other_audio_is_never_used(self):
+        """Belt and braces: the early answer only counts if the closed segment starts
+        with exactly the audio it was made from."""
+        svc = self._svc(texts=("early", "the real one"))
+        svc._audio_buffer += b"\x01\x00" * 8000
+        svc.speech_paused()
+        await asyncio.sleep(0)
+        svc.segment_closed()
+        from pipecat.audio.utils import pcm_to_wav
+        other = pcm_to_wav(b"\x03\x00" * 8000, 16000)
+        self.assertEqual(await self._texts(svc, other), ["the real one"])
+
+    async def test_a_failed_early_request_falls_back_to_the_normal_one(self):
+        svc = self._svc()
+        n = {"i": 0}
+
+        async def flaky(wav):
+            n["i"] += 1
+            if n["i"] == 1:
+                raise RuntimeError("server busy")
+            return "second try"
+        svc._transcribe = flaky
+        svc._audio_buffer += b"\x01\x00" * 8000
+        svc.speech_paused()
+        await asyncio.sleep(0)
+        wav = self._segment(svc)
+        svc.segment_closed()
+        self.assertEqual(await self._texts(svc, wav), ["second try"])
+
+    async def test_a_segment_closed_before_the_early_request_went_out_is_transcribed_normally(self):
+        """A silence wait shorter than the delay: the buffer is already cleared, so an
+        early request now would send the wrong audio."""
+        svc = self._svc(texts=("the segment",))
+        svc._speculate_after_secs = 0.05
+        svc._audio_buffer += b"\x01\x00" * 8000
+        svc.speech_paused()
+        wav = self._segment(svc)
+        svc.segment_closed()
+        svc._audio_buffer.clear()
+        await asyncio.sleep(0.1)
+        self.assertEqual(await self._texts(svc, wav), ["the segment"])
+        self.assertEqual(svc.calls, [wav], "only the segment itself was sent")
+
+    async def test_no_pause_seen_works_as_before(self):
+        svc = self._svc(texts=("plain",))
+        svc._audio_buffer += b"\x01\x00" * 8000
+        self.assertEqual(await self._texts(svc, self._segment(svc)), ["plain"])
+
+
 if __name__ == "__main__":
     unittest.main()

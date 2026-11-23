@@ -5,7 +5,9 @@ baked into the image, so it starts in seconds. Which server bots use is a profil
 (infra/stack/profiles.tf); the switch point to the GPU is measured (docs/load-testing.md).
 """
 import io
+import logging
 import os
+import time
 from contextlib import asynccontextmanager
 
 import numpy as np
@@ -16,6 +18,9 @@ from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 MODEL = os.environ.get("STT_MODEL", "nemo-parakeet-tdt-0.6b-v2")
 RATE = 16000
 _model = None
+_at_once = 0  # requests being transcribed right now (a gauge for the log; races only miscount by one)
+logging.basicConfig(level=logging.INFO)  # uvicorn configures only its own loggers
+log = logging.getLogger("stt")
 
 
 @asynccontextmanager
@@ -45,4 +50,14 @@ def transcribe(file: UploadFile = File(...), model: str = Form(""), language: st
     audio = audio.mean(axis=1)
     if rate != RATE:  # ponytail: linear resampling; the bots send 16 kHz, so this is rarely used
         audio = np.interp(np.arange(0, len(audio), rate / RATE), np.arange(len(audio)), audio).astype("float32")
-    return {"text": _model.recognize(audio, sample_rate=RATE) if len(audio) else ""}
+    global _at_once
+    _at_once += 1
+    at_once, started = _at_once, time.perf_counter()
+    try:
+        text = _model.recognize(audio, sample_rate=RATE) if len(audio) else ""
+    finally:
+        _at_once -= 1
+    # One line per request: a slow one is a long clip, a slow machine, or others running beside it.
+    log.info("transcribed audio_s=%.1f ms=%.0f at_once=%d",
+             len(audio) / RATE, (time.perf_counter() - started) * 1000, at_once)
+    return {"text": text}

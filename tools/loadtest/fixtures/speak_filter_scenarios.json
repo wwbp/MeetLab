@@ -857,6 +857,182 @@
       "expected": "speak",
       "expected_rule": "none",
       "note": "Nothing to block: a finished question, to the assistant, that no person has answered."
+    },
+    {
+      "id": "hs-01",
+      "category": "hard_silent",
+      "description": "A summary request, the kind the assistant gets, put to the participant who took notes.",
+      "bot_name": "Juniper",
+      "participants": ["Mara", "Teo"],
+      "transcript": [
+        {"speaker": "Mara", "text": "Teo, you took the notes, right?"},
+        {"speaker": "Teo", "text": "Yeah, I have most of it."},
+        {"speaker": "Mara", "text": "Great. Can you summarize what we decided so far?"}
+      ],
+      "active_rules": ["to_other_participant", "mentioned_not_asked", "unfinished_thought", "already_answered", "group_agreeing"],
+      "expected": "silent",
+      "expected_rule": "to_other_participant",
+      "note": "Same words as dir-03 without the name; 'you' is Teo, named one turn earlier."
+    },
+    {
+      "id": "hs-02",
+      "category": "hard_silent",
+      "description": "A look-it-up request to the participant who just offered a laptop.",
+      "bot_name": "Sage",
+      "participants": ["Bea", "Omar"],
+      "transcript": [
+        {"speaker": "Omar", "text": "We should check the library hours before we pick a time."},
+        {"speaker": "Bea", "text": "I've got my laptop open."},
+        {"speaker": "Omar", "text": "Oh good. Could you look up when the library closes today?"}
+      ],
+      "active_rules": ["to_other_participant", "mentioned_not_asked", "unfinished_thought", "already_answered", "group_agreeing"],
+      "expected": "silent",
+      "expected_rule": "to_other_participant",
+      "note": "The assistant could answer, but the request follows Bea's offer and is hers."
+    },
+    {
+      "id": "hs-03",
+      "category": "hard_silent",
+      "description": "'Could you show us' after a participant offers to share a screen.",
+      "bot_name": "Moss",
+      "participants": ["Inés", "Mara"],
+      "transcript": [
+        {"speaker": "Inés", "text": "I can't find the chart from last week."},
+        {"speaker": "Mara", "text": "I can share my screen if that helps."},
+        {"speaker": "Inés", "text": "Yes please. Could you show us the chart again?"}
+      ],
+      "active_rules": ["to_other_participant", "mentioned_not_asked", "unfinished_thought", "already_answered", "group_agreeing"],
+      "expected": "silent",
+      "expected_rule": "to_other_participant",
+      "note": "Only Mara can share her screen."
+    },
+    {
+      "id": "hs-04",
+      "category": "hard_silent",
+      "description": "After the assistant answers, a question to another participant by name about the assistant's answer.",
+      "bot_name": "Juniper",
+      "participants": ["Lena", "Kofi"],
+      "transcript": [
+        {"speaker": "Lena", "text": "Juniper, give us two options for the venue."},
+        {"speaker": "Juniper", "text": "The library room or the café upstairs."},
+        {"speaker": "Lena", "text": "Kofi, which one do you like better?"}
+      ],
+      "active_rules": ["to_other_participant", "mentioned_not_asked", "unfinished_thought", "already_answered", "group_agreeing"],
+      "expected": "silent",
+      "expected_rule": "to_other_participant",
+      "note": "The assistant spoke last before this; the question is Kofi's."
+    },
+    {
+      "id": "hs-05",
+      "category": "hard_silent",
+      "description": "A question with another participant's name at the end, where the bot's name would go.",
+      "bot_name": "Assistant",
+      "participants": ["Dov", "Priya", "Sam"],
+      "transcript": [
+        {"speaker": "Dov", "text": "We still need someone to book the room."},
+        {"speaker": "Priya", "text": "I booked it last time."},
+        {"speaker": "Dov", "text": "What's the plan for tomorrow then, Sam?"}
+      ],
+      "active_rules": ["to_other_participant", "mentioned_not_asked", "unfinished_thought", "already_answered", "group_agreeing"],
+      "expected": "silent",
+      "expected_rule": "to_other_participant",
+      "note": "Shaped like dir-02 with a person's name."
+    },
+    {
+      "id": "hs-06",
+      "category": "hard_silent",
+      "description": "A rhetorical complaint phrased as a question.",
+      "bot_name": "Sage",
+      "participants": ["Yuki", "Sam"],
+      "transcript": [
+        {"speaker": "Yuki", "text": "Sorry I'm late, everyone."},
+        {"speaker": "Sam", "text": "The bus was late again this morning."},
+        {"speaker": "Yuki", "text": "Of course it was. Why does this always happen to us?"}
+      ],
+      "active_rules": ["to_other_participant", "mentioned_not_asked", "unfinished_thought", "already_answered", "group_agreeing"],
+      "expected": "silent",
+      "expected_rule": "to_other_participant",
+      "note": "Nobody is asking for bus statistics."
+    },
+    {
+      "id": "hs-07",
+      "category": "hard_silent",
+      "description": "A rhetorical question, answered with a laugh.",
+      "bot_name": "Juniper",
+      "participants": ["Ravi", "Hana"],
+      "transcript": [
+        {"speaker": "Ravi", "text": "I've rewritten this intro four times now."},
+        {"speaker": "Hana", "text": "Honestly, who even reads introductions?"},
+        {"speaker": "Ravi", "text": "Ha, fair point."}
+      ],
+      "active_rules": ["to_other_participant", "mentioned_not_asked", "unfinished_thought", "already_answered", "group_agreeing"],
+      "expected": "silent",
+      "expected_rule": "to_other_participant",
+      "note": "Ends on agreement with a rhetorical question; nothing is asked."
+    },
+    {
+      "id": "hs-08",
+      "category": "hard_silent",
+      "description": "A rhetorical question about oneself.",
+      "bot_name": "Moss",
+      "participants": ["Teo", "Jonas"],
+      "transcript": [
+        {"speaker": "Teo", "text": "Ugh, my coffee's cold again."},
+        {"speaker": "Jonas", "text": "Again?"},
+        {"speaker": "Teo", "text": "Who forgets their coffee three times in one morning?"}
+      ],
+      "active_rules": ["to_other_participant", "mentioned_not_asked", "unfinished_thought", "already_answered", "group_agreeing"],
+      "expected": "silent",
+      "expected_rule": "to_other_participant",
+      "note": "Self-mockery, not a question for anyone."
+    },
+    {
+      "id": "hs-09",
+      "category": "hard_silent",
+      "description": "Reading aloud a form that contains a question.",
+      "bot_name": "Assistant",
+      "participants": ["Priya", "Dov"],
+      "transcript": [
+        {"speaker": "Priya", "text": "Let me read the consent form out loud before we start."},
+        {"speaker": "Dov", "text": "Sure."},
+        {"speaker": "Priya", "text": "It says: do you agree to be recorded for this study? Please answer yes or no on the form."}
+      ],
+      "active_rules": ["to_other_participant", "mentioned_not_asked", "unfinished_thought", "already_answered", "group_agreeing"],
+      "expected": "silent",
+      "expected_rule": "to_other_participant",
+      "note": "The question is the form's, to be answered on paper by the participants."
+    },
+    {
+      "id": "hs-10",
+      "category": "hard_silent",
+      "description": "Reading aloud an email that contains a request.",
+      "bot_name": "Sage",
+      "participants": ["Tala", "Jonas"],
+      "transcript": [
+        {"speaker": "Tala", "text": "I heard back from the venue."},
+        {"speaker": "Jonas", "text": "What did they say?"},
+        {"speaker": "Tala", "text": "The email says, quote, can you confirm the number of guests by Friday, end quote."}
+      ],
+      "active_rules": ["to_other_participant", "mentioned_not_asked", "unfinished_thought", "already_answered", "group_agreeing"],
+      "expected": "silent",
+      "expected_rule": "to_other_participant",
+      "note": "A quoted request from someone outside the meeting, answering Jonas."
+    },
+    {
+      "id": "hs-11",
+      "category": "hard_silent",
+      "description": "The bot named in passing, then a question to another participant by name.",
+      "bot_name": "Juniper",
+      "participants": ["Nils", "Hana"],
+      "transcript": [
+        {"speaker": "Nils", "text": "Juniper gave us three title ideas earlier."},
+        {"speaker": "Hana", "text": "Right, I wrote them down."},
+        {"speaker": "Nils", "text": "Hana, which one did you like best?"}
+      ],
+      "active_rules": ["to_other_participant", "mentioned_not_asked", "unfinished_thought", "already_answered", "group_agreeing"],
+      "expected": "silent",
+      "expected_rule": "to_other_participant",
+      "note": "Mentions the assistant, then asks Hana; nothing is asked of the assistant."
     }
   ]
 }

@@ -18,7 +18,7 @@ from livekit import api
 from loguru import logger
 from sqladmin import Admin, ModelView
 from sqladmin.authentication import AuthenticationBackend
-from wtforms import SelectField
+from wtforms import SelectField, ValidationError
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 from starlette.requests import Request as StarletteRequest
@@ -216,6 +216,12 @@ _STT_MODEL_CHOICES = [
 ]
 
 
+def _audio_mode_fits_scope(form, field):
+    """The database page's form follows PUT /config: global is normal only, a room may be any mode."""
+    if form.scope.data == "global" and field.data not in _AUDIO_MODES_GLOBAL:
+        raise ValidationError(f"audio_mode for the global settings must be one of {list(_AUDIO_MODES_GLOBAL)}")
+
+
 class BotConfigAdmin(ModelView, model=BotConfig):
     column_list = [
         BotConfig.scope,
@@ -249,8 +255,12 @@ class BotConfigAdmin(ModelView, model=BotConfig):
         "tts_provider": {"choices": [("elevenlabs", "ElevenLabs — paid service: ElevenLabs (default)"), ("openai", "OpenAI voices — paid service: OpenAI"), ("kokoro", "Kokoro — our own server (staging only)")]},
         "tts_aggregation_mode": {"choices": [("sentence", "sentence (default)"), ("clause", "first clause, then sentences"), ("token", "token (lower latency)")]},
         "turn_detection": {"choices": [("silence", "after a silence (default)"), ("smart_turn", "when the speaker sounds finished (smart turn)")]},
-        # ptt and baton are chosen per room on the Bot settings page, where PUT checks the scope.
-        "audio_mode": {"choices": [("normal", "normal: open mic (default)")]},
+        # Every mode is listed, so saving a ptt or baton room's row keeps its mode; the scope
+        # rule is PUT /config's (_audio_mode_fits_scope).
+        "audio_mode": {
+            "choices": [("normal", "normal: open mic (default)"), ("ptt", "ptt: push to talk (a room's own row only)"), ("baton", "baton: one speaker at a time (a room's own row only)")],
+            "validators": [_audio_mode_fits_scope],
+        },
         # These two ADD together to form the turn-end window; 450+300=750ms is
         # calibrated against real pilot audio (tests/integration/test_turn_calibration.py).
         # Judge any change by the sum. Choices are kept inside the range PUT

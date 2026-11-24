@@ -249,6 +249,16 @@ class TestCandidates(unittest.TestCase):
         self.assertEqual((e["overall"]["missed_turns"], e["overall"]["speak_expected"]), (0, 3))
         self.assertEqual(best(data, CANDIDATES, results)["errors"]["overall"]["speak_expected"], 3)
 
+    def test_a_case_that_needs_a_setting_does_not_steer_the_choice(self):
+        """'blocked' (a speak case, r2 at 0.8) set aside: the choice is the one made without it."""
+        _, results = compared()
+        flagged = {**DATA, "scenarios": [{**s, "requires_setting": "answer_unanswered_group_question"}
+                                         if s["id"] == "blocked" else s for s in DATA["scenarios"]]}
+        without = {**DATA, "scenarios": [s for s in DATA["scenarios"] if s["id"] != "blocked"]}
+        chosen = best(flagged, CANDIDATES, results)
+        self.assertEqual({k: chosen[k] for k in ("wording", "thresholds")},
+                         {k: best(without, CANDIDATES, results)[k] for k in ("wording", "thresholds")})
+
     def test_the_comparison_table_keeps_both_errors_and_the_hard_cases_apart(self):
         _, results = compared()
         text = comparison(DATA, CANDIDATES, results, threshold=0.5, hard="peers")

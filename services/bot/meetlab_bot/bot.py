@@ -1202,6 +1202,8 @@ async def _bot(runner_args: LiveKitRunnerArguments):
                 logger.info(f"closing message heard for session {sid}")
             if action == "say_closing":
                 logger.info(f"Session limit: speaking the closing message for session {sid}")
+                if floor:
+                    floor.closing()  # ptt, baton: said whoever holds the floor
                 await say(bot_config.closing_message)
             elif action == "close_room":
                 # Logged first: deleting the room disconnects this bot and ends this task.

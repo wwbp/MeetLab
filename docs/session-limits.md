@@ -77,8 +77,10 @@ and still counts towards their completion code; the assistant just no longer ans
 
 If closing the room fails, it is tried three times.
 
-**Push-to-talk and baton rooms are not covered yet:** someone holding the floor can block
-the closing message, and the room then closes without it. Use Normal mode with a limit.
+**Push-to-talk and baton rooms** end the same way: the closing message is said whoever
+holds the floor (after the same wait for a pause), and someone waiting for the baton does
+not cut it short. A reply that was waiting for the floor is dropped, not said after it.
+Tested with fake frames (`services/bot/tests/test_floor_pipeline.py`), not yet in a live room.
 
 If the closing message produces no sound within 20 s (for example the voice service is
 down), the room still closes after the buffer.

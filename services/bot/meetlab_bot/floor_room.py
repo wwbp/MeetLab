@@ -16,6 +16,7 @@ Three taps in the pipeline:
                 SPEAKING, so their next onset would never fire.
     reply_gate  after TTS. The bot's press: a check at its first audio. Blocked, the reply is
                 cancelled and runs again once the room is free, so a turn isn't left unanswered.
+                The session limit's closing line is not checked: closing() opens the gate for it.
     played      after the output transport, where words arrive as they are heard. Baton: someone
                 waiting takes the floor at the first word after a sentence end.
 
@@ -99,6 +100,7 @@ class FloorRoom:
         self._reply_again = False  # a blocked reply, to run once the room is free
         self._free_since = None
         self._sentence_ended = False
+        self._closing = False  # the session limit's closing line is next: nothing gates the bot now
 
     # In from the room.
 
@@ -199,6 +201,13 @@ class FloorRoom:
         """say() is queueing a fixed line: if it gets blocked, it is this that runs again."""
         self._line = line
 
+    def closing(self):
+        """The session limit's closing line is about to be said (session_end.py): it plays whoever
+        holds, as in a normal room nobody can cut it off. People are muted by now, so it is the
+        last thing the bot says; a reply or line blocked earlier is dropped, not run after it."""
+        self._closing = True
+        self._line_again, self._reply_again = None, False
+
     # The taps.
 
     async def _mic_frame(self, frame):
@@ -221,6 +230,8 @@ class FloorRoom:
         return True
 
     async def _may_play(self, frame):
+        if self._closing:
+            return True
         if self._reply_ok is False:
             return False
         # Only the first audio is checked, or a press would cut a sentence in two. Baton's next
@@ -253,7 +264,7 @@ class FloorRoom:
             self._sync(t)
         elif isinstance(frame, TTSTextFrame):
             self._log_sentence_end()
-            if self._sentence_ended and self._floor.waiting and self._floor.holder == Floor.BOT:
+            if self._sentence_ended and self._floor.waiting and self._floor.holder == Floor.BOT and not self._closing:
                 self._sentence_ended = False
                 self._floor.release(t, Floor.BOT)
                 self._sync(t)

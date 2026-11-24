@@ -5,7 +5,7 @@ Today every committed user turn goes to the model, so in a group the bot talks t
 researcher's rules, written in plain English, each with a threshold, can BLOCK a reply:
 
 - The default is to speak. No enabled rule, or the filter off: speak, nothing is asked.
-- Called by name in the last turn (is_direct_address): speak, nothing is asked.
+- Called by name in the turns just committed (is_direct_address): speak, nothing is asked.
 - Otherwise ONE classifier call: every enabled rule as a yes/no question about the recent
   conversation (render_state). A rule blocks when its probability is at or above its threshold;
   the comparison is ours, the classifier's own is_yes (0.5) is not used.
@@ -117,14 +117,17 @@ async def decide(
     timeout_s: float,
     enabled: bool = True,
     max_turns: int = MAX_TURNS,
+    batch_size: int = 1,
     clock: Callable[[], float] = time.monotonic,
 ) -> Decision:
     """Should the bot reply to the last of `turns`? Never raises (but can be cancelled): any
-    failure is a Decision to speak. `bot_names[0]` is the name the classifier is told."""
+    failure is a Decision to speak. `bot_names[0]` is the name the classifier is told.
+    `batch_size`: how many of the last turns were committed together (people talking at once);
+    the bot is addressed if any of them calls it."""
     active = [r for r in rules if r.enabled]
     if not enabled or not active:
         return Decision(True, "disabled")
-    if turns and not turns[-1].is_bot and is_direct_address(turns[-1].text, bot_names):
+    if any(not t.is_bot and is_direct_address(t.text, bot_names) for t in turns[-max(batch_size, 1):]):
         return Decision(True, "direct_address")
     state = render_state(turns[-max_turns:], next((n for n in bot_names if n.strip()), "Assistant"))
     questions = {r.id: YesNoQuestion(instructions=r.instructions) for r in active}

@@ -30,7 +30,8 @@ early: same images, same speech-to-text path.
 make start / make stop          # local stack up (build + migrate) / down
 make logs SERVICE=agent-runner
 
-make test                       # unit + integration against the local stack (ci.yml)
+make test                       # unit + integration + the voice loop against the local stack (ci.yml)
+make test-voice-loop            # one spoken turn through a real bot, LLM and voice stood in (no paid service)
 make test-static                # static analysis: dead code, image budget, docs, meet lint/tsc/knip
 make test-unit                  # runner unittest + meet vitest
 make test-infra                 # terraform fmt/validate/test, offline (mock provider)

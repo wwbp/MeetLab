@@ -228,8 +228,9 @@ class BotConfig(Base):
         Boolean, default=False, server_default="false", nullable=False
     )
     # Wall-clock cap on a session, in minutes, measured from the moment the first
-    # human joins (not room creation, not bot start). 0 = unlimited. Advisory only:
-    # the browser counts down and warns; nobody is disconnected.
+    # human joins (not room creation, not bot start). 0 = unlimited. Enforced:
+    # the browser counts down and warns, and at the limit the bot says closing_message and
+    # closes the room for everyone (meetlab_bot/session_end.py, docs/session-limits.md).
     session_limit_minutes: Mapped[int] = mapped_column(
         BigInteger, default=0, server_default="0", nullable=False
     )

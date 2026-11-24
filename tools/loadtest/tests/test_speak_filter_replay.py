@@ -459,6 +459,7 @@ class TestMain(unittest.TestCase):
         self.assertEqual(written["calls"], fake.calls)
         self.assertIn("thresholds", written["best"])
         self.assertIn("The speaker stopped mid-word.", said)
+        self.assertEqual(said.count("Tokens:"), 1, "tokens and cost are the whole run's, said once")
         self.assertNotIn("folding table", json.dumps(written), "ids, wordings and numbers only")
 
 

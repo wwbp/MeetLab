@@ -479,6 +479,28 @@ class FloorRoomTest(golden.NormalRoomTest):
 
         await self._meet_in("baton", meeting)
 
+    async def _nothing_plays_after_the_closing_line(self, mode, press):
+        """A reply whose model call was in flight at the limit: closing() opens the gate for the
+        closing line only, and nothing the bot says after it is heard or run again."""
+        async def meeting():
+            self.floor.closing()
+            await press(1.0, ALICE)  # people still talk to each other
+            await self.back[0].process_frame(TTSSpeakFrame("Time is up."), DOWN)
+            await self._spin()
+            self.assertEqual(self._out_audio(), 1, "the closing line is heard")
+            await self._reply_now(2.0)
+            self.assertEqual(self._out_audio(), 1, "the late reply is not heard over Alice")
+            await self._tick(30.0)
+            self.assertEqual(self._worker_frames("LLMRunFrame"), [], "nor run again")
+
+        await self._meet_in(mode, meeting)
+
+    async def test_nothing_plays_after_the_closing_line(self):
+        await self._nothing_plays_after_the_closing_line("ptt", self._press)
+
+    async def test_nothing_plays_after_the_closing_line_with_the_baton(self):
+        await self._nothing_plays_after_the_closing_line("baton", self._claim)
+
     # ptt: what counts as a press.
 
     async def test_first_press_with_the_mic_off_at_prejoin_counts(self):

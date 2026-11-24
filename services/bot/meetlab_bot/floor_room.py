@@ -16,7 +16,7 @@ Three taps in the pipeline:
                 SPEAKING, so their next onset would never fire.
     reply_gate  after TTS. The bot's press: a check at its first audio. Blocked, the reply is
                 cancelled and runs again once the room is free, so a turn isn't left unanswered.
-                The session limit's closing line is not checked: closing() opens the gate for it.
+                The session limit's closing line is not checked: closing() opens the gate for it alone.
     played      after the output transport, where words arrive as they are heard. Baton: someone
                 waiting takes the floor at the first word after a sentence end.
 
@@ -100,7 +100,7 @@ class FloorRoom:
         self._reply_again = False  # a blocked reply, to run once the room is free
         self._free_since = None
         self._sentence_ended = False
-        self._closing = False  # the session limit's closing line is next: nothing gates the bot now
+        self._closing = None  # the session limit's closing line: "next", "playing", then "said"
 
     # In from the room.
 
@@ -203,9 +203,10 @@ class FloorRoom:
 
     def closing(self):
         """The session limit's closing line is about to be said (session_end.py): it plays whoever
-        holds, as in a normal room nobody can cut it off. People are muted by now, so it is the
-        last thing the bot says; a reply or line blocked earlier is dropped, not run after it."""
-        self._closing = True
+        holds, as in a normal room nobody can cut it off. It is the last thing the bot says: a reply
+        or line blocked earlier is dropped, and audio after it (a reply whose model call was in
+        flight) is not heard."""
+        self._closing = "next"
         self._line_again, self._reply_again = None, False
 
     # The taps.
@@ -225,12 +226,17 @@ class FloorRoom:
             return await self._may_play(frame)
         if isinstance(frame, (TTSStoppedFrame, InterruptionFrame)):
             self._reply_ok = None
+            if self._closing == "playing":
+                self._closing = "said"
         elif isinstance(frame, LLMFullResponseStartFrame):
             self._reply_again = False  # a newer reply answers the turn
         return True
 
     async def _may_play(self, frame):
+        if self._closing == "said":
+            return False
         if self._closing:
+            self._closing = "playing"
             return True
         if self._reply_ok is False:
             return False

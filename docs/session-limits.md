@@ -79,7 +79,10 @@ If closing the room fails, it is tried three times.
 
 **Push-to-talk and baton rooms** end the same way: the closing message is said whoever
 holds the floor (after the same wait for a pause), and someone waiting for the baton does
-not cut it short. A reply that was waiting for the floor is dropped, not said after it.
+not cut it short. It is the last thing heard from the bot: a reply that was waiting for the
+floor is dropped, and a reply that was still being written at the limit stays silent. In
+baton rooms the bot does not take the baton for it, so the room still shows the person
+holding it while the closing message plays.
 Tested with fake frames (`services/bot/tests/test_floor_pipeline.py`), not yet in a live room.
 
 If the closing message produces no sound within 20 s (for example the voice service is

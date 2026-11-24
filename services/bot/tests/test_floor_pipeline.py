@@ -130,6 +130,7 @@ class FloorRoomTest(golden.NormalRoomTest):
         self.room, self.events = _Room(), []
         self.hang_events = False
         self.words = []
+        self.settings = {}  # bot settings on top of the mode
         self.during_connect = lambda: None  # what the room delivers before on_connected runs
         self.transport._client.connect = mock.AsyncMock()
         self.transport._client.room = self.room
@@ -140,7 +141,7 @@ class FloorRoomTest(golden.NormalRoomTest):
             self.events.append((event_type, room_name, conv_id, payload))
 
         async def load(room_name):
-            return replace(golden.CONFIG, audio_mode=self.mode)
+            return replace(golden.CONFIG, audio_mode=self.mode, **self.settings)
 
         for p in (
             mock.patch.object(bot, "load_bot_config", new=load),
@@ -406,6 +407,99 @@ class FloorRoomTest(golden.NormalRoomTest):
 
     async def test_fixed_lines_and_chat_replies_obey_the_baton(self):
         await self._lines_and_chat_obey_the_gate("baton", self._claim, self._release)
+
+    # The session limit (docs/session-limits.md): the closing line is the one thing nobody blocks.
+
+    async def _closing_line_plays_over_a_hold(self, mode, press, let_go):
+        self.settings = {"session_limit_minutes": 1, "closing_message": "Time is up."}
+        self.room.remote_participants = {"alice": ALICE}
+        closing = ("worker", "TTSSpeakFrame", "Time is up.")
+        close_room = mock.patch.object(bot, "_close_room", new=mock.AsyncMock())
+        close_room.start()
+        self.addCleanup(close_room.stop)
+
+        async def meeting():
+            start = time.monotonic()  # first_join reads the real clock for the first join
+            await press(start, ALICE)
+            await self.transport.handlers["on_first_participant_joined"](self.transport, "alice")
+            alice = await self._at(start + 1.0, self._audio, "alice")
+
+            async def she_talks_on():
+                await self._at(self.now + 4.0, alice.push_frame, UserSpeakingFrame())
+
+            # Before the limit a line is gated as ever: the greeting waits for her to let go.
+            await she_talks_on()
+            await self._reply_now(self.now + 1.0)
+            self.assertEqual(self._out_audio(), 0, "Alice holds")
+            self.assertEqual(self.floor._line_again, "Welcome.", "the greeting is owed")
+            await self.back[0].process_frame(InterruptionFrame(), DOWN)
+
+            # She talks straight through the limit: the bot gives up waiting for a pause.
+            while self.now < start + 60.0:
+                await she_talks_on()
+            for _ in range(20):
+                if closing in self.trace:
+                    break
+                await she_talks_on()
+                await asyncio.sleep(0.3)
+            self.assertIn(closing, self.trace)
+            self.assertTrue(self.floor._floor.holds("alice"), "and she still holds")
+
+            yields = self._yields()
+            await self.back[0].process_frame(TTSSpeakFrame("Time is up."), DOWN)
+            self.assertEqual(self._out_audio(), 1, "the closing line is heard")
+            self.assertEqual(self._yields(), yields, "and not cancelled")
+
+            # What was blocked before the limit is not said after the closing line.
+            spoken = len(self._worker_frames("TTSSpeakFrame"))
+            await let_go(self.now + 1.0, ALICE)
+            for second in range(1, 3 * int(floor_room.REPLY_AGAIN_AFTER_SECS) + 3):
+                await self._tick(self.now + second)
+            self.assertEqual(len(self._worker_frames("TTSSpeakFrame")), spoken, "nothing is said after it")
+            self.assertEqual(self._worker_frames("LLMRunFrame"), [])
+            self.assertEqual(self.trace.count(closing), 1)
+
+        await self._meet_in(mode, meeting)
+
+    async def test_closing_line_plays_while_someone_holds(self):
+        await self._closing_line_plays_over_a_hold("ptt", self._press, self._let_go)
+
+    async def test_closing_line_plays_while_someone_holds_the_baton(self):
+        await self._closing_line_plays_over_a_hold("baton", self._claim, self._release)
+
+    async def test_closing_line_is_not_cut_for_someone_waiting(self):
+        """Baton: the bot yields a reply after its sentence to whoever waits. Not the closing line."""
+        async def meeting():
+            await self._reply_begins(1.0, "One.")  # the bot holds the baton
+            self.floor.closing()
+            await self._claim(1.5, BOB)
+            await self._say_words("Time is up.", "Thank you.")
+            self.assertEqual(self.words, ["Time is up.", "Thank you."])
+            self.assertEqual(self._yields(), 0)
+
+        await self._meet_in("baton", meeting)
+
+    async def _nothing_plays_after_the_closing_line(self, mode, press):
+        """A reply whose model call was in flight at the limit: closing() opens the gate for the
+        closing line only, and nothing the bot says after it is heard or run again."""
+        async def meeting():
+            self.floor.closing()
+            await press(1.0, ALICE)  # people still talk to each other
+            await self.back[0].process_frame(TTSSpeakFrame("Time is up."), DOWN)
+            await self._spin()
+            self.assertEqual(self._out_audio(), 1, "the closing line is heard")
+            await self._reply_now(2.0)
+            self.assertEqual(self._out_audio(), 1, "the late reply is not heard over Alice")
+            await self._tick(30.0)
+            self.assertEqual(self._worker_frames("LLMRunFrame"), [], "nor run again")
+
+        await self._meet_in(mode, meeting)
+
+    async def test_nothing_plays_after_the_closing_line(self):
+        await self._nothing_plays_after_the_closing_line("ptt", self._press)
+
+    async def test_nothing_plays_after_the_closing_line_with_the_baton(self):
+        await self._nothing_plays_after_the_closing_line("baton", self._claim)
 
     # ptt: what counts as a press.
 

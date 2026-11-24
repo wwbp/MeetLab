@@ -14,6 +14,7 @@ from pipecat.classifiers.base_classifier import BaseClassifier, ClassifierError,
 from pipecat.metrics.metrics import LLMTokenUsage
 
 from meetlab_loadtest.speak_filter_replay import ReplayStopped, key_from, main, replay, report, stats, table
+from meetlab_loadtest.speak_filter_scenarios import load
 
 
 def scenario(id, category, expected, expected_rule, last, **extra):
@@ -130,6 +131,36 @@ class TestReplay(unittest.TestCase):
         records = run(replay(DATA, FailsOnce(), runs=1, threshold=0.5, max_calls=100))
         self.assertEqual([r["reason"] for r in records].count("classifier_error"), 1)
         self.assertEqual(len(records), 7)
+
+
+class TestTheCommittedSetReplayed(unittest.TestCase):
+    """The committed scenarios against a classifier that would block everything (1.0 for every
+    rule): what is decided before the classifier is asked."""
+
+    @classmethod
+    def setUpClass(cls):
+        class BlocksAll(FakeClassifier):
+            async def _ask(self, state, questions, **_):
+                self.calls += 1
+                return {name: YesNoResult(probability=1.0) for name in questions}, None
+        cls.data, cls.fake = load(), BlocksAll()
+        cls.records = {r["id"]: r for r in run(replay(cls.data, cls.fake, runs=1, threshold=0.5, max_calls=100))}
+
+    def test_asked_by_name_then_answered_by_a_person_the_bot_is_owed_a_reply(self):
+        for i in ("bqh-01", "bqh-02", "bqh-03"):
+            r = self.records[i]
+            self.assertEqual((r["speak"], r["reason"], r["elapsed_ms"], r["probabilities"]), (True, "owed_reply", None, {}), i)
+
+    def test_no_scenario_expecting_silence_is_owed_a_reply(self):
+        expected = {s["id"]: s["expected"] for s in self.data["scenarios"]}
+        self.assertEqual([i for i, r in self.records.items() if r["reason"] == "owed_reply" and expected[i] == "silent"], [])
+        self.assertEqual(sorted(i for i, r in self.records.items() if r["reason"] == "owed_reply"), ["bqh-01", "bqh-02", "bqh-03"])
+
+    def test_only_what_the_name_did_not_decide_reaches_the_classifier(self):
+        asked = sum(r["elapsed_ms"] is not None for r in self.records.values())
+        self.assertEqual(asked, self.fake.calls)
+        self.assertEqual(asked, len(self.records) - sum(r["reason"] in ("direct_address", "owed_reply", "disabled")
+                                                        for r in self.records.values()))
 
 
 class TestReport(unittest.TestCase):

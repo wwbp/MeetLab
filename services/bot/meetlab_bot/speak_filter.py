@@ -6,6 +6,8 @@ researcher's rules, written in plain English, each with a threshold, can BLOCK a
 
 - The default is to speak. No enabled rule, or the filter off: speak, nothing is asked.
 - Called by name in the turns just committed (is_direct_address): speak, nothing is asked.
+- Owed a reply (owed_reply): asked something by name in one of the OWED_WITHIN turns before,
+  and the bot has not spoken since (someone else spoke first): speak, nothing is asked.
 - Otherwise ONE classifier call: every enabled rule as a yes/no question about the recent
   conversation (render_state). A rule blocks when its probability is at or above its threshold;
   the comparison is ours, the classifier's own is_yes (0.5) is not used.
@@ -30,6 +32,10 @@ from pipecat.classifiers.base_classifier import BaseClassifier, ClassifierError,
 # what they need, and every turn sent is paid in tokens and in time before each reply. Also
 # the longest transcript in the scenario set the thresholds are chosen on.
 MAX_TURNS = 12
+# How many turns after a request by name the bot still owes its reply. Four lets each of the
+# four people a room can hold speak once (a person answering for the bot, the asker thanking
+# them, ...); past that the talk has moved on and a late answer would interrupt it.
+OWED_WITHIN = 4
 
 
 @dataclass(frozen=True)
@@ -50,7 +56,7 @@ class FilterTurn:
 @dataclass(frozen=True)
 class Decision:
     speak: bool
-    reason: str  # direct_address | blocked | no_rule_fired | classifier_error | disabled
+    reason: str  # direct_address | owed_reply | blocked | no_rule_fired | classifier_error | disabled
     blocked_by: tuple[str, ...] = ()  # ids of the rules at or above their threshold, in the rules' order
     probabilities: dict[str, float] = field(default_factory=dict)  # every enabled rule's, when asked
     elapsed_ms: float | None = None  # the classifier call; None when it was not made
@@ -98,6 +104,26 @@ def is_direct_address(text: str, bot_names: Sequence[str]) -> bool:
     return any(_address_pattern(name).search(text.strip()) for name in bot_names if name.strip())
 
 
+# ponytail: a word list. A turn made only of these and the bot's name is a courtesy ("Thanks,
+# Juniper.", "Hi Juniper!", "Juniper?"): answered when it is new, never owed later. Anything
+# else said with the name ("Juniper, give us a fun fact") is a request that stays owed.
+_COURTESY = frozenset("""thanks thank you so much very a lot ok okay fine oh um uh well alright and hi hey hello
+    bye goodbye cheers great good morning afternoon evening night""".split())
+
+
+def owed_reply(turns: Sequence[FilterTurn], bot_names: Sequence[str], within: int = OWED_WITHIN) -> bool:
+    """Was the bot asked something by name (is_direct_address, more than a courtesy) in the last
+    `within` turns before the newest, with no word from the bot since?"""
+    names = {w for n in bot_names for w in n.lower().split()}
+    for t in reversed(turns[-(within + 1):] if within > 0 else []):
+        if t.is_bot:
+            return False
+        words = set(re.findall(r"[\w'’]+", t.text.lower()))
+        if is_direct_address(t.text, bot_names) and words - names - _COURTESY:
+            return True
+    return False
+
+
 def render_state(turns: Sequence[FilterTurn], bot_name: str) -> str:
     """The classifier's `state`: who the assistant is, then one JSON object per turn (who said
     it is a field, never a prefix to parse out of the words: meetlab_core/turns.py). Thresholds
@@ -118,17 +144,20 @@ async def decide(
     enabled: bool = True,
     max_turns: int = MAX_TURNS,
     batch_size: int = 1,
+    owed_within: int = OWED_WITHIN,
     clock: Callable[[], float] = time.monotonic,
 ) -> Decision:
     """Should the bot reply to the last of `turns`? Never raises (but can be cancelled): any
     failure is a Decision to speak. `bot_names[0]` is the name the classifier is told.
     `batch_size`: how many of the last turns were committed together (people talking at once);
-    the bot is addressed if any of them calls it."""
+    the bot is addressed if any of them calls it. `owed_within`: see owed_reply (0 turns it off)."""
     active = [r for r in rules if r.enabled]
     if not enabled or not active:
         return Decision(True, "disabled")
     if any(not t.is_bot and is_direct_address(t.text, bot_names) for t in turns[-max(batch_size, 1):]):
         return Decision(True, "direct_address")
+    if owed_reply(turns, bot_names, owed_within):
+        return Decision(True, "owed_reply")
     state = render_state(turns[-max_turns:], next((n for n in bot_names if n.strip()), "Assistant"))
     questions = {r.id: YesNoQuestion(instructions=r.instructions) for r in active}
     started = clock()

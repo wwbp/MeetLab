@@ -5,7 +5,7 @@ import copy
 import unittest
 from collections import Counter
 
-from meetlab_bot.speak_filter import FilterTurn, render_state
+from meetlab_bot.speak_filter import FilterTurn, is_direct_address, owed_reply, render_state
 from meetlab_loadtest.speak_filter_scenarios import (
     CATEGORIES, MAX_SPEAK_SHARE, MIN_SPEAK_SHARE, filter_turns, load, validate,
 )
@@ -44,8 +44,22 @@ class TestTheCommittedSet(unittest.TestCase):
     def test_it_is_valid(self):
         self.assertEqual(validate(self.data), [])
 
-    def test_about_forty_scenarios(self):
-        self.assertTrue(36 <= len(self.data["scenarios"]) <= 56, len(self.data["scenarios"]))
+    def test_small_enough_to_replay_by_hand(self):
+        """About forty, then eleven hard silent cases (2026-11-23): every paid run is a call per
+        scenario per candidate wording, so the set stays this size."""
+        self.assertTrue(36 <= len(self.data["scenarios"]) <= 64, len(self.data["scenarios"]))
+
+    def test_hard_cases_where_the_bot_must_stay_silent(self):
+        """Talk between people that sounds like a request to the bot, a question to another person
+        by name, rhetorical questions, a question read aloud: at least ten, all silent, and none of
+        them decided by the bot's name, so each one tests the classifier."""
+        hard = [s for s in self.data["scenarios"] if s["category"] == "hard_silent"]
+        self.assertGreaterEqual(len(hard), 10)
+        for s in hard:
+            self.assertEqual(s["expected"], "silent", s["id"])
+            turns, names = filter_turns(s), [s["bot_name"]]
+            self.assertFalse(is_direct_address(turns[-1].text, names), s["id"])
+            self.assertFalse(owed_reply(turns, names), s["id"])
 
     def test_the_rules_are_the_owners_starter_rules_verbatim(self):
         self.assertEqual([r["instructions"] for r in self.data["rules"]], STARTER_RULES)

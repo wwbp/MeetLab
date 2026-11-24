@@ -30,6 +30,7 @@ CATEGORIES = (
     "overlapping_turns",               # people talking at once: one of them addresses the bot
     "unanswered_silence",              # a question nobody answers, then silence
     "control",                         # no rule applies
+    "hard_silent",                     # sounds like it is for the bot, and is not
 )
 # A filter that always blocks, or never does, must score badly: the share of scenarios
 # expecting a reply stays within this range.

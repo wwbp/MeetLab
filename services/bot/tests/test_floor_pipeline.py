@@ -427,10 +427,11 @@ class FloorRoomTest(golden.NormalRoomTest):
             async def she_talks_on():
                 await self._at(self.now + 4.0, alice.push_frame, UserSpeakingFrame())
 
-            # Before the limit a reply is gated as ever.
+            # Before the limit a line is gated as ever: the greeting waits for her to let go.
             await she_talks_on()
             await self._reply_now(self.now + 1.0)
             self.assertEqual(self._out_audio(), 0, "Alice holds")
+            self.assertEqual(self.floor._line_again, "Welcome.", "the greeting is owed")
             await self.back[0].process_frame(InterruptionFrame(), DOWN)
 
             # She talks straight through the limit: the bot gives up waiting for a pause.
@@ -449,10 +450,12 @@ class FloorRoomTest(golden.NormalRoomTest):
             self.assertEqual(self._out_audio(), 1, "the closing line is heard")
             self.assertEqual(self._yields(), yields, "and not cancelled")
 
-            # The reply blocked before the limit is not run after the closing line.
+            # What was blocked before the limit is not said after the closing line.
+            spoken = len(self._worker_frames("TTSSpeakFrame"))
             await let_go(self.now + 1.0, ALICE)
-            await self._tick(self.now)
-            await self._tick(self.now + floor_room.REPLY_AGAIN_AFTER_SECS)
+            for second in range(1, 3 * int(floor_room.REPLY_AGAIN_AFTER_SECS) + 3):
+                await self._tick(self.now + second)
+            self.assertEqual(len(self._worker_frames("TTSSpeakFrame")), spoken, "nothing is said after it")
             self.assertEqual(self._worker_frames("LLMRunFrame"), [])
             self.assertEqual(self.trace.count(closing), 1)
 

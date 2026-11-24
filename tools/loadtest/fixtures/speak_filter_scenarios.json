@@ -1,11 +1,4 @@
 {
-  "rules": [
-    {"id": "to_other_participant", "instructions": "The last speaker was talking to another participant, not to the assistant."},
-    {"id": "mentioned_not_asked", "instructions": "The assistant was mentioned but not asked anything."},
-    {"id": "unfinished_thought", "instructions": "The speaker has not finished their thought."},
-    {"id": "already_answered", "instructions": "Another participant has already answered the question."},
-    {"id": "group_agreeing", "instructions": "The group is in the middle of agreeing on something."}
-  ],
   "scenarios": [
     {
       "id": "p2p-01",
@@ -608,7 +601,7 @@
       "active_rules": ["to_other_participant", "mentioned_not_asked", "unfinished_thought", "already_answered", "group_agreeing"],
       "expected": "speak",
       "expected_rule": "direct_address",
-      "note": "Owner, 2026-11-23: any address by name gets a reply, thanks included, though 'mentioned but not asked anything' describes it exactly."
+      "note": "Owner, 2026-11-23: any address by name gets a reply, thanks included, though 'mentioned but not asked anything' describes it exactly. Owner, 2026-11-24: a courtesy by name is answered only while it is the newest turn; once someone else has spoken it is no longer owed."
     },
     {
       "id": "ste-01",
@@ -756,6 +749,7 @@
       "active_rules": ["to_other_participant", "mentioned_not_asked", "unfinished_thought", "already_answered", "group_agreeing"],
       "expected": "speak",
       "expected_rule": "none",
+      "requires_setting": "answer_unanswered_group_question",
       "silence_after_s": 9,
       "note": "Nine seconds without an answer: the assistant is the one who knows."
     },
@@ -773,6 +767,7 @@
       "active_rules": ["to_other_participant", "mentioned_not_asked", "unfinished_thought", "already_answered", "group_agreeing"],
       "expected": "speak",
       "expected_rule": "none",
+      "requires_setting": "answer_unanswered_group_question",
       "silence_after_s": 12,
       "note": "Addressed to Omar on its face, but Omar has said he cannot answer, and nobody has spoken since."
     },
@@ -790,6 +785,7 @@
       "active_rules": ["to_other_participant", "mentioned_not_asked", "unfinished_thought", "already_answered", "group_agreeing"],
       "expected": "speak",
       "expected_rule": "none",
+      "requires_setting": "answer_unanswered_group_question",
       "silence_after_s": 15,
       "note": "A stalled group and a long silence: an opening for the assistant."
     },

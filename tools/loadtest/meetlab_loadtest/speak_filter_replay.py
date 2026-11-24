@@ -39,23 +39,25 @@ class ReplayStopped(Exception):
     """The first classifier call failed: an account or model-access problem, not to be repeated."""
 
 
-async def replay(data: dict, classifier: BaseClassifier, *, runs: int, threshold: float, max_calls: int,
+async def replay(data: dict, classifier: BaseClassifier, *, runs: int, threshold: float | None, max_calls: int,
                  timeout_s: float = 10.0) -> list[dict]:
-    """Every scenario through decide(), `runs` times, every rule at `threshold`. One record per
+    """Every scenario through decide(), `runs` times, every rule at `threshold` (None: each at
+    its own, as the set's rules give it). One record per
     scenario per run. At most one classifier call per record, so `max_calls` is checked before
     the first: a run that could exceed it is refused whole."""
     planned = runs * len(data["scenarios"])
     if planned > max_calls:
         raise ValueError(f"{runs} runs of {len(data['scenarios'])} scenarios can make {planned} calls, "
                          f"more than --max-calls {max_calls}")
-    instructions = {r["id"]: r["instructions"] for r in data["rules"]}
+    rules = {r["id"]: Rule(r["id"], r["instructions"], r["threshold"] if threshold is None else threshold)
+             for r in data["rules"]}
     records, asked = [], 0
     for n in range(1, runs + 1):
         for s in data["scenarios"]:
             d = await decide(
                 filter_turns(s),
                 [s["bot_name"]],
-                [Rule(r, instructions[r], threshold) for r in s["active_rules"]],
+                [rules[r] for r in s["active_rules"]],
                 classifier, timeout_s=timeout_s, batch_size=s.get("batch_size", 1),
                 silence_s=s.get("silence_after_s"), clock=time.perf_counter,
             )
@@ -81,7 +83,7 @@ def with_wordings(data: dict, candidate: dict) -> dict:
     return {**data, "rules": [{**r, "instructions": candidate["rules"].get(r["id"], r["instructions"])} for r in data["rules"]]}
 
 
-async def compare(data: dict, candidates: list[dict], classifier: BaseClassifier, *, runs: int, threshold: float,
+async def compare(data: dict, candidates: list[dict], classifier: BaseClassifier, *, runs: int, threshold: float | None,
                   max_calls: int, repeat: str | None = None, timeout_s: float = 10.0) -> dict[str, list[dict]]:
     """Every candidate replayed `runs` times (the `repeat` one once more): {candidate id: records}.
     The cap covers them all and is checked before the first call."""
@@ -116,10 +118,17 @@ def _combined_errors(scenarios: list[dict], blocked: int) -> dict:
                             for c in dict.fromkeys(s["category"] for s in scenarios)}}
 
 
+def scored(data: dict) -> dict:
+    """The set without the cases that need a study setting (requires_setting): those are not
+    what the default rules are scored on."""
+    return {**data, "scenarios": [s for s in data["scenarios"] if not s.get("requires_setting")]}
+
+
 def combine(data: dict, results: dict[str, list[dict]], wording: dict[str, str], thresholds: dict[str, float]) -> dict:
     """The errors had each rule been worded as in the candidate `wording[rule]` and held to
     `thresholds[rule]`: from each candidate's first run, no calls. Assumes a rule's answer does
     not depend on the other questions asked with it."""
+    data = scored(data)
     first = {(c, r["id"]): r["probabilities"] for c, records in results.items() for r in records if r["run"] == 1}
     blocked = sum(1 << n for n, s in enumerate(data["scenarios"])
                   if any(first[c, s["id"]].get(rule, 0.0) >= thresholds[rule] for rule, c in wording.items()))
@@ -130,6 +139,7 @@ def best(data: dict, candidates: list[dict], results: dict[str, list[dict]]) -> 
     """The wording (the first candidate's, or one that rewords the rule) and threshold per rule
     with the fewest errors, then the fewest missed turns. Chosen on the very set it is scored
     on: a bound on what wording and thresholds can do here, not a measurement of the choice."""
+    data = scored(data)
     masks, base = _masks(data, results), candidates[0]["id"]
     speak = sum(1 << n for n, s in enumerate(data["scenarios"]) if s["expected"] == "speak")
     silent = sum(1 << n for n, s in enumerate(data["scenarios"]) if s["expected"] == "silent")
@@ -176,8 +186,21 @@ def _errors(rows: list[tuple[dict, bool]]) -> dict:
             "missed_turn_rate": _rate(speak.count(False), len(speak))}
 
 
-def report(data: dict, records: list[dict], *, threshold: float) -> dict:
-    """What the replay showed, from its records alone (the sweep makes no calls)."""
+def report(data: dict, records: list[dict], *, threshold: float | None) -> dict:
+    """What the replay showed, from its records alone (the sweep makes no calls). A case that
+    needs a study setting is listed under needs_setting and counted nowhere else."""
+    aside = [s for s in data["scenarios"] if s.get("requires_setting")]
+    kept = scored(data)
+    ids = {s["id"] for s in kept["scenarios"]}
+    return {**_report(kept, [r for r in records if r["id"] in ids], threshold=threshold),
+            "calls": sum(r["elapsed_ms"] is not None for r in records),
+            "classifier_errors": sum(r["reason"] == "classifier_error" for r in records),
+            "latency_ms": stats([r["elapsed_ms"] for r in records if r["elapsed_ms"] is not None]), "needs_setting": [
+        {"id": s["id"], "setting": s["requires_setting"], "expected": s["expected"],
+         "decisions": ["speak" if r["speak"] else "silent" for r in records if r["id"] == s["id"]]} for s in aside]}
+
+
+def _report(data: dict, records: list[dict], *, threshold: float | None) -> dict:
     scenarios = {s["id"]: s for s in data["scenarios"]}
     rules = [r["id"] for r in data["rules"]]
     rows = [(scenarios[r["id"]], r) for r in records]
@@ -251,7 +274,8 @@ def table(rep: dict) -> str:
     lat, tokens = rep["latency_ms"], rep.get("tokens") or {}
     lines = [
         f"Speak filter replay: model {rep.get('model')}, {rep['scenarios_count']} scenarios x {rep['runs']} runs, "
-        f"{rep['calls']} classifier calls, {rep['classifier_errors']} classifier errors, every rule at {rep['threshold']}.",
+        f"{rep['calls']} classifier calls, {rep['classifier_errors']} classifier errors, "
+        + (f"every rule at {rep['threshold']}." if rep["threshold"] is not None else "each rule at its own threshold."),
         *([f"Tokens: {tokens.get('input', '?')} in, {tokens.get('output', '?')} out. "
            f"Cost: {rep.get('cost_usd', 'not known (no price given)')}."] if "tokens" in rep else []),
         "Classifier call, ms: " + (f"min {lat['min']}, median {lat['median']}, p95 {lat['p95']}, max {lat['max']} (n={lat['n']})."
@@ -281,6 +305,8 @@ def table(rep: dict) -> str:
           + " | ".join(f"{r['blocks_own']} / {r['blocks_speak']}" for r in rows) + " |"
           for rule, rows in rep["sweep"]["by_rule"].items()),
         "",
+        *(f"Not counted: {s['id']} needs the setting {s['setting']} (expected {s['expected']}, decided "
+          f"{' '.join(s['decisions'])})." for s in rep.get("needs_setting", [])),
         f"Decision changed between runs ({len(rep['flips'])}): {', '.join(rep['flips']) or 'none'}.",
         "",
         "Wrong in at least one run:",
@@ -299,7 +325,8 @@ def comparison(data: dict, candidates: list[dict], results: dict[str, list[dict]
                hard: str = "hard_silent") -> str:
     """One row per candidate: what it rewords, and its two errors at `threshold`, overall and on
     the `hard` category (silent cases only, so false interruptions)."""
-    lines = [f"Candidates at {threshold}: false interruptions (should be silent, spoke) and missed turns "
+    at = "each rule's own threshold" if threshold is None else threshold
+    lines = [f"Candidates at {at}: false interruptions (should be silent, spoke) and missed turns "
              f"(should speak, blocked), overall and on {hard}:", "",
              f"| candidate | rule | wording | false interruptions | missed turns | false interruptions, {hard} |",
              "|---|---|---|---|---|---|"]
@@ -399,7 +426,7 @@ def main(argv=None, make_classifier=openai_classifier) -> int:
     p.add_argument("--i-understand-this-costs-money", action="store_true", help="required: this calls a paid API")
     p.add_argument("--max-calls", type=int, help="required: refuse a run that could make more classifier calls")
     p.add_argument("--runs", type=int, default=3)
-    p.add_argument("--threshold", type=float, default=0.5, help="every rule's threshold for the run")
+    p.add_argument("--threshold", type=float, help="every rule at this threshold (default: each rule at its own)")
     p.add_argument("--timeout", type=float, default=10.0, help="seconds to wait for one answer")
     p.add_argument("--env-file", help="read OPENAI_API_KEY (only) from this file if the environment has none")
     p.add_argument("--usd-per-1m-input", type=float, help="the model's price, to estimate the cost")

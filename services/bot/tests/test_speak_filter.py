@@ -6,7 +6,9 @@ import unittest
 
 from pipecat.classifiers.base_classifier import BaseClassifier, ClassifierError, YesNoQuestion, YesNoResult
 
-from meetlab_bot.speak_filter import MAX_TURNS, OWED_WITHIN, Decision, FilterTurn, Rule, decide, is_direct_address, owed_reply, render_state
+from meetlab_bot.speak_filter import (
+    DEFAULT_RULES, MAX_TURNS, OWED_WITHIN, Decision, FilterTurn, Rule, decide, is_direct_address, owed_reply, render_state,
+)
 
 TO_OTHER = Rule("to_other", "The last speaker was talking to another participant, not to the assistant.", 0.7)
 UNFINISHED = Rule("unfinished", "The speaker has not finished their thought.", 0.6)
@@ -302,6 +304,22 @@ class TestOwedReply(unittest.IsolatedAsyncioTestCase):
 
     async def test_the_filter_off_still_asks_nothing_and_says_disabled(self):
         self.assertEqual(await self.reason(ASKED, FilterTurn("Kofi", "The fifteenth."), enabled=False), "disabled")
+
+
+class TestDefaultRules(unittest.TestCase):
+    def test_the_owners_choice_of_2026_11_24_verbatim(self):
+        """Measured in data/speak-filter/wordings-2026-11-23.md: unfinished_a2 and mentioned_b1 in
+        place of the two wordings that misfired, the other three as the owner wrote them, all at 0.9."""
+        self.assertEqual(DEFAULT_RULES, (
+            Rule("to_other_participant", "The last speaker was talking to another participant, not to the assistant.", 0.9),
+            Rule("mentioned_not_asked", "The last speaker refers to the assistant while talking to other people, "
+                                        "and asks the assistant nothing.", 0.9),
+            Rule("unfinished_thought", "The last turn stops partway (for example on 'and', 'um', 'the' or a comma) and "
+                                       "the speaker has more to say. A short question or request that is complete "
+                                       "counts as finished.", 0.9),
+            Rule("already_answered", "Another participant has already answered the question.", 0.9),
+            Rule("group_agreeing", "The group is in the middle of agreeing on something.", 0.9),
+        ))
 
 
 class TestDirectAddress(unittest.TestCase):

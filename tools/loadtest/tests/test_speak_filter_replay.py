@@ -121,6 +121,12 @@ class TestReplay(unittest.TestCase):
         self.assertEqual(fake.states[0].splitlines()[-1], "Nobody has spoken for 9 seconds since the last turn.")
         self.assertEqual(json.loads(fake.states[1].splitlines()[-1])["text"], "x")
 
+    def test_without_a_threshold_each_rule_has_its_own(self):
+        data = {**DATA, "rules": [{**DATA["rules"][0], "threshold": 0.95}, {**DATA["rules"][1], "threshold": 0.75}]}
+        records = {r["id"]: r for r in run(replay(data, FakeClassifier(), runs=1, threshold=None, max_calls=100))}
+        self.assertEqual(records["caught"]["reason"], "no_rule_fired", "r1 0.9 is under 0.95")
+        self.assertEqual(records["blocked"]["blocked_by"], ["r2"], "r2 0.8 is over 0.75")
+
     def test_more_calls_than_the_cap_allows_is_refused_before_any_call(self):
         fake = FakeClassifier()
         with self.assertRaises(ValueError) as refused:
@@ -235,6 +241,24 @@ class TestCandidates(unittest.TestCase):
         self.assertEqual(set(b["wording"]), {"r1", "r2"})
         self.assertIn(b["wording"]["r2"], ("original", "calm_r2"), "only a candidate that rewords r2, or the original")
 
+    def test_a_combination_leaves_out_a_case_that_needs_a_setting(self):
+        _, results = compared()
+        data = {**DATA, "scenarios": [{**s, "requires_setting": "answer_unanswered_group_question"}
+                                      if s["id"] == "flips" else s for s in DATA["scenarios"]]}
+        e = combine(data, results, {"r1": "original", "r2": "calm_r2"}, {"r1": 0.5, "r2": 0.5})
+        self.assertEqual((e["overall"]["missed_turns"], e["overall"]["speak_expected"]), (0, 3))
+        self.assertEqual(best(data, CANDIDATES, results)["errors"]["overall"]["speak_expected"], 3)
+
+    def test_a_case_that_needs_a_setting_does_not_steer_the_choice(self):
+        """'blocked' (a speak case, r2 at 0.8) set aside: the choice is the one made without it."""
+        _, results = compared()
+        flagged = {**DATA, "scenarios": [{**s, "requires_setting": "answer_unanswered_group_question"}
+                                         if s["id"] == "blocked" else s for s in DATA["scenarios"]]}
+        without = {**DATA, "scenarios": [s for s in DATA["scenarios"] if s["id"] != "blocked"]}
+        chosen = best(flagged, CANDIDATES, results)
+        self.assertEqual({k: chosen[k] for k in ("wording", "thresholds")},
+                         {k: best(without, CANDIDATES, results)[k] for k in ("wording", "thresholds")})
+
     def test_the_comparison_table_keeps_both_errors_and_the_hard_cases_apart(self):
         _, results = compared()
         text = comparison(DATA, CANDIDATES, results, threshold=0.5, hard="peers")
@@ -267,17 +291,20 @@ class TestCandidates(unittest.TestCase):
         self.assertLessEqual(b["thresholds"]["r1"], 0.8)
 
     def test_the_committed_candidates(self):
-        """The owner's wording kept as 'original'; three rewordings of each misfiring rule and
-        one of to_other_participant, each changing one rule."""
-        candidates = load_candidates()
-        self.assertEqual(candidates[0], {"id": "original", "rules": {}})
-        changed = Counter(rule for c in candidates[1:] for rule in c["rules"])
-        self.assertEqual(changed, {"unfinished_thought": 3, "mentioned_not_asked": 3, "to_other_participant": 1})
-        self.assertTrue(all(len(c["rules"]) == 1 for c in candidates[1:]))
+        """The default rules first, then the owner's original two wordings, then the other
+        rewordings measured on 2026-11-23, each changing one rule of the default."""
+        candidates, data = load_candidates(), load()
+        self.assertEqual(candidates[0], {"id": "default", "rules": {}})
+        self.assertEqual(candidates[1], {"id": "owner_original", "rules": {
+            "mentioned_not_asked": "The assistant was mentioned but not asked anything.",
+            "unfinished_thought": "The speaker has not finished their thought."}})
+        self.assertEqual(Counter(rule for c in candidates[2:] for rule in c["rules"]),
+                         {"unfinished_thought": 2, "mentioned_not_asked": 2, "to_other_participant": 1})
         self.assertEqual(len({c["id"] for c in candidates}), len(candidates))
-        data = load()
+        defaults = {r["id"]: r["instructions"] for r in data["rules"]}
         for c in candidates:
             with_wordings(data, c)
+            self.assertTrue(all(defaults[r] != w for r, w in c["rules"].items()), c["id"])
 
 
 class TestTheCommittedSetReplayed(unittest.TestCase):
@@ -383,6 +410,18 @@ class TestReport(unittest.TestCase):
                                    "speak_asked": 9})
         self.assertEqual((r1[0.3]["blocks_own"], r1[0.3]["blocks_speak"]), (3, 6))
         self.assertEqual((r1[0.9]["blocks_own"], r1[0.9]["blocks_speak"]), (3, 0))
+
+    def test_a_case_that_needs_a_setting_is_reported_apart_and_not_scored(self):
+        data = {**DATA, "scenarios": [{**s, "requires_setting": "answer_unanswered_group_question"}
+                                      if s["id"] == "blocked" else s for s in DATA["scenarios"]]}
+        rep = report(data, self.records, threshold=0.5)
+        self.assertEqual(rep["errors"]["overall"]["speak_expected"], 9)
+        self.assertEqual(rep["errors"]["overall"]["missed_turns"], 2, "flips twice; 'blocked' not counted")
+        self.assertEqual(rep["needs_setting"], [{"id": "blocked", "setting": "answer_unanswered_group_question",
+                                                 "expected": "speak", "decisions": ["silent"] * 3}])
+        self.assertNotIn("blocked", [s["id"] for s in rep["scenarios"]])
+        self.assertIn("needs the setting answer_unanswered_group_question", table({**rep, "model": "fake"}))
+        self.assertEqual(report(DATA, self.records, threshold=0.5)["needs_setting"], [])
 
     def test_a_classifier_error_counts_as_speaking_and_is_counted(self):
         records = [dict(r) for r in self.records]

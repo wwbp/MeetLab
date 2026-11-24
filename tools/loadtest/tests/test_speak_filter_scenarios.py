@@ -5,20 +5,10 @@ import copy
 import unittest
 from collections import Counter
 
-from meetlab_bot.speak_filter import FilterTurn, is_direct_address, owed_reply, render_state
+from meetlab_bot.speak_filter import DEFAULT_RULES, FilterTurn, is_direct_address, owed_reply, render_state
 from meetlab_loadtest.speak_filter_scenarios import (
     CATEGORIES, MAX_SPEAK_SHARE, MIN_SPEAK_SHARE, filter_turns, load, validate,
 )
-
-# The owner's starter rules, verbatim (2026-11-23).
-STARTER_RULES = [
-    "The last speaker was talking to another participant, not to the assistant.",
-    "The assistant was mentioned but not asked anything.",
-    "The speaker has not finished their thought.",
-    "Another participant has already answered the question.",
-    "The group is in the middle of agreeing on something.",
-]
-
 
 def minimal():
     """The smallest valid set: every category twice, half speak and half silent."""
@@ -61,8 +51,17 @@ class TestTheCommittedSet(unittest.TestCase):
             self.assertFalse(is_direct_address(turns[-1].text, names), s["id"])
             self.assertFalse(owed_reply(turns, names), s["id"])
 
-    def test_the_rules_are_the_owners_starter_rules_verbatim(self):
-        self.assertEqual([r["instructions"] for r in self.data["rules"]], STARTER_RULES)
+    def test_the_rules_are_the_filters_defaults(self):
+        """One list: the set is scored with the rules the bot will use (speak_filter.DEFAULT_RULES)."""
+        self.assertEqual(self.data["rules"], [{"id": r.id, "instructions": r.instructions, "threshold": r.threshold}
+                                              for r in DEFAULT_RULES])
+
+    def test_an_unanswered_group_question_waits_for_its_setting(self):
+        """Owner, 2026-11-24: answering a question the whole group left unanswered is a per-study
+        setting, off by default, to come with the silence trigger. Until then those cases are
+        reported apart, not scored against the default rules."""
+        marked = {s["id"]: s.get("requires_setting") for s in self.data["scenarios"] if s.get("requires_setting")}
+        self.assertEqual(marked, dict.fromkeys(("sil-01", "sil-02", "sil-03"), "answer_unanswered_group_question"))
 
     def test_every_starter_rule_is_expected_to_block_somewhere(self):
         blocking = {s["expected_rule"] for s in self.data["scenarios"] if s["expected"] == "silent"}
@@ -181,8 +180,15 @@ class TestValidate(unittest.TestCase):
         self.assertRejects(lambda d: d["scenarios"][0].update(silence_after_s="long"), "s0: silence_after_s")
         self.assertRejects(lambda d: d["scenarios"][0].update(needs_owner_decision="yes"), "s0: needs_owner_decision")
         self.assertRejects(lambda d: d["scenarios"][0].update(needs_owner_decision=True), "s0: owner_question")
+        self.assertRejects(lambda d: d["scenarios"][0].update(requires_setting="answer_everything"), "s0: requires_setting")
         self.assertEqual(self.problems(lambda d: d["scenarios"][0].update(
-            silence_after_s=8, needs_owner_decision=True, owner_question="Reply anyway?")), [])
+            silence_after_s=8, needs_owner_decision=True, owner_question="Reply anyway?",
+            requires_setting="answer_unanswered_group_question")), [])
+
+    def test_a_rule_may_carry_its_threshold(self):
+        self.assertEqual(self.problems(lambda d: d["rules"][0].update(threshold=0.9)), [])
+        for bad in (1.5, "high", True):
+            self.assertRejects(lambda d: d["rules"][0].update(threshold=bad), "rule r1")
 
     def test_a_batch_is_the_last_turns_and_none_of_them_the_bots(self):
         """batch_size: how many of the last turns were committed together (people talking at once)."""

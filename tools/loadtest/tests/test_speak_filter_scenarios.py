@@ -44,7 +44,7 @@ class TestTheCommittedSet(unittest.TestCase):
         self.assertEqual(validate(self.data), [])
 
     def test_about_forty_scenarios(self):
-        self.assertTrue(36 <= len(self.data["scenarios"]) <= 50, len(self.data["scenarios"]))
+        self.assertTrue(36 <= len(self.data["scenarios"]) <= 56, len(self.data["scenarios"]))
 
     def test_the_rules_are_the_owners_starter_rules_verbatim(self):
         self.assertEqual([r["instructions"] for r in self.data["rules"]], STARTER_RULES)
@@ -53,12 +53,23 @@ class TestTheCommittedSet(unittest.TestCase):
         blocking = {s["expected_rule"] for s in self.data["scenarios"] if s["expected"] == "silent"}
         self.assertEqual(blocking, {r["id"] for r in self.data["rules"]})
 
-    def test_cases_left_to_the_owner_say_what_is_asked(self):
-        asked = [s for s in self.data["scenarios"] if s.get("needs_owner_decision")]
-        self.assertTrue(asked, "a human answering a question put to the bot is the owner's call")
-        self.assertTrue({s["category"] for s in asked} >= {"bot_question_human_answered"})
-        self.assertTrue(all(s["category"] != "bot_question_human_answered" or s.get("needs_owner_decision")
-                            for s in self.data["scenarios"]))
+    def test_no_case_is_waiting_for_the_owner(self):
+        """Decided 2026-11-23: asked by name, the bot replies, even after a person answered or
+        when it is only thanked."""
+        self.assertEqual([s["id"] for s in self.data["scenarios"] if s.get("needs_owner_decision")], [])
+        by_id = {s["id"]: s for s in self.data["scenarios"]}
+        for i in ("bqh-01", "bqh-02", "bqh-03", "dab-04"):
+            self.assertEqual((by_id[i]["expected"], by_id[i]["expected_rule"]), ("speak", "direct_address"), i)
+
+    def test_people_talking_at_once_are_a_batch_and_any_turn_in_it_may_address_the_bot(self):
+        batches = [s for s in self.data["scenarios"] if s["category"] == "overlapping_turns"]
+        self.assertGreaterEqual(len(batches), 2)
+        for s in batches:
+            self.assertGreaterEqual(s["batch_size"], 2, s["id"])
+            self.assertEqual((s["expected"], s["expected_rule"]), ("speak", "direct_address"), s["id"])
+            earlier, last = s["transcript"][-s["batch_size"]:-1], s["transcript"][-1]
+            self.assertTrue(any(s["bot_name"].lower() in t["text"].lower() for t in earlier), s["id"])
+            self.assertNotIn(s["bot_name"].lower(), last["text"].lower(), s["id"])
 
 
 class TestValidate(unittest.TestCase):
@@ -157,6 +168,18 @@ class TestValidate(unittest.TestCase):
         self.assertRejects(lambda d: d["scenarios"][0].update(needs_owner_decision=True), "s0: owner_question")
         self.assertEqual(self.problems(lambda d: d["scenarios"][0].update(
             silence_after_s=8, needs_owner_decision=True, owner_question="Reply anyway?")), [])
+
+    def test_a_batch_is_the_last_turns_and_none_of_them_the_bots(self):
+        """batch_size: how many of the last turns were committed together (people talking at once)."""
+        for bad in (0, 4, "2", True):
+            self.assertRejects(lambda d: d["scenarios"][0].update(batch_size=bad), "s0: batch_size")
+        self.assertRejects(lambda d: d["scenarios"][0].update(batch_size=2), "s0: batch_size")  # turn 2 is the bot's
+        self.assertEqual(self.problems(lambda d: d["scenarios"][0].update(batch_size=1)), [])
+
+        def two_people_at_once(d):
+            d["scenarios"][0]["transcript"][1]["speaker"] = "Mara"
+            d["scenarios"][0]["batch_size"] = 2
+        self.assertEqual(self.problems(two_people_at_once), [])
 
 
 class TestRenderState(unittest.TestCase):

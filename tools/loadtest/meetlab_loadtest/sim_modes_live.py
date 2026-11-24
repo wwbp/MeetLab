@@ -5,8 +5,9 @@
 
 PAID: every run calls the real LLM and voice. Never run it unasked (docs/audio-modes-test-plan.md).
 
-The modes are closed to real rooms (runner.py:_AUDIO_MODES_BUILT), so this writes the room's row in
-the database itself, and refuses any stack but the local one (refuse_unless_local). Normal rooms
+This writes the room's row in the database itself (the runner accepts ptt and baton for a room's
+own row since v2.1.14, runner.py:_AUDIO_MODES_BUILT; it did not when this was written), and refuses
+any stack but the local one (refuse_unless_local). Normal rooms
 get no row: they run on the global settings, as today.
 
 Everything down to `# Live` is standard library and runs in `make sim-modes-check`, in virtual time.
@@ -273,7 +274,7 @@ PLAYS = {"turn_taking": _turn_taking, "overlap": _overlap, "interrupt": _interru
 
 # Keeping it local, and the money.
 def refuse_unless_local(env) -> None:
-    """Writing audio_mode to the database would open a mode the runner refuses: local stack only."""
+    """This writes audio_mode straight to the database, and every run is paid: local stack only."""
     for key in ("DATABASE_URL", "LIVEKIT_URL", "AGENT_RUNNER_URL"):
         host = urlsplit(env.get(key, "")).hostname
         if host not in ("postgres", "transport-server", "agent-runner", "localhost", "127.0.0.1"):

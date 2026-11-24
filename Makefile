@@ -18,7 +18,7 @@ ALEMBIC = alembic -c packages/core/alembic.ini
 # cross-service integration and system tests from the repo root.
 UNIT_SUITES = packages/core services/api services/bot tools/loadtest
 
-.PHONY: test-static test-config-parity up down start stop logs migrate migration test test-unit test-integration test-infra test-stt-cpu test-image test-dead-code scan scan-agent-runner scan-meet sim-attribution sim-group sim-modes-check sim-modes sim-modes-matrix sim-modes-stack
+.PHONY: test-static test-config-parity up down start stop logs migrate migration test test-unit test-integration test-voice-loop test-infra test-stt-cpu test-image test-dead-code scan scan-agent-runner scan-meet sim-attribution sim-group sim-modes-check sim-modes sim-modes-matrix sim-modes-stack
 
 up:
 	$(COMPOSE) build bot tests
@@ -50,7 +50,7 @@ migration:
 logs:
 	$(COMPOSE) logs -f --tail=$(LOG_TAIL) $(SERVICE)
 
-test: test-unit test-integration
+test: test-unit test-integration test-voice-loop
 
 test-unit:
 	@# Bots run their own image (BOT_IMAGE); build it even on a fresh machine (CI runs make test).
@@ -142,6 +142,24 @@ test-integration:
 	$(COMPOSE) up -d transport-server agent-runner meet
 	$(COMPOSE) exec -T meet pnpm test:api
 	$(COMPOSE) exec -T meet pnpm test:load
+
+# The free voice loop (tests/system/voice_loop.py): a participant speaks a recorded line; a real bot
+# hears it through stt-cpu, asks a scripted stand-in for the LLM and answers in a stand-in voice
+# (meetlab_loadtest/model_stubs.py, served by the test's own container, reached as `tests`).
+# No paid service. Last in `make test`: it restarts the runner with the stand-ins' addresses
+# (docker-compose.voice-loop.yml), which a room uses only if its Bot Config names them.
+test-voice-loop:
+	$(COMPOSE) build bot
+	$(COMPOSE) -f .devcontainer/docker-compose.voice-loop.yml up -d --wait transport-server agent-runner
+	$(COMPOSE) exec -T agent-runner $(ALEMBIC) upgrade head
+	-docker rm -f $$(docker ps -aq --filter label=meetlab.session) 2>/dev/null
+	@# A bot's container removes itself when it ends, so its log is followed from its start
+	@# and shown if the test fails. ponytail: the first bot container seen; fine for one room.
+	@(for i in $$(seq 600); do c=$$(docker ps -q --filter label=meetlab.session | head -1); [ -n "$$c" ] && break; sleep 0.5; done; \
+	  [ -n "$$c" ] && docker logs -f $$c) >/tmp/voice-loop-bot.log 2>&1 & \
+	$(COMPOSE) run --rm --no-deps -T --use-aliases tests python -m unittest tests.system.voice_loop -v \
+	  || { echo "== the bot's log (last 300 lines)"; tail -n 300 /tmp/voice-loop-bot.log; exit 1; }
+	-docker rm -f $$(docker ps -aq --filter label=meetlab.session) 2>/dev/null
 
 scan: scan-agent-runner scan-meet
 

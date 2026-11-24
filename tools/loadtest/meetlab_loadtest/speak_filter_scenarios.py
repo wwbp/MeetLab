@@ -1,5 +1,6 @@
 """The speak filter's scenario set: written conversations, each ending at the moment the bot
-must decide whether to reply, with the decision expected of it and the rule that should block.
+must decide whether to reply, with the decision expected of it and the rule that should block. People talking at once reach
+the bot as one batch of turns: `batch_size` says how many of the last turns that is (1 if absent).
 To be replayed through the filter with a real classifier, to choose each rule's threshold.
 
 The data is tools/loadtest/fixtures/speak_filter_scenarios.json: invented names and words only.
@@ -24,6 +25,7 @@ CATEGORIES = (
     "implicit_request",                # no name, but only the bot could answer
     "direct_address_with_block_rule",  # addressed by name while a block rule also holds
     "transcription_error",             # a misheard word or a wrong speaker label
+    "overlapping_turns",               # people talking at once: one of them addresses the bot
     "unanswered_silence",              # a question nobody answers, then silence
     "control",                         # no rule applies
 )
@@ -33,7 +35,7 @@ MIN_SPEAK_SHARE, MAX_SPEAK_SHARE = 0.4, 0.6
 
 _TEXT = ("id", "category", "description", "bot_name", "note")
 _REQUIRED = _TEXT + ("participants", "transcript", "active_rules", "expected", "expected_rule")
-_OPTIONAL = ("silence_after_s", "needs_owner_decision", "owner_question")
+_OPTIONAL = ("silence_after_s", "batch_size", "needs_owner_decision", "owner_question")
 
 
 def load(path=SCENARIOS_PATH) -> dict:
@@ -83,6 +85,10 @@ def _scenario_problems(s: dict, rule_ids: set) -> list[str]:
     silence = s.get("silence_after_s", 0)
     if isinstance(silence, bool) or not isinstance(silence, (int, float)) or silence < 0:
         out.append("silence_after_s must be seconds, 0 or more")
+    batch = s.get("batch_size", 1)
+    if turns and people and not (type(batch) is int and 1 <= batch <= len(turns)
+                                 and all(t["speaker"] in people for t in turns[-batch:])):
+        out.append("batch_size must count the last turns committed together, all of them participants'")
     if not isinstance(s.get("needs_owner_decision", False), bool):
         out.append("needs_owner_decision must be true or false")
     elif s.get("needs_owner_decision") and not _text(s.get("owner_question")):

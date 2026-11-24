@@ -155,6 +155,23 @@
       "note": "A name that is also a common noun: 'the assistant' is a mention."
     },
     {
+      "id": "nna-05",
+      "category": "named_not_addressed",
+      "description": "A participant says they used the assistant for something earlier.",
+      "bot_name": "Moss",
+      "participants": ["Bea", "Omar"],
+      "transcript": [
+        {"speaker": "Bea", "text": "Your notes from last week were really clear."},
+        {"speaker": "Omar", "text": "Ha, thanks."},
+        {"speaker": "Bea", "text": "Did you write them yourself?"},
+        {"speaker": "Omar", "text": "Mostly. I had Moss tidy them up afterwards."}
+      ],
+      "active_rules": ["to_other_participant", "mentioned_not_asked", "unfinished_thought", "already_answered", "group_agreeing"],
+      "expected": "silent",
+      "expected_rule": "mentioned_not_asked",
+      "note": "The name is the object of the sentence, in an answer to another person."
+    },
+    {
       "id": "unf-01",
       "category": "unfinished_thought",
       "description": "A participant, answering the assistant, trails off on 'and'.",
@@ -267,6 +284,22 @@
       "note": "Nothing is left to add; repeating the answer is the over-talking the filter is for."
     },
     {
+      "id": "gqa-04",
+      "category": "group_question_answered",
+      "description": "A request to everyone, met by a participant and acknowledged by a third.",
+      "bot_name": "Assistant",
+      "participants": ["Nils", "Hana", "Ravi"],
+      "transcript": [
+        {"speaker": "Nils", "text": "Does anyone have the link to the shared folder?"},
+        {"speaker": "Hana", "text": "I just pasted it in the chat."},
+        {"speaker": "Ravi", "text": "Got it, thanks Hana."}
+      ],
+      "active_rules": ["to_other_participant", "mentioned_not_asked", "unfinished_thought", "already_answered", "group_agreeing"],
+      "expected": "silent",
+      "expected_rule": "already_answered",
+      "note": "The asker is not the one who thanks; the question is closed all the same."
+    },
+    {
       "id": "bqh-01",
       "category": "bot_question_human_answered",
       "description": "The assistant is asked by name; a participant answers fully and the asker accepts it.",
@@ -278,11 +311,9 @@
         {"speaker": "Lena", "text": "Oh great, thanks Kofi."}
       ],
       "active_rules": ["to_other_participant", "mentioned_not_asked", "unfinished_thought", "already_answered", "group_agreeing"],
-      "expected": "silent",
-      "expected_rule": "already_answered",
-      "needs_owner_decision": true,
-      "owner_question": "The assistant was asked by name two turns ago, a person answered fully and the asker thanked them. Stay silent (as marked), or reply because it was asked?",
-      "note": "Marked silent: the asker has what she wanted, and the name was not in the last turn."
+      "expected": "speak",
+      "expected_rule": "direct_address",
+      "note": "Owner, 2026-11-23: asked by name, the assistant always replies, even after a person answered. The name is two turns back, not in the last turn."
     },
     {
       "id": "bqh-02",
@@ -297,10 +328,8 @@
       ],
       "active_rules": ["to_other_participant", "mentioned_not_asked", "unfinished_thought", "already_answered", "group_agreeing"],
       "expected": "speak",
-      "expected_rule": "none",
-      "needs_owner_decision": true,
-      "owner_question": "A person offered an unsure guess to a question put to the assistant. Reply (as marked), or does any human answer count as 'already answered'?",
-      "note": "Marked speak: an unsure guess is not an answer, and the asker is not satisfied."
+      "expected_rule": "direct_address",
+      "note": "Owner, 2026-11-23: asked by name, the assistant always replies. Here the person's answer was only a guess as well."
     },
     {
       "id": "bqh-03",
@@ -314,11 +343,9 @@
         {"speaker": "Teo", "text": "It's a Thursday, I have my calendar open."}
       ],
       "active_rules": ["to_other_participant", "mentioned_not_asked", "unfinished_thought", "already_answered", "group_agreeing"],
-      "expected": "silent",
-      "expected_rule": "already_answered",
-      "needs_owner_decision": true,
-      "owner_question": "A person answered confidently before the assistant could, and the asker has not reacted yet. Stay silent (as marked), or should the assistant confirm?",
-      "note": "Marked silent: a confident answer from a stated source, right after the question."
+      "expected": "speak",
+      "expected_rule": "direct_address",
+      "note": "Owner, 2026-11-23: asked by name, the assistant always replies, even when a person answers first and confidently."
     },
     {
       "id": "agr-01",
@@ -581,9 +608,7 @@
       "active_rules": ["to_other_participant", "mentioned_not_asked", "unfinished_thought", "already_answered", "group_agreeing"],
       "expected": "speak",
       "expected_rule": "direct_address",
-      "needs_owner_decision": true,
-      "owner_question": "Thanked by name with nothing asked: a short reply (as marked, by the always-reply-to-a-name rule), or silence?",
-      "note": "Marked speak by the owner's rule (a name always gets a reply), though 'mentioned but not asked anything' describes it exactly."
+      "note": "Owner, 2026-11-23: any address by name gets a reply, thanks included, though 'mentioned but not asked anything' describes it exactly."
     },
     {
       "id": "ste-01",
@@ -648,6 +673,74 @@
       "expected": "speak",
       "expected_rule": "none",
       "note": "'For the main activity': garbled, and still plainly the next question to the assistant."
+    },
+    {
+      "id": "ste-05",
+      "category": "transcription_error",
+      "description": "Two misheard words in a remark from one participant to another.",
+      "bot_name": "Juniper",
+      "participants": ["Lena", "Sam"],
+      "transcript": [
+        {"speaker": "Lena", "text": "Are you coming to the dinner on Friday?"},
+        {"speaker": "Sam", "text": "I'm not sure yet."},
+        {"speaker": "Lena", "text": "Well, weather you come or knot, let me know by Wednesday."}
+      ],
+      "active_rules": ["to_other_participant", "mentioned_not_asked", "unfinished_thought", "already_answered", "group_agreeing"],
+      "expected": "silent",
+      "expected_rule": "to_other_participant",
+      "note": "'Whether you come or not': garbled, and still plainly Lena to Sam."
+    },
+    {
+      "id": "ovl-01",
+      "category": "overlapping_turns",
+      "description": "One person asks the assistant by name while another talks about their microphone.",
+      "bot_name": "Juniper",
+      "participants": ["Mara", "Teo"],
+      "transcript": [
+        {"speaker": "Teo", "text": "Okay, everyone's here."},
+        {"speaker": "Mara", "text": "Juniper, can you suggest an icebreaker?"},
+        {"speaker": "Teo", "text": "Hang on, is my mic working?"}
+      ],
+      "active_rules": ["to_other_participant", "mentioned_not_asked", "unfinished_thought", "already_answered", "group_agreeing"],
+      "expected": "speak",
+      "expected_rule": "direct_address",
+      "batch_size": 2,
+      "note": "The last two turns came in together. The last is not for the assistant; the one before it is."
+    },
+    {
+      "id": "ovl-02",
+      "category": "overlapping_turns",
+      "description": "Three people at once: the first asks the assistant, the other two talk to each other.",
+      "bot_name": "Sage",
+      "participants": ["Kofi", "Lena", "Dov"],
+      "transcript": [
+        {"speaker": "Lena", "text": "That was a good warm up."},
+        {"speaker": "Kofi", "text": "Sage, how much time do we have left?"},
+        {"speaker": "Lena", "text": "I think we should start the main part."},
+        {"speaker": "Dov", "text": "Yeah, let's go."}
+      ],
+      "active_rules": ["to_other_participant", "mentioned_not_asked", "unfinished_thought", "already_answered", "group_agreeing"],
+      "expected": "speak",
+      "expected_rule": "direct_address",
+      "batch_size": 3,
+      "note": "A batch of three; read alone, the last two turns are a group agreeing."
+    },
+    {
+      "id": "ovl-03",
+      "category": "overlapping_turns",
+      "description": "A question with the assistant's name at its end, and a remark to the asker on top of it.",
+      "bot_name": "Moss",
+      "participants": ["Priya", "Sam"],
+      "transcript": [
+        {"speaker": "Sam", "text": "That covers the budget."},
+        {"speaker": "Priya", "text": "What's the next topic, Moss?"},
+        {"speaker": "Sam", "text": "Priya, you're cutting out a bit."}
+      ],
+      "active_rules": ["to_other_participant", "mentioned_not_asked", "unfinished_thought", "already_answered", "group_agreeing"],
+      "expected": "speak",
+      "expected_rule": "direct_address",
+      "batch_size": 2,
+      "note": "The last turn names another participant; the turn it overlapped names the assistant."
     },
     {
       "id": "sil-01",

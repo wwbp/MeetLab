@@ -27,8 +27,8 @@ from pathlib import Path
 from pipecat.classifiers.base_classifier import BaseClassifier, ClassifierError
 from pipecat.metrics.metrics import LLMUsageMetricsData
 
-from meetlab_bot.speak_filter import FilterTurn, Rule, decide
-from meetlab_loadtest.speak_filter_scenarios import load, validate
+from meetlab_bot.speak_filter import Rule, decide
+from meetlab_loadtest.speak_filter_scenarios import filter_turns, load, validate
 
 SWEEP = (0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9)
 
@@ -51,10 +51,11 @@ async def replay(data: dict, classifier: BaseClassifier, *, runs: int, threshold
     for n in range(1, runs + 1):
         for s in data["scenarios"]:
             d = await decide(
-                [FilterTurn(t["speaker"], t["text"], is_bot=t["speaker"] == s["bot_name"]) for t in s["transcript"]],
+                filter_turns(s),
                 [s["bot_name"]],
                 [Rule(r, instructions[r], threshold) for r in s["active_rules"]],
-                classifier, timeout_s=timeout_s, batch_size=s.get("batch_size", 1), clock=time.perf_counter,
+                classifier, timeout_s=timeout_s, batch_size=s.get("batch_size", 1),
+                silence_s=s.get("silence_after_s"), clock=time.perf_counter,
             )
             asked += d.elapsed_ms is not None
             if asked == 1 and d.reason == "classifier_error":

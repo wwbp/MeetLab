@@ -124,13 +124,16 @@ def owed_reply(turns: Sequence[FilterTurn], bot_names: Sequence[str], within: in
     return False
 
 
-def render_state(turns: Sequence[FilterTurn], bot_name: str) -> str:
+def render_state(turns: Sequence[FilterTurn], bot_name: str, silence_s: float | None = None) -> str:
     """The classifier's `state`: who the assistant is, then one JSON object per turn (who said
-    it is a field, never a prefix to parse out of the words: meetlab_core/turns.py). Thresholds
-    hold for this format only; the scenario set renders the same."""
+    it is a field, never a prefix to parse out of the words: meetlab_core/turns.py), then, when
+    `silence_s` rounds to more than 0.0, how long nobody has spoken. Thresholds hold for this
+    format only; the scenario set is rendered by this function too."""
     lines = [f"The assistant is named {bot_name}. The conversation so far, oldest turn first, one JSON object per line:"]
     lines += [json.dumps({"speaker": t.speaker, "role": "assistant" if t.is_bot else "participant", "text": t.text},
                          ensure_ascii=False) for t in turns]
+    if silence_s and round(silence_s, 1) > 0:
+        lines.append(f"Nobody has spoken for {round(silence_s, 1):g} seconds since the last turn.")
     return "\n".join(lines)
 
 
@@ -145,12 +148,14 @@ async def decide(
     max_turns: int = MAX_TURNS,
     batch_size: int = 1,
     owed_within: int = OWED_WITHIN,
+    silence_s: float | None = None,
     clock: Callable[[], float] = time.monotonic,
 ) -> Decision:
     """Should the bot reply to the last of `turns`? Never raises (but can be cancelled): any
     failure is a Decision to speak. `bot_names[0]` is the name the classifier is told.
     `batch_size`: how many of the last turns were committed together (people talking at once);
-    the bot is addressed if any of them calls it. `owed_within`: see owed_reply (0 turns it off)."""
+    the bot is addressed if any of them calls it. `owed_within`: see owed_reply (0 turns it off).
+    `silence_s`: seconds since the last turn ended, told to the classifier; only a rule can act on it."""
     active = [r for r in rules if r.enabled]
     if not enabled or not active:
         return Decision(True, "disabled")
@@ -158,7 +163,7 @@ async def decide(
         return Decision(True, "direct_address")
     if owed_reply(turns, bot_names, owed_within):
         return Decision(True, "owed_reply")
-    state = render_state(turns[-max_turns:], next((n for n in bot_names if n.strip()), "Assistant"))
+    state = render_state(turns[-max_turns:], next((n for n in bot_names if n.strip()), "Assistant"), silence_s)
     questions = {r.id: YesNoQuestion(instructions=r.instructions) for r in active}
     started = clock()
 

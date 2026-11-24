@@ -152,6 +152,18 @@ class TestDecide(unittest.IsolatedAsyncioTestCase):
             '{"speaker": "Teo", "role": "participant", "text": "Mara, did you send the draft yet?"}'
         ))
 
+    async def test_silence_is_told_to_the_classifier(self):
+        fake = FakeClassifier()
+        await self.decide(fake, silence_s=12)
+        await self.decide(fake)
+        self.assertEqual(fake.calls[0][0], render_state(TURNS, "Juniper", silence_s=12))
+        self.assertEqual(fake.calls[1][0], render_state(TURNS, "Juniper"))
+
+    async def test_silence_does_not_make_the_bot_speak_by_itself(self):
+        """Only a rule can act on it: with every rule firing, a long silence still blocks."""
+        d = await self.decide(FakeClassifier({"to_other": 1.0}), silence_s=60)
+        self.assertEqual(d.reason, "blocked")
+
     async def test_only_the_most_recent_turns_are_sent(self):
         self.assertEqual(MAX_TURNS, 12)
         turns = [FilterTurn("Mara", f"line {n}") for n in range(30)]
@@ -396,6 +408,22 @@ class TestRenderState(unittest.TestCase):
             '{"speaker": "Juniper", "role": "assistant", "text": "The chance of data this extreme if nothing is going on."}\n'
             '{"speaker": "Teo", "role": "participant", "text": "Così, okay: and…"}'
         ))
+
+    def test_seconds_of_silence_since_the_last_turn_are_the_last_line(self):
+        turns = [FilterTurn("Mara", "Does anybody know which planet has the most moons?")]
+        self.assertEqual(render_state(turns, "Juniper", silence_s=9), (
+            'The assistant is named Juniper. The conversation so far, oldest turn first, one JSON object per line:\n'
+            '{"speaker": "Mara", "role": "participant", "text": "Does anybody know which planet has the most moons?"}\n'
+            'Nobody has spoken for 9 seconds since the last turn.'
+        ))
+        for seconds, said in ((7.5, "7.5"), (12.0, "12"), (3.14159, "3.1")):
+            self.assertEqual(render_state(turns, "Juniper", silence_s=seconds).splitlines()[-1],
+                             f"Nobody has spoken for {said} seconds since the last turn.")
+
+    def test_no_silence_or_too_little_to_say_no_line(self):
+        turns = [FilterTurn("Mara", "Hello.")]
+        for seconds in (None, 0, 0.04):
+            self.assertEqual(render_state(turns, "Juniper", silence_s=seconds), render_state(turns, "Juniper"), seconds)
 
     def test_a_person_with_the_bots_name_is_still_a_participant(self):
         self.assertIn('"role": "participant"', render_state([FilterTurn("Juniper", "Hello.")], "Juniper"))

@@ -8,12 +8,16 @@ import json
 import os
 import tempfile
 import unittest
+from collections import Counter
 from pathlib import Path
 
 from pipecat.classifiers.base_classifier import BaseClassifier, ClassifierError, YesNoResult
 from pipecat.metrics.metrics import LLMTokenUsage
 
-from meetlab_loadtest.speak_filter_replay import ReplayStopped, key_from, main, replay, report, stats, table
+from meetlab_loadtest.speak_filter_replay import (
+    ReplayStopped, best, combine, compare, comparison, key_from, load_candidates, main, replay, report, stats, table,
+    with_wordings,
+)
 from meetlab_loadtest.speak_filter_scenarios import load
 
 
@@ -143,6 +147,114 @@ class TestReplay(unittest.TestCase):
         records = run(replay(DATA, FailsOnce(), runs=1, threshold=0.5, max_calls=100))
         self.assertEqual([r["reason"] for r in records].count("classifier_error"), 1)
         self.assertEqual(len(records), 7)
+
+# Candidate wordings for the fake set: r2 reworded so it never fires, r1 reworded so it always does.
+CANDIDATES = [{"id": "original", "rules": {}},
+              {"id": "calm_r2", "rules": {"r2": "Rule two, calmer."}},
+              {"id": "eager_r1", "rules": {"r1": "Rule one, eager."}}]
+REWORDED = {"Rule two, calmer.": 0.0, "Rule one, eager.": 1.0}
+
+
+class WordingFake(FakeClassifier):
+    """As FakeClassifier, but a reworded question gets its own answer (REWORDED), and every
+    candidate gets the first run's answers."""
+
+    def __init__(self, **kwargs):
+        super().__init__({k: v[0] if isinstance(v, list) else v for k, v in SCRIPT.items()}, **kwargs)
+
+    async def _ask(self, state, questions, **_):
+        answers, usage = await super()._ask(state, questions)
+        return {name: YesNoResult(probability=REWORDED.get(q.instructions, answers[name].probability))
+                for name, q in questions.items()}, usage
+
+
+def compared(**kwargs):
+    fake = WordingFake()
+    kwargs = {"runs": 1, "threshold": 0.5, "max_calls": 100, **kwargs}
+    return fake, run(compare(DATA, CANDIDATES, fake, **kwargs))
+
+
+class TestCandidates(unittest.TestCase):
+    """Several wordings of the rules scored in one run: each candidate is the scenario set with
+    some rules' instructions replaced, replayed and reported on its own."""
+
+    def test_a_candidate_replaces_only_the_wordings_it_names(self):
+        data = with_wordings(DATA, CANDIDATES[1])
+        self.assertEqual(data["rules"], [{"id": "r1", "instructions": "Rule one."}, {"id": "r2", "instructions": "Rule two, calmer."}])
+        self.assertEqual(data["scenarios"], DATA["scenarios"])
+        self.assertEqual(DATA["rules"][1]["instructions"], "Rule two.", "the set itself is left as it was")
+        with self.assertRaises(ValueError):
+            with_wordings(DATA, {"id": "typo", "rules": {"r9": "x"}})
+
+    def test_every_candidate_is_replayed(self):
+        fake, results = compared()
+        self.assertEqual(list(results), ["original", "calm_r2", "eager_r1"])
+        self.assertEqual(fake.calls, 3 * 6, "the named scenario is never asked")
+        blocked = {c: sorted(r["id"] for r in records if not r["speak"]) for c, records in results.items()}
+        self.assertEqual(blocked["original"], ["blocked", "caught", "flips", "wrong-rule"])
+        self.assertEqual(blocked["calm_r2"], ["caught", "flips"])
+        self.assertEqual(blocked["eager_r1"], ["blocked", "caught", "flips", "replied", "spoke-over", "wrong-rule"])
+
+    def test_the_cap_counts_every_candidate_and_the_repeat_before_any_call(self):
+        fake = WordingFake()
+        with self.assertRaises(ValueError):
+            run(compare(DATA, CANDIDATES, fake, runs=1, threshold=0.5, max_calls=27, repeat="calm_r2"))
+        self.assertEqual(fake.calls, 0)
+        _, results = compared(max_calls=28, repeat="calm_r2")
+        self.assertEqual({c: max(r["run"] for r in rs) for c, rs in results.items()},
+                         {"original": 1, "calm_r2": 2, "eager_r1": 1})
+        with self.assertRaises(ValueError):
+            compared(repeat="nobody")
+
+    def test_an_account_error_stops_every_candidate(self):
+        fake = WordingFake(error=ClassifierError("HTTP 401"))
+        with self.assertRaises(ReplayStopped):
+            run(compare(DATA, CANDIDATES, fake, runs=1, threshold=0.5, max_calls=100))
+        self.assertEqual(fake.calls, 1)
+
+    def test_a_combination_takes_each_rules_answers_from_the_candidate_chosen_for_it(self):
+        """From recorded probabilities, no calls: r1 as originally worded at 0.5, r2 calmer."""
+        _, results = compared()
+        e = combine(DATA, results, {"r1": "original", "r2": "calm_r2"}, {"r1": 0.5, "r2": 0.5})
+        self.assertEqual({k: e["overall"][k] for k in ("false_interruptions", "missed_turns")},
+                         {"false_interruptions": 2, "missed_turns": 1})
+        self.assertEqual(e["by_category"]["peers"]["false_interruptions"], 2)
+        e = combine(DATA, results, {"r1": "original", "r2": "original"}, {"r1": 0.95, "r2": 0.95})
+        self.assertEqual((e["overall"]["false_interruptions"], e["overall"]["missed_turns"]), (3, 0))
+
+    def test_the_best_combination_has_the_fewest_errors_and_then_the_fewest_missed_turns(self):
+        """From the fake's answers: spoke-over (0.2, 0.1) gets through at any swept threshold, and
+        wrong-rule (r2 0.7) cannot be blocked without blocking 'blocked' (r2 0.8) or wording r2
+        calmer. So two errors at best, both false interruptions; r1 kept as worded, high enough
+        to let flips (0.6) through and still catch caught (0.9)."""
+        _, results = compared()
+        b = best(DATA, CANDIDATES, results)
+        self.assertEqual((b["errors"]["overall"]["false_interruptions"], b["errors"]["overall"]["missed_turns"]), (2, 0))
+        self.assertEqual(b["wording"]["r1"], "original")
+        self.assertIn(b["thresholds"]["r1"], (0.7, 0.8, 0.9))
+        self.assertEqual(set(b["wording"]), {"r1", "r2"})
+        self.assertIn(b["wording"]["r2"], ("original", "calm_r2"), "only a candidate that rewords r2, or the original")
+
+    def test_the_comparison_table_keeps_both_errors_and_the_hard_cases_apart(self):
+        _, results = compared()
+        text = comparison(DATA, CANDIDATES, results, threshold=0.5, hard="peers")
+        for word in ("calm_r2", "eager_r1", "Rule two, calmer.", "false interruptions", "missed turns", "peers"):
+            self.assertIn(word, text)
+        row = next(line for line in text.splitlines() if line.startswith("| calm_r2"))
+        self.assertIn("| 2/3 | 1/4 | 2/3 |", row, "overall false interruptions, missed turns, then on the hard cases")
+
+    def test_the_committed_candidates(self):
+        """The owner's wording kept as 'original'; three rewordings of each misfiring rule and
+        one of to_other_participant, each changing one rule."""
+        candidates = load_candidates()
+        self.assertEqual(candidates[0], {"id": "original", "rules": {}})
+        changed = Counter(rule for c in candidates[1:] for rule in c["rules"])
+        self.assertEqual(changed, {"unfinished_thought": 3, "mentioned_not_asked": 3, "to_other_participant": 1})
+        self.assertTrue(all(len(c["rules"]) == 1 for c in candidates[1:]))
+        self.assertEqual(len({c["id"] for c in candidates}), len(candidates))
+        data = load()
+        for c in candidates:
+            with_wordings(data, c)
 
 
 class TestTheCommittedSetReplayed(unittest.TestCase):
@@ -323,6 +435,31 @@ class TestMain(unittest.TestCase):
         self.assertEqual(written["errors"]["overall"]["missed_turns"], 0)
         self.assertEqual(written["errors"]["overall"]["false_interruption_rate"], 1.0)
         self.assertNotIn("folding table", json.dumps(written), "ids and numbers only, none of the words")
+
+    def test_candidates_are_compared_in_one_run_within_one_cap(self):
+        class Flat(FakeClassifier):
+            async def _ask(self, state, questions, **_):
+                self.calls += 1
+                return {name: YesNoResult(probability=0.0) for name in questions}, None
+        with tempfile.TemporaryDirectory() as tmp:
+            path, out = Path(tmp) / "candidates.json", Path(tmp) / "report.json"
+            path.write_text(json.dumps({"candidates": [
+                {"id": "original", "rules": {}},
+                {"id": "calm", "rules": {"unfinished_thought": "The speaker stopped mid-word."}}]}))
+            args = ("--i-understand-this-costs-money", "--runs", "1", "--candidates", str(path), "--out", str(out))
+            code, said, made = self.main(*args, "--max-calls", "126", "--repeat", "calm")
+            self.assertEqual((code, made), (2, []), "two candidates, one repeated: 3 x 63 calls possible")
+            self.assertIn("189", said)
+            fake = Flat()
+            code, said, _ = self.main(*args, "--max-calls", "189", "--repeat", "calm", classifier=fake)
+            written = json.loads(out.read_text())
+        self.assertEqual(code, 0)
+        self.assertEqual(list(written["candidates"]), ["original", "calm"])
+        self.assertEqual((written["candidates"]["calm"]["runs"], written["candidates"]["original"]["runs"]), (2, 1))
+        self.assertEqual(written["calls"], fake.calls)
+        self.assertIn("thresholds", written["best"])
+        self.assertIn("The speaker stopped mid-word.", said)
+        self.assertNotIn("folding table", json.dumps(written), "ids, wordings and numbers only")
 
 
 class TestKey(unittest.TestCase):

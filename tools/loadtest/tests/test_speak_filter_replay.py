@@ -279,7 +279,7 @@ class TestMain(unittest.TestCase):
         self.assertEqual(written["tokens"], {"input": 100 * fake.calls, "output": 7 * fake.calls})
         self.assertEqual(written["errors"]["overall"]["missed_turns"], 0)
         self.assertEqual(written["errors"]["overall"]["false_interruption_rate"], 1.0)
-        self.assertNotIn("transcript", json.dumps(written))
+        self.assertNotIn("folding table", json.dumps(written), "ids and numbers only, none of the words")
 
 
 class TestKey(unittest.TestCase):

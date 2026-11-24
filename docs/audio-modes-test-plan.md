@@ -115,7 +115,9 @@ No jsdom here: use EventTarget fakes and `renderToStaticMarkup`.
 The settings change touches more than the three places in `CLAUDE.md`: also
 `db/config_loader.py:EffectiveBotConfig` and `connection-details/route.ts`.
 
-**What CI can't run:** it has no ElevenLabs key, so the bot ends before anyone speaks (#256).
+**What CI can't run:** it has no ElevenLabs key, so a bot on the default voice ends before anyone
+speaks (#256). `make test-voice-loop` (in `make test`) runs one whole turn in a normal room with
+stand-ins for the LLM and the voice; ptt and baton rooms are not on it yet.
 Fake-frame tests stand in on each PR. Live scenarios run in the release pipeline and fail rather
 than skip.
 

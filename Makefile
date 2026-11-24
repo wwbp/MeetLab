@@ -146,10 +146,11 @@ test-integration:
 # The free voice loop (tests/system/voice_loop.py): a participant speaks a recorded line; a real bot
 # hears it through stt-cpu, asks a scripted stand-in for the LLM and answers in a stand-in voice
 # (meetlab_loadtest/model_stubs.py, served by the test's own container, reached as `tests`).
-# No paid service. Last in `make test`: it restarts the runner.
+# No paid service. Last in `make test`: it restarts the runner with the stand-ins' addresses
+# (docker-compose.voice-loop.yml), which a room uses only if its Bot Config names them.
 test-voice-loop:
 	$(COMPOSE) build bot
-	$(COMPOSE) up -d --wait transport-server agent-runner
+	$(COMPOSE) -f .devcontainer/docker-compose.voice-loop.yml up -d --wait transport-server agent-runner
 	$(COMPOSE) exec -T agent-runner $(ALEMBIC) upgrade head
 	-docker rm -f $$(docker ps -aq --filter label=meetlab.session) 2>/dev/null
 	@# A bot's container removes itself when it ends, so its log is followed from its start

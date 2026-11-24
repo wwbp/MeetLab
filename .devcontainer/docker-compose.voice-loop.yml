@@ -1,0 +1,11 @@
+# Only for `make test-voice-loop` (tests/system/voice_loop.py), on top of docker-compose.yml:
+# where a bot finds the stand-ins for the LLM and the voice, through the settings production
+# uses for our own models (infra/stack/models.tf). Bots copy the runner's environment, and the
+# stand-ins are served by the test's own container (`run --use-aliases tests`), so this starts
+# nothing and publishes no port. `make up` never reads this file.
+services:
+  agent-runner:
+    environment:
+      SELFHOSTED_LLM_URL: "http://tests:9100/v1"
+      SELFHOSTED_LLM_MODEL: "scripted-stub"  # meetlab_loadtest/model_stubs.py MODEL
+      KOKORO_TTS_URL: "http://tests:9100/v1"

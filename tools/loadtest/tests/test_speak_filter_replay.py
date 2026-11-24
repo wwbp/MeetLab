@@ -312,12 +312,24 @@ class TestMain(unittest.TestCase):
         self.assertEqual(written["errors"]["overall"]["false_interruption_rate"], 1.0)
         self.assertNotIn("folding table", json.dumps(written), "ids and numbers only, none of the words")
 
+    def test_the_client_is_closed_even_when_the_run_stops(self):
+        closed = []
+
+        class Client:
+            async def close(self):
+                closed.append(True)
+        fake = FakeClassifier(error=ClassifierError("HTTP 403: model not available"))
+        fake.client = Client()
+        code, _, _ = self.main("--i-understand-this-costs-money", "--max-calls", "400", classifier=fake)
+        self.assertEqual((code, closed), (1, [True]))
+
 
 class TestKey(unittest.TestCase):
     def test_only_the_one_line_is_read(self):
         with tempfile.TemporaryDirectory() as tmp:
             env = Path(tmp) / ".env"
-            env.write_text('# comment\nOTHER_SECRET=nope\nexport OPENAI_API_KEY="sk-test-123"\nLIVEKIT_API_SECRET=no\n')
+            env.write_text('# comment\nOTHER_SECRET=nope\nLIVEKIT_API_KEY=devkey\nAZURE_OPENAI_API_KEY=nope\n'
+                           'export OPENAI_API_KEY="sk-test-123"\nLIVEKIT_API_SECRET=no\n')
             before = dict(os.environ)
             self.assertEqual(key_from(env), "sk-test-123")
             self.assertEqual(dict(os.environ), before, "reading the file sets nothing")

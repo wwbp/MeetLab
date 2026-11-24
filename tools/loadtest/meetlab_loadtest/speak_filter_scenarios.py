@@ -11,7 +11,7 @@ import json
 from collections import Counter
 from pathlib import Path
 
-from meetlab_bot.speak_filter import FilterTurn
+from meetlab_bot.speak_filter import DEFAULT_RULES, FilterTurn
 
 SCENARIOS_PATH = Path(__file__).parents[1] / "fixtures" / "speak_filter_scenarios.json"
 
@@ -38,16 +38,26 @@ MIN_SPEAK_SHARE, MAX_SPEAK_SHARE = 0.4, 0.6
 
 _TEXT = ("id", "category", "description", "bot_name", "note")
 _REQUIRED = _TEXT + ("participants", "transcript", "active_rules", "expected", "expected_rule")
-_OPTIONAL = ("silence_after_s", "batch_size", "needs_owner_decision", "owner_question")
+_OPTIONAL = ("silence_after_s", "batch_size", "needs_owner_decision", "owner_question", "requires_setting")
+# Behaviour a study can switch on, off by default: a case that needs one is reported apart, not
+# scored against the default rules. answer_unanswered_group_question: owner, 2026-11-24, to be
+# built with the silence trigger.
+SETTINGS = ("answer_unanswered_group_question",)
 
 
 def load(path=SCENARIOS_PATH) -> dict:
-    """{"rules": [{id, instructions}], "scenarios": [...]}, as written; validate() checks it."""
-    return json.loads(Path(path).read_text(encoding="utf-8"))
+    """{"rules": [{id, instructions, threshold}], "scenarios": [...]}: the scenarios as written,
+    the rules the filter's defaults (DEFAULT_RULES). validate() checks it."""
+    return {"rules": [{"id": r.id, "instructions": r.instructions, "threshold": r.threshold} for r in DEFAULT_RULES],
+            **json.loads(Path(path).read_text(encoding="utf-8"))}
 
 
 def _text(value) -> bool:
     return isinstance(value, str) and bool(value.strip())
+
+
+def _probability(value) -> bool:
+    return not isinstance(value, bool) and isinstance(value, (int, float)) and 0 <= value <= 1
 
 
 def _scenario_problems(s: dict, rule_ids: set) -> list[str]:
@@ -96,6 +106,8 @@ def _scenario_problems(s: dict, rule_ids: set) -> list[str]:
         out.append("needs_owner_decision must be true or false")
     elif s.get("needs_owner_decision") and not _text(s.get("owner_question")):
         out.append("owner_question must say what the owner is asked")
+    if s.get("requires_setting", SETTINGS[0]) not in SETTINGS:
+        out.append(f"requires_setting must be one of {', '.join(SETTINGS)}")
     return out
 
 
@@ -103,8 +115,10 @@ def validate(data: dict) -> list[str]:
     """Every problem with the set, as sentences; empty when it is valid."""
     rule_ids = [r.get("id") for r in data["rules"]]
     out = [f"duplicate rule {r}" for r, n in Counter(rule_ids).items() if n > 1]
-    out += [f"rule {r.get('id')}: id and instructions must be text" for r in data["rules"]
-            if set(r) != {"id", "instructions"} or not all(map(_text, r.values()))]
+    out += [f"rule {r.get('id')}: id and instructions must be text, a threshold 0 to 1" for r in data["rules"]
+            if not {"id", "instructions"} <= set(r) <= {"id", "instructions", "threshold"}
+            or not (_text(r.get("id")) and _text(r.get("instructions")))
+            or not _probability(r.get("threshold", 0.5))]
     scenarios = data["scenarios"]
     out += [f"duplicate id {i}" for i, n in Counter(s.get("id") for s in scenarios).items() if n > 1]
     for s in scenarios:

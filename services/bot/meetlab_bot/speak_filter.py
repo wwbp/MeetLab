@@ -46,6 +46,21 @@ class Rule:
     enabled: bool = True
 
 
+# The rules a study starts with: chosen by the owner on 2026-11-24 from the comparison in
+# data/speak-filter/wordings-2026-11-23.md (unfinished_a2 and mentioned_b1 replace his first
+# wordings, which blocked short complete requests and fired with the bot not mentioned).
+# The probabilities sit near 0 or 1, so 0.9 blocks only what the classifier is sure of.
+DEFAULT_RULES = (
+    Rule("to_other_participant", "The last speaker was talking to another participant, not to the assistant.", 0.9),
+    Rule("mentioned_not_asked", "The last speaker refers to the assistant while talking to other people, "
+                                "and asks the assistant nothing.", 0.9),
+    Rule("unfinished_thought", "The last turn stops partway (for example on 'and', 'um', 'the' or a comma) and the "
+                               "speaker has more to say. A short question or request that is complete counts as finished.", 0.9),
+    Rule("already_answered", "Another participant has already answered the question.", 0.9),
+    Rule("group_agreeing", "The group is in the middle of agreeing on something.", 0.9),
+)
+
+
 @dataclass(frozen=True)
 class FilterTurn:
     speaker: str  # display name
@@ -105,8 +120,9 @@ def is_direct_address(text: str, bot_names: Sequence[str]) -> bool:
 
 
 # ponytail: a word list. A turn made only of these and the bot's name is a courtesy ("Thanks,
-# Juniper.", "Hi Juniper!", "Juniper?"): answered when it is new, never owed later. Anything
-# else said with the name ("Juniper, give us a fun fact") is a request that stays owed.
+# Juniper.", "Hi Juniper!", "Juniper?"): answered when it is new, never owed later (owner's
+# decision, 2026-11-24). Anything else said with the name ("Juniper, give us a fun fact") is a
+# request that stays owed.
 _COURTESY = frozenset("""thanks thank you so much very a lot ok okay fine oh um uh well alright and hi hey hello
     bye goodbye cheers great good morning afternoon evening night""".split())
 

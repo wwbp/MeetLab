@@ -9,6 +9,7 @@ enough to rebuild it exactly.
 | Conversation library **v1**: 100 everyday dialogues (DailyDialog), voiced | load tests with `library = v1` | `s3://meetlab-v2-staging-media-…/loadtests/library/v1/` | CC BY-NC-SA 4.0 (research use) | [conversation-library/](conversation-library/) |
 | Conversation library **v2**: 280 real, long chats (Topical-Chat), voiced | load tests with `library = v2` (the 100-room spike) | `s3://…/loadtests/library/v2/` | CDLA-Sharing-1.0 | [conversation-library/](conversation-library/) |
 | Stored turns: 24 short recorded questions | load tests with `library = none` | in git: `tools/loadtest/fixtures/conversations/` | ours (synthetic speech) | `make conversation-audio` (`tools/loadtest/meetlab_loadtest/generate_conversation_audio.py`) |
+| Speak filter scenarios: 52 written group conversations, each ending where the bot must decide whether to reply, with the expected decision | choosing the speak filter's thresholds (replayed through a classifier; not yet run) | in git: `tools/loadtest/fixtures/speak_filter_scenarios.json` | ours (invented names and words) | written by hand; checked by `tools/loadtest/tests/test_speak_filter_scenarios.py` |
 | Spoken question | the live tests and the load generator | in git: `tools/loadtest/fixtures/benchmark_prompt.wav` | ours (synthetic speech) | not rebuilt |
 | Pilot participant audio | one-off analyses (e.g. smart turn, 2026-10-04) | **nowhere**: copied to a private scratch folder for the analysis, then deleted; only aggregates are kept | real participants | — |
 

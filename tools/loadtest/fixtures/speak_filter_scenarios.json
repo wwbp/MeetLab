@@ -1,0 +1,862 @@
+{
+  "rules": [
+    {"id": "to_other_participant", "instructions": "The last speaker was talking to another participant, not to the assistant."},
+    {"id": "mentioned_not_asked", "instructions": "The assistant was mentioned but not asked anything."},
+    {"id": "unfinished_thought", "instructions": "The speaker has not finished their thought."},
+    {"id": "already_answered", "instructions": "Another participant has already answered the question."},
+    {"id": "group_agreeing", "instructions": "The group is in the middle of agreeing on something."}
+  ],
+  "scenarios": [
+    {
+      "id": "p2p-01",
+      "category": "peer_to_peer",
+      "description": "A participant asks another, by name, to bring something.",
+      "bot_name": "Juniper",
+      "participants": ["Mara", "Teo"],
+      "transcript": [
+        {"speaker": "Mara", "text": "Okay, so the picnic is Saturday at noon."},
+        {"speaker": "Teo", "text": "Works for me. I'll bring drinks."},
+        {"speaker": "Mara", "text": "Teo, can you bring the folding table too?"}
+      ],
+      "active_rules": ["to_other_participant", "mentioned_not_asked", "unfinished_thought", "already_answered", "group_agreeing"],
+      "expected": "silent",
+      "expected_rule": "to_other_participant",
+      "note": "A 'can you' request with another person's name in front: not for the assistant."
+    },
+    {
+      "id": "p2p-02",
+      "category": "peer_to_peer",
+      "description": "A 'do you' question with no name, plainly to the person just spoken with.",
+      "bot_name": "Sage",
+      "participants": ["Kofi", "Inés"],
+      "transcript": [
+        {"speaker": "Kofi", "text": "I finally watched that documentary about octopuses last night."},
+        {"speaker": "Inés", "text": "Oh nice, the one with the diver?"},
+        {"speaker": "Kofi", "text": "Yeah. Do you still have the book you mentioned about it?"}
+      ],
+      "active_rules": ["to_other_participant", "mentioned_not_asked", "unfinished_thought", "already_answered", "group_agreeing"],
+      "expected": "silent",
+      "expected_rule": "to_other_participant",
+      "note": "No name is said; 'the book you mentioned' can only mean Inés."
+    },
+    {
+      "id": "p2p-03",
+      "category": "peer_to_peer",
+      "description": "After the assistant answers, three people sort out who sends what.",
+      "bot_name": "Juniper",
+      "participants": ["Priya", "Dov", "Lena"],
+      "transcript": [
+        {"speaker": "Priya", "text": "Juniper, how long should the survey take?"},
+        {"speaker": "Juniper", "text": "About ten minutes for most people."},
+        {"speaker": "Dov", "text": "Ten minutes is fine. Priya, did you send the draft to Lena yet?"},
+        {"speaker": "Priya", "text": "Not yet, I'll do it tonight."},
+        {"speaker": "Lena", "text": "No rush. Could you also attach the consent form when you do?"}
+      ],
+      "active_rules": ["to_other_participant", "mentioned_not_asked", "unfinished_thought", "already_answered", "group_agreeing"],
+      "expected": "silent",
+      "expected_rule": "to_other_participant",
+      "note": "The assistant was addressed earlier, not in the last turn; 'could you' is to Priya."
+    },
+    {
+      "id": "p2p-04",
+      "category": "peer_to_peer",
+      "description": "Small talk between two people about a relative.",
+      "bot_name": "Assistant",
+      "participants": ["Sam", "Yuki"],
+      "transcript": [
+        {"speaker": "Sam", "text": "My sister just moved to Lisbon."},
+        {"speaker": "Yuki", "text": "Wow, how does she like it?"},
+        {"speaker": "Sam", "text": "She loves it, but she says the hills are brutal."},
+        {"speaker": "Yuki", "text": "Ha, I can imagine. You should visit her in the spring."}
+      ],
+      "active_rules": ["to_other_participant", "mentioned_not_asked", "unfinished_thought", "already_answered", "group_agreeing"],
+      "expected": "silent",
+      "expected_rule": "to_other_participant",
+      "note": "No question, no request; 'you' is Sam."
+    },
+    {
+      "id": "p2p-05",
+      "category": "peer_to_peer",
+      "description": "A participant asks another to explain something the assistant could also explain.",
+      "bot_name": "Moss",
+      "participants": ["Omar", "Bea"],
+      "transcript": [
+        {"speaker": "Omar", "text": "Bea, you took statistics last year, right?"},
+        {"speaker": "Bea", "text": "I did, why?"},
+        {"speaker": "Omar", "text": "Can you explain what a confidence interval is? I never got it."}
+      ],
+      "active_rules": ["to_other_participant", "mentioned_not_asked", "unfinished_thought", "already_answered", "group_agreeing"],
+      "expected": "silent",
+      "expected_rule": "to_other_participant",
+      "note": "The hard one: the assistant knows the answer, but Bea was asked."
+    },
+    {
+      "id": "nna-01",
+      "category": "named_not_addressed",
+      "description": "The group plans to ask the assistant later.",
+      "bot_name": "Juniper",
+      "participants": ["Nils", "Tala"],
+      "transcript": [
+        {"speaker": "Nils", "text": "Okay, next item is recruitment."},
+        {"speaker": "Nils", "text": "I'm not sure how many people we need for the pilot."},
+        {"speaker": "Tala", "text": "Me neither. Let's ask Juniper later, once we've finished the list."}
+      ],
+      "active_rules": ["to_other_participant", "mentioned_not_asked", "unfinished_thought", "already_answered", "group_agreeing"],
+      "expected": "silent",
+      "expected_rule": "mentioned_not_asked",
+      "note": "'Later' says not now; the name is the object of 'ask', not a term of address."
+    },
+    {
+      "id": "nna-02",
+      "category": "named_not_addressed",
+      "description": "A participant reports what the assistant said earlier.",
+      "bot_name": "Sage",
+      "participants": ["Ravi", "Hana"],
+      "transcript": [
+        {"speaker": "Ravi", "text": "So which venue are we going with?"},
+        {"speaker": "Hana", "text": "I liked the library room."},
+        {"speaker": "Ravi", "text": "Sage said earlier that the library room is free on Fridays, so that works."}
+      ],
+      "active_rules": ["to_other_participant", "mentioned_not_asked", "unfinished_thought", "already_answered", "group_agreeing"],
+      "expected": "silent",
+      "expected_rule": "mentioned_not_asked",
+      "note": "The name opens the sentence but is its subject, not a call."
+    },
+    {
+      "id": "nna-03",
+      "category": "named_not_addressed",
+      "description": "Two people talk about the assistant in the third person.",
+      "bot_name": "Juniper",
+      "participants": ["Jonas", "Mara"],
+      "transcript": [
+        {"speaker": "Jonas", "text": "Have you used one of these meeting assistants before?"},
+        {"speaker": "Mara", "text": "Once. It was fine."},
+        {"speaker": "Jonas", "text": "I think Juniper is actually pretty good at summaries. Better than my notes, anyway."}
+      ],
+      "active_rules": ["to_other_participant", "mentioned_not_asked", "unfinished_thought", "already_answered", "group_agreeing"],
+      "expected": "silent",
+      "expected_rule": "mentioned_not_asked",
+      "note": "Talked about, not talked to."
+    },
+    {
+      "id": "nna-04",
+      "category": "named_not_addressed",
+      "description": "The assistant, named 'Assistant', is referred to as 'the assistant'.",
+      "bot_name": "Assistant",
+      "participants": ["Kofi", "Lena", "Dov"],
+      "transcript": [
+        {"speaker": "Kofi", "text": "Do we need to go over the schedule again?"},
+        {"speaker": "Lena", "text": "I don't think so."},
+        {"speaker": "Dov", "text": "No, the assistant already gave us the dates, we can skip that part."}
+      ],
+      "active_rules": ["to_other_participant", "mentioned_not_asked", "unfinished_thought", "already_answered", "group_agreeing"],
+      "expected": "silent",
+      "expected_rule": "mentioned_not_asked",
+      "note": "A name that is also a common noun: 'the assistant' is a mention."
+    },
+    {
+      "id": "nna-05",
+      "category": "named_not_addressed",
+      "description": "A participant says they used the assistant for something earlier.",
+      "bot_name": "Moss",
+      "participants": ["Bea", "Omar"],
+      "transcript": [
+        {"speaker": "Bea", "text": "Your notes from last week were really clear."},
+        {"speaker": "Omar", "text": "Ha, thanks."},
+        {"speaker": "Bea", "text": "Did you write them yourself?"},
+        {"speaker": "Omar", "text": "Mostly. I had Moss tidy them up afterwards."}
+      ],
+      "active_rules": ["to_other_participant", "mentioned_not_asked", "unfinished_thought", "already_answered", "group_agreeing"],
+      "expected": "silent",
+      "expected_rule": "mentioned_not_asked",
+      "note": "The name is the object of the sentence, in an answer to another person."
+    },
+    {
+      "id": "unf-01",
+      "category": "unfinished_thought",
+      "description": "A participant, answering the assistant, trails off on 'and'.",
+      "bot_name": "Juniper",
+      "participants": ["Priya", "Sam"],
+      "transcript": [
+        {"speaker": "Priya", "text": "Juniper, can you help us plan the workshop?"},
+        {"speaker": "Juniper", "text": "Sure. What do you have so far?"},
+        {"speaker": "Priya", "text": "So we have the room booked, and we've got the speakers confirmed, and…"}
+      ],
+      "active_rules": ["to_other_participant", "mentioned_not_asked", "unfinished_thought", "already_answered", "group_agreeing"],
+      "expected": "silent",
+      "expected_rule": "unfinished_thought",
+      "note": "The words are for the assistant, but the list is not over."
+    },
+    {
+      "id": "unf-02",
+      "category": "unfinished_thought",
+      "description": "A numbered list stops at 'Second,'.",
+      "bot_name": "Moss",
+      "participants": ["Teo", "Bea"],
+      "transcript": [
+        {"speaker": "Teo", "text": "Let's write the shopping list."},
+        {"speaker": "Bea", "text": "Okay, go."},
+        {"speaker": "Teo", "text": "We need three things. First, tomatoes. Second,"}
+      ],
+      "active_rules": ["to_other_participant", "mentioned_not_asked", "unfinished_thought", "already_answered", "group_agreeing"],
+      "expected": "silent",
+      "expected_rule": "unfinished_thought",
+      "note": "Three things announced, one given."
+    },
+    {
+      "id": "unf-03",
+      "category": "unfinished_thought",
+      "description": "A phone number is being dictated to the assistant.",
+      "bot_name": "Assistant",
+      "participants": ["Yuki", "Omar"],
+      "transcript": [
+        {"speaker": "Yuki", "text": "Can you take down the caterer's number?"},
+        {"speaker": "Assistant", "text": "Yes, go ahead."},
+        {"speaker": "Yuki", "text": "It's five five five, zero one four,"}
+      ],
+      "active_rules": ["to_other_participant", "mentioned_not_asked", "unfinished_thought", "already_answered", "group_agreeing"],
+      "expected": "silent",
+      "expected_rule": "unfinished_thought",
+      "note": "Six digits of a number, and a comma: replying now would cut the dictation."
+    },
+    {
+      "id": "unf-04",
+      "category": "unfinished_thought",
+      "description": "A mid-sentence pause while searching for a word.",
+      "bot_name": "Sage",
+      "participants": ["Hana", "Nils"],
+      "transcript": [
+        {"speaker": "Hana", "text": "I've been thinking about the title."},
+        {"speaker": "Nils", "text": "Yeah?"},
+        {"speaker": "Hana", "text": "What if we called it, um, something like, the"}
+      ],
+      "active_rules": ["to_other_participant", "mentioned_not_asked", "unfinished_thought", "already_answered", "group_agreeing"],
+      "expected": "silent",
+      "expected_rule": "unfinished_thought",
+      "note": "The sentence ends on 'the'."
+    },
+    {
+      "id": "gqa-01",
+      "category": "group_question_answered",
+      "description": "A question to everyone, answered by a participant and acknowledged.",
+      "bot_name": "Juniper",
+      "participants": ["Inés", "Ravi", "Tala"],
+      "transcript": [
+        {"speaker": "Inés", "text": "Does anyone remember what time the bakery closes?"},
+        {"speaker": "Ravi", "text": "Six on weekdays, I was there yesterday."},
+        {"speaker": "Inés", "text": "Perfect, thanks."}
+      ],
+      "active_rules": ["to_other_participant", "mentioned_not_asked", "unfinished_thought", "already_answered", "group_agreeing"],
+      "expected": "silent",
+      "expected_rule": "already_answered",
+      "note": "Asked, answered, thanked. The first rule may fire as well; either block is right."
+    },
+    {
+      "id": "gqa-02",
+      "category": "group_question_answered",
+      "description": "A question to everyone; the last turn is a participant's answer.",
+      "bot_name": "Moss",
+      "participants": ["Jonas", "Sam", "Priya"],
+      "transcript": [
+        {"speaker": "Sam", "text": "This is going well."},
+        {"speaker": "Jonas", "text": "Anyone know how many minutes we have left in the room booking?"},
+        {"speaker": "Priya", "text": "We have it until three, so about forty minutes."}
+      ],
+      "active_rules": ["to_other_participant", "mentioned_not_asked", "unfinished_thought", "already_answered", "group_agreeing"],
+      "expected": "silent",
+      "expected_rule": "already_answered",
+      "note": "The decision falls right after the answer, before anyone acknowledges it."
+    },
+    {
+      "id": "gqa-03",
+      "category": "group_question_answered",
+      "description": "A general-knowledge question the assistant could answer, answered by a participant.",
+      "bot_name": "Sage",
+      "participants": ["Mara", "Dov"],
+      "transcript": [
+        {"speaker": "Mara", "text": "What's the word for when two words sound the same but mean different things?"},
+        {"speaker": "Dov", "text": "Homophones."},
+        {"speaker": "Mara", "text": "Homophones, that's it."}
+      ],
+      "active_rules": ["to_other_participant", "mentioned_not_asked", "unfinished_thought", "already_answered", "group_agreeing"],
+      "expected": "silent",
+      "expected_rule": "already_answered",
+      "note": "Nothing is left to add; repeating the answer is the over-talking the filter is for."
+    },
+    {
+      "id": "gqa-04",
+      "category": "group_question_answered",
+      "description": "A request to everyone, met by a participant and acknowledged by a third.",
+      "bot_name": "Assistant",
+      "participants": ["Nils", "Hana", "Ravi"],
+      "transcript": [
+        {"speaker": "Nils", "text": "Does anyone have the link to the shared folder?"},
+        {"speaker": "Hana", "text": "I just pasted it in the chat."},
+        {"speaker": "Ravi", "text": "Got it, thanks Hana."}
+      ],
+      "active_rules": ["to_other_participant", "mentioned_not_asked", "unfinished_thought", "already_answered", "group_agreeing"],
+      "expected": "silent",
+      "expected_rule": "already_answered",
+      "note": "The asker is not the one who thanks; the question is closed all the same."
+    },
+    {
+      "id": "bqh-01",
+      "category": "bot_question_human_answered",
+      "description": "The assistant is asked by name; a participant answers fully and the asker accepts it.",
+      "bot_name": "Juniper",
+      "participants": ["Lena", "Kofi"],
+      "transcript": [
+        {"speaker": "Lena", "text": "Juniper, what's the deadline for the abstract?"},
+        {"speaker": "Kofi", "text": "It's the fifteenth, I checked this morning."},
+        {"speaker": "Lena", "text": "Oh great, thanks Kofi."}
+      ],
+      "active_rules": ["to_other_participant", "mentioned_not_asked", "unfinished_thought", "already_answered", "group_agreeing"],
+      "expected": "speak",
+      "expected_rule": "direct_address",
+      "note": "Owner, 2026-11-23: asked by name, the assistant always replies, even after a person answered. The name is two turns back, not in the last turn."
+    },
+    {
+      "id": "bqh-02",
+      "category": "bot_question_human_answered",
+      "description": "The assistant is asked by name; a participant guesses and says they are unsure.",
+      "bot_name": "Sage",
+      "participants": ["Omar", "Bea"],
+      "transcript": [
+        {"speaker": "Omar", "text": "Sage, how many grams are in an ounce?"},
+        {"speaker": "Bea", "text": "I think it's like thirty? Not sure though."},
+        {"speaker": "Omar", "text": "Hmm, okay."}
+      ],
+      "active_rules": ["to_other_participant", "mentioned_not_asked", "unfinished_thought", "already_answered", "group_agreeing"],
+      "expected": "speak",
+      "expected_rule": "direct_address",
+      "note": "Owner, 2026-11-23: asked by name, the assistant always replies. Here the person's answer was only a guess as well."
+    },
+    {
+      "id": "bqh-03",
+      "category": "bot_question_human_answered",
+      "description": "The assistant is asked by name; a participant answers at once, nobody has reacted yet.",
+      "bot_name": "Moss",
+      "participants": ["Teo", "Yuki"],
+      "transcript": [
+        {"speaker": "Teo", "text": "We need to pick a date."},
+        {"speaker": "Yuki", "text": "Moss, what day of the week is the twentieth?"},
+        {"speaker": "Teo", "text": "It's a Thursday, I have my calendar open."}
+      ],
+      "active_rules": ["to_other_participant", "mentioned_not_asked", "unfinished_thought", "already_answered", "group_agreeing"],
+      "expected": "speak",
+      "expected_rule": "direct_address",
+      "note": "Owner, 2026-11-23: asked by name, the assistant always replies, even when a person answers first and confidently."
+    },
+    {
+      "id": "agr-01",
+      "category": "group_agreeing",
+      "description": "Three people settle on a colour.",
+      "bot_name": "Juniper",
+      "participants": ["Hana", "Nils", "Ravi"],
+      "transcript": [
+        {"speaker": "Hana", "text": "So are we going with the blue poster?"},
+        {"speaker": "Nils", "text": "Blue works for me."},
+        {"speaker": "Ravi", "text": "Yeah, blue."},
+        {"speaker": "Hana", "text": "Okay, blue it is, unless anyone objects."}
+      ],
+      "active_rules": ["to_other_participant", "mentioned_not_asked", "unfinished_thought", "already_answered", "group_agreeing"],
+      "expected": "silent",
+      "expected_rule": "group_agreeing",
+      "note": "'Unless anyone objects' is to the people who voted, not an opening for the assistant."
+    },
+    {
+      "id": "agr-02",
+      "category": "group_agreeing",
+      "description": "Two people fix a meeting time.",
+      "bot_name": "Sage",
+      "participants": ["Tala", "Jonas"],
+      "transcript": [
+        {"speaker": "Tala", "text": "Could we meet Tuesday instead?"},
+        {"speaker": "Jonas", "text": "Tuesday morning or afternoon?"},
+        {"speaker": "Tala", "text": "Afternoon, say two."},
+        {"speaker": "Jonas", "text": "Two works. Let me just check, yeah, I'm free."}
+      ],
+      "active_rules": ["to_other_participant", "mentioned_not_asked", "unfinished_thought", "already_answered", "group_agreeing"],
+      "expected": "silent",
+      "expected_rule": "group_agreeing",
+      "note": "A negotiation closing between two people."
+    },
+    {
+      "id": "agr-03",
+      "category": "group_agreeing",
+      "description": "The assistant gave options; the group is choosing between them.",
+      "bot_name": "Assistant",
+      "participants": ["Sam", "Priya", "Dov"],
+      "transcript": [
+        {"speaker": "Sam", "text": "Assistant, what are some icebreakers for a small group?"},
+        {"speaker": "Assistant", "text": "You could try two truths and a lie, or a quick show and tell."},
+        {"speaker": "Priya", "text": "I like two truths and a lie."},
+        {"speaker": "Dov", "text": "Same here."},
+        {"speaker": "Sam", "text": "Okay, I think we're agreed then, two truths and a lie."}
+      ],
+      "active_rules": ["to_other_participant", "mentioned_not_asked", "unfinished_thought", "already_answered", "group_agreeing"],
+      "expected": "silent",
+      "expected_rule": "group_agreeing",
+      "note": "The assistant's own suggestion is being discussed; that is not a question to it."
+    },
+    {
+      "id": "agr-04",
+      "category": "group_agreeing",
+      "description": "A vote among four people, the last one conceding.",
+      "bot_name": "Moss",
+      "participants": ["Mara", "Inés", "Kofi", "Lena"],
+      "transcript": [
+        {"speaker": "Mara", "text": "Let's vote. Pizza or noodles?"},
+        {"speaker": "Inés", "text": "Pizza."},
+        {"speaker": "Kofi", "text": "Pizza for me too."},
+        {"speaker": "Lena", "text": "I'd go noodles, but I'm fine with pizza if that's the majority."}
+      ],
+      "active_rules": ["to_other_participant", "mentioned_not_asked", "unfinished_thought", "already_answered", "group_agreeing"],
+      "expected": "silent",
+      "expected_rule": "group_agreeing",
+      "note": "Agreement with a dissent in it: still converging."
+    },
+    {
+      "id": "dir-01",
+      "category": "direct_request",
+      "description": "The name, a comma, a question.",
+      "bot_name": "Juniper",
+      "participants": ["Teo", "Bea"],
+      "transcript": [
+        {"speaker": "Teo", "text": "I think we should start with the interviews."},
+        {"speaker": "Bea", "text": "I'd rather start with the survey."},
+        {"speaker": "Teo", "text": "Juniper, what do you think?"}
+      ],
+      "active_rules": ["to_other_participant", "mentioned_not_asked", "unfinished_thought", "already_answered", "group_agreeing"],
+      "expected": "speak",
+      "expected_rule": "direct_address",
+      "note": "The plainest address there is; two people disagreeing just before must not block it."
+    },
+    {
+      "id": "dir-02",
+      "category": "direct_request",
+      "description": "A question with the name at its end.",
+      "bot_name": "Sage",
+      "participants": ["Omar", "Yuki"],
+      "transcript": [
+        {"speaker": "Omar", "text": "We still need an opening question."},
+        {"speaker": "Yuki", "text": "Something light."},
+        {"speaker": "Omar", "text": "What would be a good opening question, Sage?"}
+      ],
+      "active_rules": ["to_other_participant", "mentioned_not_asked", "unfinished_thought", "already_answered", "group_agreeing"],
+      "expected": "speak",
+      "expected_rule": "direct_address",
+      "note": "Trailing term of address."
+    },
+    {
+      "id": "dir-03",
+      "category": "direct_request",
+      "description": "A greeting and the name, transcribed without any punctuation.",
+      "bot_name": "Moss",
+      "participants": ["Ravi", "Hana"],
+      "transcript": [
+        {"speaker": "Ravi", "text": "Okay, that was a lot."},
+        {"speaker": "Hana", "text": "Yeah, I lost track."},
+        {"speaker": "Ravi", "text": "Hey Moss can you summarize what we decided so far"}
+      ],
+      "active_rules": ["to_other_participant", "mentioned_not_asked", "unfinished_thought", "already_answered", "group_agreeing"],
+      "expected": "speak",
+      "expected_rule": "direct_address",
+      "note": "Speech-to-text often drops the comma; 'Hey Moss can you' is still an address."
+    },
+    {
+      "id": "dir-04",
+      "category": "direct_request",
+      "description": "The assistant is named 'Assistant' and asked by that name.",
+      "bot_name": "Assistant",
+      "participants": ["Nils", "Tala"],
+      "transcript": [
+        {"speaker": "Nils", "text": "We should figure out the session length."},
+        {"speaker": "Tala", "text": "No idea what's normal."},
+        {"speaker": "Nils", "text": "Assistant, how long does a typical focus group run?"}
+      ],
+      "active_rules": ["to_other_participant", "mentioned_not_asked", "unfinished_thought", "already_answered", "group_agreeing"],
+      "expected": "speak",
+      "expected_rule": "direct_address",
+      "note": "The pair of nna-04: the same word, here a term of address."
+    },
+    {
+      "id": "imp-01",
+      "category": "implicit_request",
+      "description": "A follow-up to the assistant's own answer, no name.",
+      "bot_name": "Juniper",
+      "participants": ["Jonas", "Sam"],
+      "transcript": [
+        {"speaker": "Jonas", "text": "Juniper, what's a good way to split tasks between four people?"},
+        {"speaker": "Juniper", "text": "List the tasks, then let each person pick one in turn."},
+        {"speaker": "Jonas", "text": "Okay, and what if two people want the same one?"}
+      ],
+      "active_rules": ["to_other_participant", "mentioned_not_asked", "unfinished_thought", "already_answered", "group_agreeing"],
+      "expected": "speak",
+      "expected_rule": "none",
+      "note": "The question continues the exchange with the assistant; Sam has said nothing."
+    },
+    {
+      "id": "imp-02",
+      "category": "implicit_request",
+      "description": "One person alone with the assistant.",
+      "bot_name": "Sage",
+      "participants": ["Priya"],
+      "transcript": [
+        {"speaker": "Priya", "text": "Hi, I'm here early I guess."},
+        {"speaker": "Sage", "text": "Hi Priya. Happy to chat while we wait."},
+        {"speaker": "Priya", "text": "What can you actually help with in these meetings?"}
+      ],
+      "active_rules": ["to_other_participant", "mentioned_not_asked", "unfinished_thought", "already_answered", "group_agreeing"],
+      "expected": "speak",
+      "expected_rule": "none",
+      "note": "Nobody else is in the room: 'you' is the assistant."
+    },
+    {
+      "id": "imp-03",
+      "category": "implicit_request",
+      "description": "A participant answers a question the assistant asked.",
+      "bot_name": "Moss",
+      "participants": ["Dov", "Mara"],
+      "transcript": [
+        {"speaker": "Moss", "text": "Before we start, would you like a short recap of last time?"},
+        {"speaker": "Dov", "text": "Hmm."},
+        {"speaker": "Mara", "text": "Yes please, that would help."}
+      ],
+      "active_rules": ["to_other_participant", "mentioned_not_asked", "unfinished_thought", "already_answered", "group_agreeing"],
+      "expected": "speak",
+      "expected_rule": "none",
+      "note": "A yes to the assistant's offer: silence here would look broken."
+    },
+    {
+      "id": "imp-04",
+      "category": "implicit_request",
+      "description": "A participant asks for a repeat of something only the assistant said.",
+      "bot_name": "Assistant",
+      "participants": ["Inés", "Kofi"],
+      "transcript": [
+        {"speaker": "Assistant", "text": "The second option is cheaper but takes a week longer."},
+        {"speaker": "Inés", "text": "Wait, I missed that."},
+        {"speaker": "Kofi", "text": "Sorry, could you repeat the part about the cost?"}
+      ],
+      "active_rules": ["to_other_participant", "mentioned_not_asked", "unfinished_thought", "already_answered", "group_agreeing"],
+      "expected": "speak",
+      "expected_rule": "none",
+      "note": "'Could you' right after another person spoke, yet only the assistant talked about cost."
+    },
+    {
+      "id": "dab-01",
+      "category": "direct_address_with_block_rule",
+      "description": "Addressed by name, and the sentence is not finished.",
+      "bot_name": "Juniper",
+      "participants": ["Lena", "Sam"],
+      "transcript": [
+        {"speaker": "Lena", "text": "We need the population numbers."},
+        {"speaker": "Sam", "text": "Right."},
+        {"speaker": "Lena", "text": "Juniper, can you tell us the population of, um, what was it called,"}
+      ],
+      "active_rules": ["to_other_participant", "mentioned_not_asked", "unfinished_thought", "already_answered", "group_agreeing"],
+      "expected": "speak",
+      "expected_rule": "direct_address",
+      "note": "The unfinished-thought rule holds too; the owner's rule is that a name always gets a reply (here, a question back)."
+    },
+    {
+      "id": "dab-02",
+      "category": "direct_address_with_block_rule",
+      "description": "The group has just agreed; the assistant is then asked by name.",
+      "bot_name": "Sage",
+      "participants": ["Bea", "Teo", "Omar"],
+      "transcript": [
+        {"speaker": "Bea", "text": "So, Friday for the pilot?"},
+        {"speaker": "Teo", "text": "Friday's good."},
+        {"speaker": "Omar", "text": "Fine by me."},
+        {"speaker": "Bea", "text": "Great. Sage, does Friday leave enough time to print the forms?"}
+      ],
+      "active_rules": ["to_other_participant", "mentioned_not_asked", "unfinished_thought", "already_answered", "group_agreeing"],
+      "expected": "speak",
+      "expected_rule": "direct_address",
+      "note": "The agreement rule holds for the turns before; the name is at the start of the second sentence."
+    },
+    {
+      "id": "dab-03",
+      "category": "direct_address_with_block_rule",
+      "description": "A participant answered; the assistant is asked to confirm.",
+      "bot_name": "Moss",
+      "participants": ["Yuki", "Hana"],
+      "transcript": [
+        {"speaker": "Yuki", "text": "How many weeks is a typical semester?"},
+        {"speaker": "Hana", "text": "Fifteen, usually."},
+        {"speaker": "Yuki", "text": "Is that right, Moss?"}
+      ],
+      "active_rules": ["to_other_participant", "mentioned_not_asked", "unfinished_thought", "already_answered", "group_agreeing"],
+      "expected": "speak",
+      "expected_rule": "direct_address",
+      "note": "Already answered by a person, and still a question to the assistant."
+    },
+    {
+      "id": "dab-04",
+      "category": "direct_address_with_block_rule",
+      "description": "The assistant is thanked by name, nothing is asked.",
+      "bot_name": "Assistant",
+      "participants": ["Nils", "Ravi"],
+      "transcript": [
+        {"speaker": "Nils", "text": "Assistant, what's seven times eight?"},
+        {"speaker": "Assistant", "text": "Fifty-six."},
+        {"speaker": "Ravi", "text": "Told you."},
+        {"speaker": "Nils", "text": "Okay, fine. Thanks, Assistant."}
+      ],
+      "active_rules": ["to_other_participant", "mentioned_not_asked", "unfinished_thought", "already_answered", "group_agreeing"],
+      "expected": "speak",
+      "expected_rule": "direct_address",
+      "note": "Owner, 2026-11-23: any address by name gets a reply, thanks included, though 'mentioned but not asked anything' describes it exactly."
+    },
+    {
+      "id": "ste-01",
+      "category": "transcription_error",
+      "description": "The assistant's name, Sage, is transcribed as 'Stage'.",
+      "bot_name": "Sage",
+      "participants": ["Tala", "Jonas"],
+      "transcript": [
+        {"speaker": "Tala", "text": "We need a name for the project."},
+        {"speaker": "Jonas", "text": "Something short."},
+        {"speaker": "Tala", "text": "Stage, can you suggest three names for a reading group?"}
+      ],
+      "active_rules": ["to_other_participant", "mentioned_not_asked", "unfinished_thought", "already_answered", "group_agreeing"],
+      "expected": "speak",
+      "expected_rule": "none",
+      "note": "A text match on the name misses this; no rule should block a request nobody else could be 'Stage' for."
+    },
+    {
+      "id": "ste-02",
+      "category": "transcription_error",
+      "description": "A participant's answer is stored under the asker's name.",
+      "bot_name": "Juniper",
+      "participants": ["Priya", "Dov"],
+      "transcript": [
+        {"speaker": "Priya", "text": "Dov, did you book the room?"},
+        {"speaker": "Priya", "text": "Yes, I booked it for two o'clock."},
+        {"speaker": "Priya", "text": "Great, thank you."}
+      ],
+      "active_rules": ["to_other_participant", "mentioned_not_asked", "unfinished_thought", "already_answered", "group_agreeing"],
+      "expected": "silent",
+      "expected_rule": "to_other_participant",
+      "note": "The second turn was Dov's. Read as labelled it is one person talking to herself; it is still between participants."
+    },
+    {
+      "id": "ste-03",
+      "category": "transcription_error",
+      "description": "'Most' is transcribed as the assistant's name, Moss.",
+      "bot_name": "Moss",
+      "participants": ["Mara", "Kofi"],
+      "transcript": [
+        {"speaker": "Mara", "text": "When should we do the follow-up?"},
+        {"speaker": "Kofi", "text": "Thursday or Friday."},
+        {"speaker": "Mara", "text": "Moss of us can make Thursday, right Kofi?"}
+      ],
+      "active_rules": ["to_other_participant", "mentioned_not_asked", "unfinished_thought", "already_answered", "group_agreeing"],
+      "expected": "silent",
+      "expected_rule": "to_other_participant",
+      "note": "The name appears, first word of the turn, and nobody said it. The question is to Kofi."
+    },
+    {
+      "id": "ste-04",
+      "category": "transcription_error",
+      "description": "A follow-up to the assistant with misheard words.",
+      "bot_name": "Juniper",
+      "participants": ["Inés", "Ravi"],
+      "transcript": [
+        {"speaker": "Inés", "text": "Juniper, what's a good length for a warm up activity?"},
+        {"speaker": "Juniper", "text": "Five minutes is usually plenty."},
+        {"speaker": "Inés", "text": "And four the mane activity, how long?"}
+      ],
+      "active_rules": ["to_other_participant", "mentioned_not_asked", "unfinished_thought", "already_answered", "group_agreeing"],
+      "expected": "speak",
+      "expected_rule": "none",
+      "note": "'For the main activity': garbled, and still plainly the next question to the assistant."
+    },
+    {
+      "id": "ste-05",
+      "category": "transcription_error",
+      "description": "Two misheard words in a remark from one participant to another.",
+      "bot_name": "Juniper",
+      "participants": ["Lena", "Sam"],
+      "transcript": [
+        {"speaker": "Lena", "text": "Are you coming to the dinner on Friday?"},
+        {"speaker": "Sam", "text": "I'm not sure yet."},
+        {"speaker": "Lena", "text": "Well, weather you come or knot, let me know by Wednesday."}
+      ],
+      "active_rules": ["to_other_participant", "mentioned_not_asked", "unfinished_thought", "already_answered", "group_agreeing"],
+      "expected": "silent",
+      "expected_rule": "to_other_participant",
+      "note": "'Whether you come or not': garbled, and still plainly Lena to Sam."
+    },
+    {
+      "id": "ovl-01",
+      "category": "overlapping_turns",
+      "description": "One person asks the assistant by name while another talks about their microphone.",
+      "bot_name": "Juniper",
+      "participants": ["Mara", "Teo"],
+      "transcript": [
+        {"speaker": "Teo", "text": "Okay, everyone's here."},
+        {"speaker": "Mara", "text": "Juniper, can you suggest an icebreaker?"},
+        {"speaker": "Teo", "text": "Hang on, is my mic working?"}
+      ],
+      "active_rules": ["to_other_participant", "mentioned_not_asked", "unfinished_thought", "already_answered", "group_agreeing"],
+      "expected": "speak",
+      "expected_rule": "direct_address",
+      "batch_size": 2,
+      "note": "The last two turns came in together. The last is not for the assistant; the one before it is."
+    },
+    {
+      "id": "ovl-02",
+      "category": "overlapping_turns",
+      "description": "Three people at once: the first asks the assistant, the other two talk to each other.",
+      "bot_name": "Sage",
+      "participants": ["Kofi", "Lena", "Dov"],
+      "transcript": [
+        {"speaker": "Lena", "text": "That was a good warm up."},
+        {"speaker": "Kofi", "text": "Sage, how much time do we have left?"},
+        {"speaker": "Lena", "text": "I think we should start the main part."},
+        {"speaker": "Dov", "text": "Yeah, let's go."}
+      ],
+      "active_rules": ["to_other_participant", "mentioned_not_asked", "unfinished_thought", "already_answered", "group_agreeing"],
+      "expected": "speak",
+      "expected_rule": "direct_address",
+      "batch_size": 3,
+      "note": "A batch of three; read alone, the last two turns are a group agreeing."
+    },
+    {
+      "id": "ovl-03",
+      "category": "overlapping_turns",
+      "description": "A question with the assistant's name at its end, and a remark to the asker on top of it.",
+      "bot_name": "Moss",
+      "participants": ["Priya", "Sam"],
+      "transcript": [
+        {"speaker": "Sam", "text": "That covers the budget."},
+        {"speaker": "Priya", "text": "What's the next topic, Moss?"},
+        {"speaker": "Sam", "text": "Priya, you're cutting out a bit."}
+      ],
+      "active_rules": ["to_other_participant", "mentioned_not_asked", "unfinished_thought", "already_answered", "group_agreeing"],
+      "expected": "speak",
+      "expected_rule": "direct_address",
+      "batch_size": 2,
+      "note": "The last turn names another participant; the turn it overlapped names the assistant."
+    },
+    {
+      "id": "sil-01",
+      "category": "unanswered_silence",
+      "description": "A trivia question to the group; nobody answers.",
+      "bot_name": "Sage",
+      "participants": ["Sam", "Bea", "Lena"],
+      "transcript": [
+        {"speaker": "Sam", "text": "This trivia sheet is hard."},
+        {"speaker": "Bea", "text": "Tell me about it."},
+        {"speaker": "Lena", "text": "Next one. Does anybody know which planet has the most moons?"}
+      ],
+      "active_rules": ["to_other_participant", "mentioned_not_asked", "unfinished_thought", "already_answered", "group_agreeing"],
+      "expected": "speak",
+      "expected_rule": "none",
+      "silence_after_s": 9,
+      "note": "Nine seconds without an answer: the assistant is the one who knows."
+    },
+    {
+      "id": "sil-02",
+      "category": "unanswered_silence",
+      "description": "Two people establish that neither knows; the question hangs.",
+      "bot_name": "Moss",
+      "participants": ["Teo", "Omar"],
+      "transcript": [
+        {"speaker": "Teo", "text": "I can't remember how to convert Fahrenheit to Celsius."},
+        {"speaker": "Omar", "text": "Me neither, honestly."},
+        {"speaker": "Teo", "text": "So how do we do it then?"}
+      ],
+      "active_rules": ["to_other_participant", "mentioned_not_asked", "unfinished_thought", "already_answered", "group_agreeing"],
+      "expected": "speak",
+      "expected_rule": "none",
+      "silence_after_s": 12,
+      "note": "Addressed to Omar on its face, but Omar has said he cannot answer, and nobody has spoken since."
+    },
+    {
+      "id": "sil-03",
+      "category": "unanswered_silence",
+      "description": "Nobody wants to start.",
+      "bot_name": "Juniper",
+      "participants": ["Yuki", "Hana", "Dov"],
+      "transcript": [
+        {"speaker": "Yuki", "text": "So, who wants to start?"},
+        {"speaker": "Hana", "text": "Um."},
+        {"speaker": "Yuki", "text": "Anyone? What should we even talk about first?"}
+      ],
+      "active_rules": ["to_other_participant", "mentioned_not_asked", "unfinished_thought", "already_answered", "group_agreeing"],
+      "expected": "speak",
+      "expected_rule": "none",
+      "silence_after_s": 15,
+      "note": "A stalled group and a long silence: an opening for the assistant."
+    },
+    {
+      "id": "ctl-01",
+      "category": "control",
+      "description": "The group is agreeing, but only the unfinished-thought rule is switched on.",
+      "bot_name": "Juniper",
+      "participants": ["Nils", "Tala", "Ravi"],
+      "transcript": [
+        {"speaker": "Nils", "text": "Shall we say ten minutes each?"},
+        {"speaker": "Tala", "text": "Ten is good."},
+        {"speaker": "Ravi", "text": "Agreed, ten minutes each."}
+      ],
+      "active_rules": ["unfinished_thought"],
+      "expected": "speak",
+      "expected_rule": "none",
+      "note": "A rule that is not active cannot block: the reply goes out as it does today."
+    },
+    {
+      "id": "ctl-02",
+      "category": "control",
+      "description": "Two people talking to each other, with no rules switched on.",
+      "bot_name": "Sage",
+      "participants": ["Jonas", "Lena"],
+      "transcript": [
+        {"speaker": "Jonas", "text": "Did you see the game last night?"},
+        {"speaker": "Lena", "text": "Only the second half."},
+        {"speaker": "Jonas", "text": "You missed the best part then."}
+      ],
+      "active_rules": [],
+      "expected": "speak",
+      "expected_rule": "none",
+      "note": "No rules: the filter is off and the bot behaves as it does today."
+    },
+    {
+      "id": "ctl-03",
+      "category": "control",
+      "description": "A running exchange with the assistant continues.",
+      "bot_name": "Juniper",
+      "participants": ["Jonas", "Priya"],
+      "transcript": [
+        {"speaker": "Jonas", "text": "Juniper, give us a fun fact."},
+        {"speaker": "Juniper", "text": "Honey never spoils."},
+        {"speaker": "Priya", "text": "Ha, nice."},
+        {"speaker": "Jonas", "text": "Give us another one."}
+      ],
+      "active_rules": ["to_other_participant", "mentioned_not_asked", "unfinished_thought", "already_answered", "group_agreeing"],
+      "expected": "speak",
+      "expected_rule": "none",
+      "note": "A request, complete, unanswered, to the one who gave the first fact."
+    },
+    {
+      "id": "ctl-04",
+      "category": "control",
+      "description": "Participants answer the assistant's opening question with a request.",
+      "bot_name": "Sage",
+      "participants": ["Dov", "Mara"],
+      "transcript": [
+        {"speaker": "Sage", "text": "Welcome, both of you. What would you like to work on today?"},
+        {"speaker": "Dov", "text": "Good question."},
+        {"speaker": "Mara", "text": "We want to practice for a job interview. Where do we start?"}
+      ],
+      "active_rules": ["to_other_participant", "mentioned_not_asked", "unfinished_thought", "already_answered", "group_agreeing"],
+      "expected": "speak",
+      "expected_rule": "none",
+      "note": "Nothing to block: a finished question, to the assistant, that no person has answered."
+    }
+  ]
+}

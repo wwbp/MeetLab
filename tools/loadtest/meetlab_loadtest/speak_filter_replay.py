@@ -252,7 +252,8 @@ def table(rep: dict) -> str:
     lines = [
         f"Speak filter replay: model {rep.get('model')}, {rep['scenarios_count']} scenarios x {rep['runs']} runs, "
         f"{rep['calls']} classifier calls, {rep['classifier_errors']} classifier errors, every rule at {rep['threshold']}.",
-        f"Tokens: {tokens.get('input', '?')} in, {tokens.get('output', '?')} out. Cost: {rep.get('cost_usd', 'not known (no price given)')}.",
+        *([f"Tokens: {tokens.get('input', '?')} in, {tokens.get('output', '?')} out. "
+           f"Cost: {rep.get('cost_usd', 'not known (no price given)')}."] if "tokens" in rep else []),
         "Classifier call, ms: " + (f"min {lat['min']}, median {lat['median']}, p95 {lat['p95']}, max {lat['max']} (n={lat['n']})."
                                    if lat["n"] else "none made."),
         "",
@@ -377,11 +378,13 @@ async def _run(args, data: dict, make_classifier) -> int:
                    for c in candidates}
         rep = {**head, "threshold": args.threshold, "calls": sum(r["calls"] for r in reports.values()),
                "candidates": reports, "best": best(data, candidates, results)}
-        text = "\n\n".join([comparison(data, candidates, results, threshold=args.threshold),
+        text = "\n\n".join([f"All candidates: {rep['calls']} classifier calls. Tokens: {tokens['input']} in, {tokens['output']} out. "
+                             f"Cost: {head.get('cost_usd', 'not known (no price given)')}.",
+                             comparison(data, candidates, results, threshold=args.threshold),
                              "Best wording and threshold per rule, chosen on this set: " + json.dumps(
                                  {k: rep["best"][k] for k in ("wording", "thresholds")}) + " " + json.dumps(
                                  rep["best"]["errors"]["overall"]),
-                             *(f"## {cid}\n\n" + table({**head, **r}) for cid, r in reports.items())])
+                             *(f"## {cid}\n\n" + table({"model": head["model"], **r}) for cid, r in reports.items())])
     else:
         rep = {**head, **report(data, records, threshold=args.threshold)}
         text = table(rep)

@@ -27,7 +27,7 @@ class FakeClassifier(BaseClassifier):
         super().__init__()
         self.probabilities, self.error, self.delay, self.calls = probabilities or {}, error, delay, []
 
-    async def _ask(self, state, questions, images=()):
+    async def _ask(self, state, questions, **_):
         self.calls.append((state, dict(questions)))
         await asyncio.sleep(self.delay)
         if self.error:
@@ -155,7 +155,7 @@ class TestDecide(unittest.IsolatedAsyncioTestCase):
 
     async def test_an_answer_missing_a_rule_or_out_of_range_fails_open(self):
         class Partial(FakeClassifier):
-            async def yes_no(self, state, questions, *, images=None):
+            async def yes_no(self, state, questions, **_):
                 return {"to_other": YesNoResult(probability=1.0)}
         d = await self.decide(Partial())
         self.assertEqual((d.speak, d.reason, d.probabilities), (True, "classifier_error", {}))

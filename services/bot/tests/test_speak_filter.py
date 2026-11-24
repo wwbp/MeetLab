@@ -102,6 +102,31 @@ class TestDecide(unittest.IsolatedAsyncioTestCase):
         fake = FakeClassifier({"to_other": 0.9})
         self.assertEqual((await self.decide(fake)).reason, "blocked")
 
+    async def test_people_talking_at_once_any_turn_of_the_batch_may_address_the_bot(self):
+        """Several people's words can be committed together; batch_size says how many of the
+        last turns that is."""
+        fake = FakeClassifier({"to_other": 1.0})
+        batch = [FilterTurn("Teo", "Okay, everyone's here."),
+                 FilterTurn("Mara", "Juniper, can you suggest an icebreaker?"),
+                 FilterTurn("Teo", "Hang on, is my mic working?")]
+        self.assertEqual(await self.decide(fake, turns=batch, batch_size=2), Decision(speak=True, reason="direct_address"))
+        self.assertEqual(await self.decide(fake, turns=batch, batch_size=3), Decision(speak=True, reason="direct_address"))
+        self.assertEqual(fake.calls, [])
+
+    async def test_a_batch_where_nobody_addresses_the_bot_goes_to_the_classifier(self):
+        fake = FakeClassifier({"to_other": 0.9})
+        d = await self.decide(fake, batch_size=2)  # TURNS: the bot's own turn, then Teo to Mara
+        self.assertEqual((d.reason, len(fake.calls)), ("blocked", 1))
+        self.assertEqual(len(fake.calls[0][0].splitlines()), 1 + len(TURNS), "the batch changes nothing that is sent")
+
+    async def test_the_batch_is_the_last_turn_unless_said(self):
+        fake = FakeClassifier({"to_other": 0.9})
+        batch = [FilterTurn("Mara", "Juniper, can you suggest an icebreaker?"), FilterTurn("Teo", "Is my mic working?")]
+        self.assertEqual((await self.decide(fake, turns=batch)).reason, "blocked")
+        self.assertEqual((await self.decide(fake, turns=batch, batch_size=1)).reason, "blocked")
+        self.assertEqual((await self.decide(fake, turns=batch, batch_size=0)).reason, "blocked", "never fewer than one")
+        self.assertEqual((await self.decide(fake, turns=batch, batch_size=9)).reason, "direct_address", "no more than there are")
+
     async def test_any_of_the_bots_names_is_an_address(self):
         d = await self.decide(FakeClassifier(), names=("Juniper", "Assistant"),
                               turns=[FilterTurn("Teo", "Assistant, what time is it?")])

@@ -1,0 +1,12 @@
+{
+  "candidates": [
+    {"id": "original", "rules": {}},
+    {"id": "unfinished_a1", "rules": {"unfinished_thought": "The last turn breaks off in the middle of a sentence, and the speaker is clearly about to continue."}},
+    {"id": "unfinished_a2", "rules": {"unfinished_thought": "The last turn stops partway (for example on 'and', 'um', 'the' or a comma) and the speaker has more to say. A short question or request that is complete counts as finished."}},
+    {"id": "unfinished_a3", "rules": {"unfinished_thought": "The words of the last turn do not yet form a complete question, request or statement."}},
+    {"id": "mentioned_b1", "rules": {"mentioned_not_asked": "The last speaker refers to the assistant while talking to other people, and asks the assistant nothing."}},
+    {"id": "mentioned_b2", "rules": {"mentioned_not_asked": "The assistant is named in the last turn only as someone being talked about, not as someone being spoken to. If the last turn does not name the assistant, the answer is no."}},
+    {"id": "mentioned_b3", "rules": {"mentioned_not_asked": "In the last turn, a participant talks about the assistant in the third person (as in 'let's ask it later' or 'it said earlier'), and nothing is being asked of the assistant now."}},
+    {"id": "to_other_c1", "rules": {"to_other_participant": "The last speaker is speaking to a particular other participant (by name, or by replying to what that person just said), not to the assistant. A follow-up to what the assistant just said is speaking to the assistant."}}
+  ]
+}

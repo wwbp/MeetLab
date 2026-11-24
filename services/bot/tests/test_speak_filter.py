@@ -6,7 +6,7 @@ import unittest
 
 from pipecat.classifiers.base_classifier import BaseClassifier, ClassifierError, YesNoQuestion, YesNoResult
 
-from meetlab_bot.speak_filter import MAX_TURNS, Decision, FilterTurn, Rule, decide, is_direct_address, render_state
+from meetlab_bot.speak_filter import MAX_TURNS, OWED_WITHIN, Decision, FilterTurn, Rule, decide, is_direct_address, render_state
 
 TO_OTHER = Rule("to_other", "The last speaker was talking to another participant, not to the assistant.", 0.7)
 UNFINISHED = Rule("unfinished", "The speaker has not finished their thought.", 0.6)
@@ -97,8 +97,9 @@ class TestDecide(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(d, Decision(speak=True, reason="direct_address"))
         self.assertEqual(fake.calls, [])
 
-    async def test_only_the_last_turn_counts_as_an_address(self):
-        """TURNS opens with 'Juniper, how long…' and ends with one person asking another."""
+    async def test_an_address_the_bot_has_answered_is_not_an_address_now(self):
+        """TURNS opens with 'Juniper, how long…', which the bot answers, and ends with one
+        person asking another."""
         fake = FakeClassifier({"to_other": 0.9})
         self.assertEqual((await self.decide(fake)).reason, "blocked")
 
@@ -120,12 +121,14 @@ class TestDecide(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(fake.calls[0][0].splitlines()), 1 + len(TURNS), "the batch changes nothing that is sent")
 
     async def test_the_batch_is_the_last_turn_unless_said(self):
+        """Which reason is given: named in the batch is direct_address; named before it, owed_reply."""
         fake = FakeClassifier({"to_other": 0.9})
         batch = [FilterTurn("Mara", "Juniper, can you suggest an icebreaker?"), FilterTurn("Teo", "Is my mic working?")]
-        self.assertEqual((await self.decide(fake, turns=batch)).reason, "blocked")
-        self.assertEqual((await self.decide(fake, turns=batch, batch_size=1)).reason, "blocked")
-        self.assertEqual((await self.decide(fake, turns=batch, batch_size=0)).reason, "blocked", "never fewer than one")
+        self.assertEqual((await self.decide(fake, turns=batch)).reason, "owed_reply")
+        self.assertEqual((await self.decide(fake, turns=batch, batch_size=1)).reason, "owed_reply")
+        self.assertEqual((await self.decide(fake, turns=batch, batch_size=0)).reason, "owed_reply", "never fewer than one")
         self.assertEqual((await self.decide(fake, turns=batch, batch_size=9)).reason, "direct_address", "no more than there are")
+        self.assertEqual(fake.calls, [])
 
     async def test_any_of_the_bots_names_is_an_address(self):
         d = await self.decide(FakeClassifier(), names=("Juniper", "Assistant"),
@@ -201,6 +204,91 @@ class TestDecide(unittest.IsolatedAsyncioTestCase):
         first = await self.decide(FakeClassifier(answers))
         self.assertEqual(await self.decide(FakeClassifier(answers)), first)
         self.assertEqual(first.blocked_by, ("to_other", "agreeing"))
+
+
+BLOCK_ALL = {"to_other": 1.0, "unfinished": 1.0, "agreeing": 1.0}
+ASKED = FilterTurn("Lena", "Juniper, what's the deadline for the abstract?")
+
+
+class TestOwedReply(unittest.IsolatedAsyncioTestCase):
+    """The bot is owed a reply when one of the last OWED_WITHIN turns before the newest is a
+    participant's, calls the bot by name (is_direct_address) with more than a courtesy, and the
+    bot has not spoken since. Then it speaks, and the classifier is not asked."""
+
+    async def reason(self, *turns, **kwargs):
+        fake = FakeClassifier(BLOCK_ALL)
+        d = await decide(turns, ("Juniper",), RULES, fake, timeout_s=1.0, **kwargs)
+        self.assertEqual(d.speak, d.reason != "blocked")
+        self.assertEqual(len(fake.calls), d.reason == "blocked", "asked only when nothing else decided")
+        return d.reason
+
+    async def test_asked_by_name_then_a_person_answers(self):
+        fake = FakeClassifier(BLOCK_ALL)
+        turns = [ASKED, FilterTurn("Kofi", "It's the fifteenth, I checked this morning."),
+                 FilterTurn("Lena", "Oh great, thanks Kofi.")]
+        self.assertEqual(await decide(turns, ("Juniper",), RULES, fake, timeout_s=1.0),
+                         Decision(speak=True, reason="owed_reply"))
+        self.assertEqual(fake.calls, [])
+
+    async def test_the_bot_spoke_after_the_question_nothing_is_owed(self):
+        self.assertEqual(await self.reason(ASKED, FilterTurn("Juniper", "The fifteenth.", is_bot=True),
+                                           FilterTurn("Kofi", "Told you, Lena.")), "blocked")
+
+    async def test_two_questions_by_name(self):
+        second = FilterTurn("Kofi", "Juniper, and how long can it be?")
+        bot = FilterTurn("Juniper", "The fifteenth.", is_bot=True)
+        other = FilterTurn("Lena", "Kofi, are you writing it?")
+        self.assertEqual(await self.reason(ASKED, second, other), "owed_reply", "both unanswered: one reply is owed")
+        self.assertEqual(await self.reason(ASKED, bot, second, other), "owed_reply", "the second came after the bot spoke")
+        self.assertEqual(await self.reason(ASKED, second, bot, other), "blocked",
+                         "the bot has spoken since both: whatever it said, the debt is cleared")
+
+    async def test_a_request_with_no_question_mark_or_request_word_is_owed(self):
+        self.assertEqual(await self.reason(FilterTurn("Lena", "Juniper, give us a fun fact"),
+                                           FilterTurn("Kofi", "Ha, good one.")), "owed_reply")
+
+    async def test_thanks_or_a_greeting_by_name_is_answered_at_once_or_not_at_all(self):
+        """NEEDS THE OWNER'S RULING. His rule: any address by name gets a reply, thanks included;
+        that holds in the turns just committed. A turn later the moment for "you're welcome"
+        has passed, and saying it then would interrupt: a courtesy does not stay owed."""
+        later = FilterTurn("Kofi", "Lena, shall we go on?")
+        for words in ("Thanks, Juniper.", "Okay, fine. Thanks, Juniper.", "Thank you Juniper", "Hi Juniper!",
+                      "Juniper?", "Oh, hey, Juniper!", "Bye, Juniper."):
+            self.assertEqual(await self.reason(FilterTurn("Lena", words)), "direct_address", words)
+            self.assertEqual(await self.reason(FilterTurn("Lena", words), later), "blocked", words)
+        self.assertEqual(await self.reason(FilterTurn("Lena", "Thanks, Juniper. What about Friday?"), later), "owed_reply")
+
+    async def test_a_name_that_is_mentioned_owes_nothing(self):
+        for words in ("Let's ask Juniper later.", "Juniper said the library is free on Fridays.", "Should we ask Juniper?"):
+            self.assertEqual(await self.reason(FilterTurn("Lena", words), FilterTurn("Kofi", "Sure.")), "blocked", words)
+
+    async def test_the_bots_own_words_owe_nothing(self):
+        self.assertEqual(await self.reason(FilterTurn("Juniper", "Juniper, what do you think?", is_bot=True),
+                                           FilterTurn("Kofi", "Sure.")), "blocked")
+
+    async def test_it_stays_owed_for_four_turns_one_each_in_a_full_room(self):
+        self.assertEqual(OWED_WITHIN, 4)
+        chat = [FilterTurn("Kofi", f"Lena, line {n}.") for n in range(5)]
+        self.assertEqual(await self.reason(ASKED, *chat[:4]), "owed_reply")
+        self.assertEqual(await self.reason(ASKED, *chat[:5]), "blocked", "five turns on, the talk has moved on")
+
+    async def test_the_bound_is_a_parameter_and_zero_turns_it_off(self):
+        chat = [FilterTurn("Kofi", f"Lena, line {n}.") for n in range(5)]
+        self.assertEqual(await self.reason(ASKED, *chat[:2], owed_within=1), "blocked")
+        self.assertEqual(await self.reason(ASKED, *chat[:1], owed_within=1), "owed_reply")
+        self.assertEqual(await self.reason(ASKED, *chat[:5], owed_within=5), "owed_reply")
+        self.assertEqual(await self.reason(ASKED, *chat[:1], owed_within=0), "blocked")
+        self.assertEqual(await self.reason(ASKED, owed_within=0), "direct_address", "the newest turns are not the look-back's")
+
+    async def test_the_bound_counts_turns_not_batches(self):
+        """Turns committed together count one each: a big batch does not stretch the look-back."""
+        chat = [FilterTurn("Kofi", f"Lena, line {n}.") for n in range(5)]
+        self.assertEqual(await self.reason(ASKED, *chat[:4], batch_size=3), "owed_reply")
+        self.assertEqual(await self.reason(ASKED, *chat[:5], batch_size=3), "blocked")
+        self.assertEqual(await self.reason(ASKED, *chat[:2], batch_size=3), "direct_address", "in the batch itself")
+
+    async def test_the_filter_off_still_asks_nothing_and_says_disabled(self):
+        self.assertEqual(await self.reason(ASKED, FilterTurn("Kofi", "The fifteenth."), enabled=False), "disabled")
 
 
 class TestDirectAddress(unittest.TestCase):

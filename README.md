@@ -243,3 +243,7 @@ Set-up, secrets, releasing and operating: [docs/deployment.md](docs/deployment.m
 | Session limits, study support | [docs/session-limits.md](docs/session-limits.md), [docs/study-support.md](docs/study-support.md) |
 | Decisions, costs, measurements | [infra/LEDGER.md](infra/LEDGER.md) |
 | v1 history | tag [`v1.0.0`](../../tree/v1.0.0), [docs/v1-to-v2-migration.md](docs/v1-to-v2-migration.md) |
+
+## License
+
+MeetLab is released under the [MIT License](LICENSE).

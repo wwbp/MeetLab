@@ -4,12 +4,14 @@ the bot as one batch of turns: `batch_size` says how many of the last turns that
 To be replayed through the filter with a real classifier, to choose each rule's threshold.
 
 The data is tools/loadtest/fixtures/speak_filter_scenarios.json: invented names and words only.
-Here: load it, check it (validate), and render a transcript as the text the classifier reads
-(render_state). Standard library only, no model calls: tools/loadtest/tests/test_speak_filter_scenarios.py.
+Here: load it, check it (validate), and turn a transcript into the filter's turns
+(filter_turns). No model calls: tools/loadtest/tests/test_speak_filter_scenarios.py.
 """
 import json
 from collections import Counter
 from pathlib import Path
+
+from meetlab_bot.speak_filter import FilterTurn
 
 SCENARIOS_PATH = Path(__file__).parents[1] / "fixtures" / "speak_filter_scenarios.json"
 
@@ -114,14 +116,7 @@ def validate(data: dict) -> list[str]:
     return out
 
 
-def render_state(scenario: dict) -> str:
-    """The classifier's `state` for a scenario: who the assistant is, then one JSON object per
-    turn (who said it is a field, never a prefix to parse out of the words: turns.py), then how
-    long nobody has spoken, when the scenario says. Thresholds hold for this format only."""
-    bot = scenario["bot_name"]
-    lines = [f"The assistant is named {bot}. The conversation so far, oldest turn first, one JSON object per line:"]
-    lines += [json.dumps({"speaker": t["speaker"], "role": "assistant" if t["speaker"] == bot else "participant",
-                          "text": t["text"]}, ensure_ascii=False) for t in scenario["transcript"]]
-    if scenario.get("silence_after_s"):
-        lines.append(f"Nobody has spoken for {scenario['silence_after_s']:g} seconds since the last turn.")
-    return "\n".join(lines)
+def filter_turns(scenario: dict) -> list[FilterTurn]:
+    """A scenario's transcript as the filter's turns: the bot's are those under its name. The
+    classifier's text is then speak_filter.render_state, the one renderer."""
+    return [FilterTurn(t["speaker"], t["text"], is_bot=t["speaker"] == scenario["bot_name"]) for t in scenario["transcript"]]

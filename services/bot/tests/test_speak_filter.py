@@ -6,7 +6,7 @@ import unittest
 
 from pipecat.classifiers.base_classifier import BaseClassifier, ClassifierError, YesNoQuestion, YesNoResult
 
-from meetlab_bot.speak_filter import MAX_TURNS, OWED_WITHIN, Decision, FilterTurn, Rule, decide, is_direct_address, render_state
+from meetlab_bot.speak_filter import MAX_TURNS, OWED_WITHIN, Decision, FilterTurn, Rule, decide, is_direct_address, owed_reply, render_state
 
 TO_OTHER = Rule("to_other", "The last speaker was talking to another participant, not to the assistant.", 0.7)
 UNFINISHED = Rule("unfinished", "The speaker has not finished their thought.", 0.6)
@@ -279,6 +279,7 @@ class TestOwedReply(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await self.reason(ASKED, *chat[:5], owed_within=5), "owed_reply")
         self.assertEqual(await self.reason(ASKED, *chat[:1], owed_within=0), "blocked")
         self.assertEqual(await self.reason(ASKED, owed_within=0), "direct_address", "the newest turns are not the look-back's")
+        self.assertFalse(owed_reply([ASKED], ["Juniper"], within=0), "zero looks back at nothing, not even the newest")
 
     async def test_the_bound_counts_turns_not_batches(self):
         """Turns committed together count one each: a big batch does not stretch the look-back."""

@@ -5,8 +5,9 @@ import copy
 import unittest
 from collections import Counter
 
+from meetlab_bot.speak_filter import FilterTurn, render_state
 from meetlab_loadtest.speak_filter_scenarios import (
-    CATEGORIES, MAX_SPEAK_SHARE, MIN_SPEAK_SHARE, load, render_state, validate,
+    CATEGORIES, MAX_SPEAK_SHARE, MIN_SPEAK_SHARE, filter_turns, load, validate,
 )
 
 # The owner's starter rules, verbatim (2026-11-23).
@@ -182,9 +183,10 @@ class TestValidate(unittest.TestCase):
         self.assertEqual(self.problems(two_people_at_once), [])
 
 
-class TestRenderState(unittest.TestCase):
-    """The text the classifier is given. Thresholds are tuned against this exact format, so a
-    change here is a change to every threshold: change this test knowingly."""
+class TestTheClassifiersText(unittest.TestCase):
+    """A scenario is sent as the filter renders it (speak_filter.render_state, its exact format
+    pinned in services/bot/tests/test_speak_filter.py): one renderer, so thresholds chosen on the
+    scenarios hold for the bot."""
 
     scenario = {
         "bot_name": "Juniper",
@@ -195,27 +197,17 @@ class TestRenderState(unittest.TestCase):
         ],
     }
 
-    def test_the_exact_format(self):
-        self.assertEqual(render_state(self.scenario), (
-            'The assistant is named Juniper. The conversation so far, oldest turn first, one JSON object per line:\n'
-            '{"speaker": "Mara", "role": "participant", "text": "Juniper, what\'s a \\"p-value\\"?"}\n'
-            '{"speaker": "Juniper", "role": "assistant", "text": "The chance of data this extreme if nothing is going on."}\n'
-            '{"speaker": "Teo", "role": "participant", "text": "Così, okay: and…"}'
-        ))
+    def test_the_bots_turns_are_the_bots_name_the_rest_participants(self):
+        self.assertEqual(filter_turns(self.scenario), [
+            FilterTurn("Mara", "Juniper, what's a \"p-value\"?"),
+            FilterTurn("Juniper", "The chance of data this extreme if nothing is going on.", is_bot=True),
+            FilterTurn("Teo", "Così, okay: and…"),
+        ])
 
-    def test_silence_after_the_last_turn_is_the_last_line(self):
-        self.assertEqual(render_state({**self.scenario, "silence_after_s": 12}).splitlines()[-1],
-                         "Nobody has spoken for 12 seconds since the last turn.")
-        self.assertEqual(render_state({**self.scenario, "silence_after_s": 7.5}).splitlines()[-1],
-                         "Nobody has spoken for 7.5 seconds since the last turn.")
-
-    def test_no_silence_no_line(self):
-        self.assertEqual(render_state({**self.scenario, "silence_after_s": 0}), render_state(self.scenario))
-
-    def test_every_committed_scenario_renders(self):
+    def test_every_committed_scenario_renders_with_its_silence(self):
         for s in load()["scenarios"]:
-            self.assertEqual(len(render_state(s).splitlines()),
-                             1 + len(s["transcript"]) + bool(s.get("silence_after_s")), s["id"])
+            state = render_state(filter_turns(s), s["bot_name"], silence_s=s.get("silence_after_s"))
+            self.assertEqual(len(state.splitlines()), 1 + len(s["transcript"]) + bool(s.get("silence_after_s")), s["id"])
 
 
 if __name__ == "__main__":

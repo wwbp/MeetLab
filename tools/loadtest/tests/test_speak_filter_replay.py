@@ -105,6 +105,18 @@ class TestReplay(unittest.TestCase):
                          [("disabled", {}), ("no_rule_fired", {"r1": 0.1}), ("direct_address", {})])
         self.assertEqual(fake.calls, 1)
 
+    def test_a_scenarios_silence_is_told_to_the_classifier(self):
+        class Keeps(FakeClassifier):
+            async def _ask(self, state, questions, **_):
+                self.states = [*getattr(self, "states", []), state]
+                return {name: YesNoResult(probability=0.0) for name in questions}, None
+        fake = Keeps()
+        data = {"rules": DATA["rules"], "scenarios": [scenario("quiet", "c", "speak", "none", "x", silence_after_s=9),
+                                                      scenario("loud", "c", "speak", "none", "x")]}
+        run(replay(data, fake, runs=1, threshold=0.5, max_calls=10))
+        self.assertEqual(fake.states[0].splitlines()[-1], "Nobody has spoken for 9 seconds since the last turn.")
+        self.assertEqual(json.loads(fake.states[1].splitlines()[-1])["text"], "x")
+
     def test_more_calls_than_the_cap_allows_is_refused_before_any_call(self):
         fake = FakeClassifier()
         with self.assertRaises(ValueError) as refused:

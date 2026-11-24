@@ -1,6 +1,6 @@
 # Audio modes: test and simulation plan
 
-Status: proposal. The page's gate is in the room (`services/web/lib/room-floor.ts`), the bot's in `services/bot/meetlab_bot/floor_room.py`; both still closed to real rooms. Three modes, built test-first:
+Status: shipped in v2.1.14. The page's gate is in the room (`services/web/lib/room-floor.ts`), the bot's in `services/bot/meetlab_bot/floor_room.py`. `ptt` and `baton` are set per room (a room's own Bot settings row); the global settings accept only `normal`. Three modes, built test-first:
 
 | Mode | Who may speak | Bot speaks when |
 |---|---|---|
@@ -203,9 +203,9 @@ pilot chooses among the survivors.
 | `make sim-modes-matrix COST_OK=<usd>` | Full matrix, refuses without the flag | $4–10 with OpenAI voice; $6–50 with ElevenLabs | ~6.5 h serial |
 | `make sim-modes-report [JUDGE=1]` | Not built. The matrix prints `report()` when it finishes; judging ~$2 | $0 | Minutes |
 
-The driver (`sim_modes_live.py`) runs against the local stack only and refuses any other. The modes
-stay closed to real rooms: it writes the room's `audio_mode` to the local database itself, as the
-runner still refuses it. A run says what it expects to cost before it starts. The matrix keeps every
+The driver (`sim_modes_live.py`) runs against the local stack only and refuses any other. It writes
+the room's `audio_mode` to the local database itself (written before the runner accepted `ptt` and
+`baton` for a room, as it has since v2.1.14). A run says what it expects to cost before it starts. The matrix keeps every
 attempt in `sim-modes-results.jsonl`, reruns invalid ones, carries on from that file, and stops before
 an attempt that could pass `COST_OK`, counting the top of the estimate.
 

@@ -1,0 +1,121 @@
+"""The speak filter's scenario set: written conversations, each ending at the moment the bot
+must decide whether to reply, with the decision expected of it and the rule that should block.
+To be replayed through the filter with a real classifier, to choose each rule's threshold.
+
+The data is tools/loadtest/fixtures/speak_filter_scenarios.json: invented names and words only.
+Here: load it, check it (validate), and render a transcript as the text the classifier reads
+(render_state). Standard library only, no model calls: tools/loadtest/tests/test_speak_filter_scenarios.py.
+"""
+import json
+from collections import Counter
+from pathlib import Path
+
+SCENARIOS_PATH = Path(__file__).parents[1] / "fixtures" / "speak_filter_scenarios.json"
+
+# What each case tests; every category has at least two cases.
+CATEGORIES = (
+    "peer_to_peer",                    # two participants talking to each other
+    "named_not_addressed",             # the bot named, nothing asked of it
+    "unfinished_thought",              # the speaker is mid-thought
+    "group_question_answered",         # a question to the group, answered by a participant
+    "bot_question_human_answered",     # a question to the bot, answered first by a participant
+    "group_agreeing",                  # the group converging on a decision
+    "direct_request",                  # the bot asked by name
+    "implicit_request",                # no name, but only the bot could answer
+    "direct_address_with_block_rule",  # addressed by name while a block rule also holds
+    "transcription_error",             # a misheard word or a wrong speaker label
+    "unanswered_silence",              # a question nobody answers, then silence
+    "control",                         # no rule applies
+)
+# A filter that always blocks, or never does, must score badly: the share of scenarios
+# expecting a reply stays within this range.
+MIN_SPEAK_SHARE, MAX_SPEAK_SHARE = 0.4, 0.6
+
+_TEXT = ("id", "category", "description", "bot_name", "note")
+_REQUIRED = _TEXT + ("participants", "transcript", "active_rules", "expected", "expected_rule")
+_OPTIONAL = ("silence_after_s", "needs_owner_decision", "owner_question")
+
+
+def load(path=SCENARIOS_PATH) -> dict:
+    """{"rules": [{id, instructions}], "scenarios": [...]}, as written; validate() checks it."""
+    return json.loads(Path(path).read_text(encoding="utf-8"))
+
+
+def _text(value) -> bool:
+    return isinstance(value, str) and bool(value.strip())
+
+
+def _scenario_problems(s: dict, rule_ids: set) -> list[str]:
+    out = [f"missing {f}" for f in _REQUIRED if f not in s]
+    out += [f"unknown field {f}" for f in s if f not in _REQUIRED + _OPTIONAL]
+    if out:
+        return out
+    out += [f"{f} must be text" for f in _TEXT if not _text(s[f])]
+    if s["category"] not in CATEGORIES:
+        out.append(f"category {s['category']!r} is not one of CATEGORIES")
+    people = s["participants"]
+    if not (isinstance(people, list) and 1 <= len(people) <= 4 and all(map(_text, people))
+            and len(set(people)) == len(people) and s["bot_name"] not in people):
+        out.append("participants must be 1 to 4 distinct names, none of them the bot's")
+        people = []
+    turns = s["transcript"]
+    if not (isinstance(turns, list) and 3 <= len(turns) <= 12
+            and all(isinstance(t, dict) and set(t) == {"speaker", "text"} for t in turns)):
+        out.append("transcript must be 3 to 12 turns of {speaker, text}")
+        turns = []
+    for n, t in enumerate(turns, 1):
+        if people and t["speaker"] not in [*people, s["bot_name"]]:
+            out.append(f"turn {n} speaker {t['speaker']!r} is neither a participant nor the bot")
+        if not _text(t["text"]):
+            out.append(f"turn {n} text is empty")
+    if turns and people and turns[-1]["speaker"] not in people:
+        out.append("the last turn must be a participant's: the bot decides after a person speaks")
+    active = s["active_rules"] if isinstance(s["active_rules"], list) else []
+    if active != s["active_rules"]:
+        out.append("active_rules must be a list of rule ids")
+    out += [f"unknown rule {r}" for r in active if r not in rule_ids]
+    if s["expected"] not in ("speak", "silent"):
+        out.append(f"expected {s['expected']!r} is neither speak nor silent")
+    elif s["expected"] == "silent" and s["expected_rule"] not in active:
+        out.append("expected_rule of a silent case must be the active rule that blocks")
+    elif s["expected"] == "speak" and s["expected_rule"] not in ("direct_address", "none"):
+        out.append("expected_rule of a speak case must be direct_address or none")
+    silence = s.get("silence_after_s", 0)
+    if isinstance(silence, bool) or not isinstance(silence, (int, float)) or silence < 0:
+        out.append("silence_after_s must be seconds, 0 or more")
+    if not isinstance(s.get("needs_owner_decision", False), bool):
+        out.append("needs_owner_decision must be true or false")
+    elif s.get("needs_owner_decision") and not _text(s.get("owner_question")):
+        out.append("owner_question must say what the owner is asked")
+    return out
+
+
+def validate(data: dict) -> list[str]:
+    """Every problem with the set, as sentences; empty when it is valid."""
+    rule_ids = [r.get("id") for r in data["rules"]]
+    out = [f"duplicate rule {r}" for r, n in Counter(rule_ids).items() if n > 1]
+    out += [f"rule {r.get('id')}: id and instructions must be text" for r in data["rules"]
+            if set(r) != {"id", "instructions"} or not all(map(_text, r.values()))]
+    scenarios = data["scenarios"]
+    out += [f"duplicate id {i}" for i, n in Counter(s.get("id") for s in scenarios).items() if n > 1]
+    for s in scenarios:
+        out += [f"{s.get('id')}: {p}" for p in _scenario_problems(s, set(rule_ids))]
+    cases = Counter(s.get("category") for s in scenarios)
+    out += [f"category {c}: {cases[c]} case(s), at least 2 needed" for c in CATEGORIES if cases[c] < 2]
+    speak = sum(s.get("expected") == "speak" for s in scenarios) / max(len(scenarios), 1)
+    if not MIN_SPEAK_SHARE <= speak <= MAX_SPEAK_SHARE:
+        out.append(f"speak share {speak:.2f} is outside {MIN_SPEAK_SHARE}-{MAX_SPEAK_SHARE}")
+    return out
+
+
+def render_state(scenario: dict) -> str:
+    """The classifier's `state` for a scenario: who the assistant is, then one JSON object per
+    turn (who said it is a field, never a prefix to parse out of the words: turns.py), then how
+    long nobody has spoken, when the scenario says. Thresholds hold for this format only."""
+    bot = scenario["bot_name"]
+    lines = [f"The assistant is named {bot}. The conversation so far, oldest turn first, one JSON object per line:"]
+    lines += [json.dumps({"speaker": t["speaker"], "role": "assistant" if t["speaker"] == bot else "participant",
+                          "text": t["text"]}, ensure_ascii=False) for t in scenario["transcript"]]
+    if scenario.get("silence_after_s"):
+        lines.append(f"Nobody has spoken for {scenario['silence_after_s']:g} seconds since the last turn.")
+    return "\n".join(lines)

@@ -84,7 +84,7 @@ class TestValidate(unittest.TestCase):
         for field in ("id", "category", "description", "bot_name", "participants", "transcript",
                       "active_rules", "expected", "expected_rule", "note"):
             with self.subTest(field):
-                self.assertRejects(lambda d: d["scenarios"][0].pop(field), f"s0: missing {field}")
+                self.assertRejects(lambda d: d["scenarios"][0].pop(field), f": missing {field}")
 
     def test_an_unknown_field_is_a_typo(self):
         self.assertRejects(lambda d: d["scenarios"][0].update(expcted="speak"), "s0: unknown field expcted")

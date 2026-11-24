@@ -25,10 +25,10 @@ from uuid import uuid4
 
 import numpy as np
 from livekit import rtc
-from sqlalchemy import select
+from sqlalchemy import delete, select
 
 from meetlab_core.db.engine import AsyncSessionLocal, engine
-from meetlab_core.db.models import Utterance
+from meetlab_core.db.models import BotConfig, Utterance
 from meetlab_loadtest import audio_scenarios as audio
 from meetlab_loadtest._sim_common import (
     LIVEKIT_URL, capture_signal, conversation_status, publish_audio_source, request, token,
@@ -67,6 +67,11 @@ class VoiceLoop(unittest.IsolatedAsyncioTestCase):
 
         room_name, me = f"voice-loop-{uuid4().hex[:6]}", f"sim_{uuid4().hex[:4]}"
         request("PUT", "/config", {"scope": room_name, "llm_model": MODEL, "tts_provider": "kokoro", "tts_voice": "alloy"})
+
+        async def forget_room_config():  # a developer's database keeps no row per run
+            async with AsyncSessionLocal() as db, db.begin():
+                await db.execute(delete(BotConfig).where(BotConfig.scope == room_name))
+        self.addAsyncCleanup(forget_room_config)
 
         room, listener = rtc.Room(), BotListener()
 

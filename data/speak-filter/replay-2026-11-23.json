@@ -1,0 +1,3629 @@
+{
+ "date": "2026-11-23",
+ "model": "gpt-6-luna",
+ "runs": 3,
+ "threshold": 0.5,
+ "scenarios_count": 52,
+ "calls": 120,
+ "classifier_errors": 0,
+ "errors": {
+  "overall": {
+   "silent_expected": 75,
+   "false_interruptions": 0,
+   "false_interruption_rate": 0.0,
+   "speak_expected": 81,
+   "missed_turns": 30,
+   "missed_turn_rate": 0.3704
+  },
+  "by_category": {
+   "peer_to_peer": {
+    "silent_expected": 15,
+    "false_interruptions": 0,
+    "false_interruption_rate": 0.0,
+    "speak_expected": 0,
+    "missed_turns": 0,
+    "missed_turn_rate": null
+   },
+   "named_not_addressed": {
+    "silent_expected": 15,
+    "false_interruptions": 0,
+    "false_interruption_rate": 0.0,
+    "speak_expected": 0,
+    "missed_turns": 0,
+    "missed_turn_rate": null
+   },
+   "unfinished_thought": {
+    "silent_expected": 12,
+    "false_interruptions": 0,
+    "false_interruption_rate": 0.0,
+    "speak_expected": 0,
+    "missed_turns": 0,
+    "missed_turn_rate": null
+   },
+   "group_question_answered": {
+    "silent_expected": 12,
+    "false_interruptions": 0,
+    "false_interruption_rate": 0.0,
+    "speak_expected": 0,
+    "missed_turns": 0,
+    "missed_turn_rate": null
+   },
+   "bot_question_human_answered": {
+    "silent_expected": 0,
+    "false_interruptions": 0,
+    "false_interruption_rate": null,
+    "speak_expected": 9,
+    "missed_turns": 9,
+    "missed_turn_rate": 1.0
+   },
+   "group_agreeing": {
+    "silent_expected": 12,
+    "false_interruptions": 0,
+    "false_interruption_rate": 0.0,
+    "speak_expected": 0,
+    "missed_turns": 0,
+    "missed_turn_rate": null
+   },
+   "direct_request": {
+    "silent_expected": 0,
+    "false_interruptions": 0,
+    "false_interruption_rate": null,
+    "speak_expected": 12,
+    "missed_turns": 0,
+    "missed_turn_rate": 0.0
+   },
+   "implicit_request": {
+    "silent_expected": 0,
+    "false_interruptions": 0,
+    "false_interruption_rate": null,
+    "speak_expected": 12,
+    "missed_turns": 3,
+    "missed_turn_rate": 0.25
+   },
+   "direct_address_with_block_rule": {
+    "silent_expected": 0,
+    "false_interruptions": 0,
+    "false_interruption_rate": null,
+    "speak_expected": 12,
+    "missed_turns": 0,
+    "missed_turn_rate": 0.0
+   },
+   "transcription_error": {
+    "silent_expected": 9,
+    "false_interruptions": 0,
+    "false_interruption_rate": 0.0,
+    "speak_expected": 6,
+    "missed_turns": 6,
+    "missed_turn_rate": 1.0
+   },
+   "overlapping_turns": {
+    "silent_expected": 0,
+    "false_interruptions": 0,
+    "false_interruption_rate": null,
+    "speak_expected": 9,
+    "missed_turns": 0,
+    "missed_turn_rate": 0.0
+   },
+   "unanswered_silence": {
+    "silent_expected": 0,
+    "false_interruptions": 0,
+    "false_interruption_rate": null,
+    "speak_expected": 9,
+    "missed_turns": 9,
+    "missed_turn_rate": 1.0
+   },
+   "control": {
+    "silent_expected": 0,
+    "false_interruptions": 0,
+    "false_interruption_rate": null,
+    "speak_expected": 12,
+    "missed_turns": 3,
+    "missed_turn_rate": 0.25
+   }
+  },
+  "by_rule": {
+   "to_other_participant": {
+    "should_block": 24,
+    "false_interruptions": 0,
+    "missed_turns": 18,
+    "blocked_for_another_rule": 45
+   },
+   "mentioned_not_asked": {
+    "should_block": 15,
+    "false_interruptions": 0,
+    "missed_turns": 9,
+    "blocked_for_another_rule": 45
+   },
+   "unfinished_thought": {
+    "should_block": 12,
+    "false_interruptions": 0,
+    "missed_turns": 18,
+    "blocked_for_another_rule": 12
+   },
+   "already_answered": {
+    "should_block": 12,
+    "false_interruptions": 0,
+    "missed_turns": 9,
+    "blocked_for_another_rule": 6
+   },
+   "group_agreeing": {
+    "should_block": 12,
+    "false_interruptions": 0,
+    "missed_turns": 9,
+    "blocked_for_another_rule": 21
+   }
+  }
+ },
+ "flips": [],
+ "latency_ms": {
+  "n": 120,
+  "min": 111.4,
+  "median": 192.9,
+  "p95": 518.4,
+  "max": 1003.7
+ },
+ "sweep": {
+  "all_rules": [
+   {
+    "threshold": 0.3,
+    "silent_expected": 75,
+    "false_interruptions": 0,
+    "false_interruption_rate": 0.0,
+    "speak_expected": 81,
+    "missed_turns": 39,
+    "missed_turn_rate": 0.4815
+   },
+   {
+    "threshold": 0.4,
+    "silent_expected": 75,
+    "false_interruptions": 0,
+    "false_interruption_rate": 0.0,
+    "speak_expected": 81,
+    "missed_turns": 33,
+    "missed_turn_rate": 0.4074
+   },
+   {
+    "threshold": 0.5,
+    "silent_expected": 75,
+    "false_interruptions": 0,
+    "false_interruption_rate": 0.0,
+    "speak_expected": 81,
+    "missed_turns": 30,
+    "missed_turn_rate": 0.3704
+   },
+   {
+    "threshold": 0.6,
+    "silent_expected": 75,
+    "false_interruptions": 0,
+    "false_interruption_rate": 0.0,
+    "speak_expected": 81,
+    "missed_turns": 30,
+    "missed_turn_rate": 0.3704
+   },
+   {
+    "threshold": 0.7,
+    "silent_expected": 75,
+    "false_interruptions": 0,
+    "false_interruption_rate": 0.0,
+    "speak_expected": 81,
+    "missed_turns": 30,
+    "missed_turn_rate": 0.3704
+   },
+   {
+    "threshold": 0.8,
+    "silent_expected": 75,
+    "false_interruptions": 0,
+    "false_interruption_rate": 0.0,
+    "speak_expected": 81,
+    "missed_turns": 27,
+    "missed_turn_rate": 0.3333
+   },
+   {
+    "threshold": 0.9,
+    "silent_expected": 75,
+    "false_interruptions": 3,
+    "false_interruption_rate": 0.04,
+    "speak_expected": 81,
+    "missed_turns": 18,
+    "missed_turn_rate": 0.2222
+   }
+  ],
+  "by_rule": {
+   "to_other_participant": [
+    {
+     "threshold": 0.3,
+     "should_block": 24,
+     "blocks_own": 24,
+     "blocks_speak": 21,
+     "speak_asked": 45
+    },
+    {
+     "threshold": 0.4,
+     "should_block": 24,
+     "blocks_own": 24,
+     "blocks_speak": 18,
+     "speak_asked": 45
+    },
+    {
+     "threshold": 0.5,
+     "should_block": 24,
+     "blocks_own": 24,
+     "blocks_speak": 18,
+     "speak_asked": 45
+    },
+    {
+     "threshold": 0.6,
+     "should_block": 24,
+     "blocks_own": 24,
+     "blocks_speak": 18,
+     "speak_asked": 45
+    },
+    {
+     "threshold": 0.7,
+     "should_block": 24,
+     "blocks_own": 24,
+     "blocks_speak": 18,
+     "speak_asked": 45
+    },
+    {
+     "threshold": 0.8,
+     "should_block": 24,
+     "blocks_own": 24,
+     "blocks_speak": 15,
+     "speak_asked": 45
+    },
+    {
+     "threshold": 0.9,
+     "should_block": 24,
+     "blocks_own": 24,
+     "blocks_speak": 12,
+     "speak_asked": 45
+    }
+   ],
+   "mentioned_not_asked": [
+    {
+     "threshold": 0.3,
+     "should_block": 15,
+     "blocks_own": 12,
+     "blocks_speak": 12,
+     "speak_asked": 45
+    },
+    {
+     "threshold": 0.4,
+     "should_block": 15,
+     "blocks_own": 12,
+     "blocks_speak": 9,
+     "speak_asked": 45
+    },
+    {
+     "threshold": 0.5,
+     "should_block": 15,
+     "blocks_own": 12,
+     "blocks_speak": 9,
+     "speak_asked": 45
+    },
+    {
+     "threshold": 0.6,
+     "should_block": 15,
+     "blocks_own": 9,
+     "blocks_speak": 9,
+     "speak_asked": 45
+    },
+    {
+     "threshold": 0.7,
+     "should_block": 15,
+     "blocks_own": 9,
+     "blocks_speak": 9,
+     "speak_asked": 45
+    },
+    {
+     "threshold": 0.8,
+     "should_block": 15,
+     "blocks_own": 9,
+     "blocks_speak": 9,
+     "speak_asked": 45
+    },
+    {
+     "threshold": 0.9,
+     "should_block": 15,
+     "blocks_own": 6,
+     "blocks_speak": 9,
+     "speak_asked": 45
+    }
+   ],
+   "unfinished_thought": [
+    {
+     "threshold": 0.3,
+     "should_block": 12,
+     "blocks_own": 12,
+     "blocks_speak": 27,
+     "speak_asked": 45
+    },
+    {
+     "threshold": 0.4,
+     "should_block": 12,
+     "blocks_own": 12,
+     "blocks_speak": 21,
+     "speak_asked": 45
+    },
+    {
+     "threshold": 0.5,
+     "should_block": 12,
+     "blocks_own": 12,
+     "blocks_speak": 18,
+     "speak_asked": 45
+    },
+    {
+     "threshold": 0.6,
+     "should_block": 12,
+     "blocks_own": 12,
+     "blocks_speak": 18,
+     "speak_asked": 45
+    },
+    {
+     "threshold": 0.7,
+     "should_block": 12,
+     "blocks_own": 12,
+     "blocks_speak": 15,
+     "speak_asked": 45
+    },
+    {
+     "threshold": 0.8,
+     "should_block": 12,
+     "blocks_own": 12,
+     "blocks_speak": 9,
+     "speak_asked": 45
+    },
+    {
+     "threshold": 0.9,
+     "should_block": 12,
+     "blocks_own": 12,
+     "blocks_speak": 3,
+     "speak_asked": 45
+    }
+   ],
+   "already_answered": [
+    {
+     "threshold": 0.3,
+     "should_block": 12,
+     "blocks_own": 12,
+     "blocks_speak": 9,
+     "speak_asked": 45
+    },
+    {
+     "threshold": 0.4,
+     "should_block": 12,
+     "blocks_own": 12,
+     "blocks_speak": 9,
+     "speak_asked": 45
+    },
+    {
+     "threshold": 0.5,
+     "should_block": 12,
+     "blocks_own": 12,
+     "blocks_speak": 9,
+     "speak_asked": 45
+    },
+    {
+     "threshold": 0.6,
+     "should_block": 12,
+     "blocks_own": 12,
+     "blocks_speak": 9,
+     "speak_asked": 45
+    },
+    {
+     "threshold": 0.7,
+     "should_block": 12,
+     "blocks_own": 12,
+     "blocks_speak": 9,
+     "speak_asked": 45
+    },
+    {
+     "threshold": 0.8,
+     "should_block": 12,
+     "blocks_own": 9,
+     "blocks_speak": 6,
+     "speak_asked": 45
+    },
+    {
+     "threshold": 0.9,
+     "should_block": 12,
+     "blocks_own": 9,
+     "blocks_speak": 6,
+     "speak_asked": 45
+    }
+   ],
+   "group_agreeing": [
+    {
+     "threshold": 0.3,
+     "should_block": 12,
+     "blocks_own": 12,
+     "blocks_speak": 12,
+     "speak_asked": 45
+    },
+    {
+     "threshold": 0.4,
+     "should_block": 12,
+     "blocks_own": 12,
+     "blocks_speak": 9,
+     "speak_asked": 45
+    },
+    {
+     "threshold": 0.5,
+     "should_block": 12,
+     "blocks_own": 12,
+     "blocks_speak": 9,
+     "speak_asked": 45
+    },
+    {
+     "threshold": 0.6,
+     "should_block": 12,
+     "blocks_own": 12,
+     "blocks_speak": 6,
+     "speak_asked": 45
+    },
+    {
+     "threshold": 0.7,
+     "should_block": 12,
+     "blocks_own": 12,
+     "blocks_speak": 6,
+     "speak_asked": 45
+    },
+    {
+     "threshold": 0.8,
+     "should_block": 12,
+     "blocks_own": 12,
+     "blocks_speak": 3,
+     "speak_asked": 45
+    },
+    {
+     "threshold": 0.9,
+     "should_block": 12,
+     "blocks_own": 12,
+     "blocks_speak": 0,
+     "speak_asked": 45
+    }
+   ]
+  }
+ },
+ "scenarios": [
+  {
+   "id": "p2p-01",
+   "category": "peer_to_peer",
+   "expected": "silent",
+   "expected_rule": "to_other_participant",
+   "decisions": [
+    "silent",
+    "silent",
+    "silent"
+   ],
+   "reasons": [
+    "blocked",
+    "blocked",
+    "blocked"
+   ],
+   "blocked_by": [
+    [
+     "to_other_participant",
+     "mentioned_not_asked",
+     "group_agreeing"
+    ],
+    [
+     "to_other_participant",
+     "mentioned_not_asked",
+     "group_agreeing"
+    ],
+    [
+     "to_other_participant",
+     "mentioned_not_asked",
+     "group_agreeing"
+    ]
+   ],
+   "flipped": false,
+   "correct": [
+    true,
+    true,
+    true
+   ],
+   "probabilities": {
+    "to_other_participant": [
+     1.0,
+     1.0,
+     1.0
+    ],
+    "mentioned_not_asked": [
+     1.0,
+     1.0,
+     1.0
+    ],
+    "unfinished_thought": [
+     0.03,
+     0.03,
+     0.03
+    ],
+    "already_answered": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "group_agreeing": [
+     0.91,
+     0.91,
+     0.91
+    ]
+   },
+   "spread": {
+    "to_other_participant": 0.0,
+    "mentioned_not_asked": 0.0,
+    "unfinished_thought": 0.0,
+    "already_answered": 0.0,
+    "group_agreeing": 0.0
+   }
+  },
+  {
+   "id": "p2p-02",
+   "category": "peer_to_peer",
+   "expected": "silent",
+   "expected_rule": "to_other_participant",
+   "decisions": [
+    "silent",
+    "silent",
+    "silent"
+   ],
+   "reasons": [
+    "blocked",
+    "blocked",
+    "blocked"
+   ],
+   "blocked_by": [
+    [
+     "to_other_participant",
+     "mentioned_not_asked",
+     "unfinished_thought"
+    ],
+    [
+     "to_other_participant",
+     "mentioned_not_asked",
+     "unfinished_thought"
+    ],
+    [
+     "to_other_participant",
+     "mentioned_not_asked",
+     "unfinished_thought"
+    ]
+   ],
+   "flipped": false,
+   "correct": [
+    true,
+    true,
+    true
+   ],
+   "probabilities": {
+    "to_other_participant": [
+     0.97,
+     0.97,
+     0.97
+    ],
+    "mentioned_not_asked": [
+     0.96,
+     0.96,
+     0.96
+    ],
+    "unfinished_thought": [
+     0.56,
+     0.56,
+     0.56
+    ],
+    "already_answered": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "group_agreeing": [
+     0.09,
+     0.09,
+     0.09
+    ]
+   },
+   "spread": {
+    "to_other_participant": 0.0,
+    "mentioned_not_asked": 0.0,
+    "unfinished_thought": 0.0,
+    "already_answered": 0.0,
+    "group_agreeing": 0.0
+   }
+  },
+  {
+   "id": "p2p-03",
+   "category": "peer_to_peer",
+   "expected": "silent",
+   "expected_rule": "to_other_participant",
+   "decisions": [
+    "silent",
+    "silent",
+    "silent"
+   ],
+   "reasons": [
+    "blocked",
+    "blocked",
+    "blocked"
+   ],
+   "blocked_by": [
+    [
+     "to_other_participant"
+    ],
+    [
+     "to_other_participant"
+    ],
+    [
+     "to_other_participant"
+    ]
+   ],
+   "flipped": false,
+   "correct": [
+    true,
+    true,
+    true
+   ],
+   "probabilities": {
+    "to_other_participant": [
+     1.0,
+     1.0,
+     1.0
+    ],
+    "mentioned_not_asked": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "unfinished_thought": [
+     0.09,
+     0.09,
+     0.09
+    ],
+    "already_answered": [
+     0.28,
+     0.28,
+     0.28
+    ],
+    "group_agreeing": [
+     0.49,
+     0.49,
+     0.49
+    ]
+   },
+   "spread": {
+    "to_other_participant": 0.0,
+    "mentioned_not_asked": 0.0,
+    "unfinished_thought": 0.0,
+    "already_answered": 0.0,
+    "group_agreeing": 0.0
+   }
+  },
+  {
+   "id": "p2p-04",
+   "category": "peer_to_peer",
+   "expected": "silent",
+   "expected_rule": "to_other_participant",
+   "decisions": [
+    "silent",
+    "silent",
+    "silent"
+   ],
+   "reasons": [
+    "blocked",
+    "blocked",
+    "blocked"
+   ],
+   "blocked_by": [
+    [
+     "to_other_participant",
+     "mentioned_not_asked"
+    ],
+    [
+     "to_other_participant",
+     "mentioned_not_asked"
+    ],
+    [
+     "to_other_participant",
+     "mentioned_not_asked"
+    ]
+   ],
+   "flipped": false,
+   "correct": [
+    true,
+    true,
+    true
+   ],
+   "probabilities": {
+    "to_other_participant": [
+     1.0,
+     1.0,
+     1.0
+    ],
+    "mentioned_not_asked": [
+     1.0,
+     1.0,
+     1.0
+    ],
+    "unfinished_thought": [
+     0.07,
+     0.07,
+     0.07
+    ],
+    "already_answered": [
+     0.16,
+     0.16,
+     0.16
+    ],
+    "group_agreeing": [
+     0.17,
+     0.17,
+     0.17
+    ]
+   },
+   "spread": {
+    "to_other_participant": 0.0,
+    "mentioned_not_asked": 0.0,
+    "unfinished_thought": 0.0,
+    "already_answered": 0.0,
+    "group_agreeing": 0.0
+   }
+  },
+  {
+   "id": "p2p-05",
+   "category": "peer_to_peer",
+   "expected": "silent",
+   "expected_rule": "to_other_participant",
+   "decisions": [
+    "silent",
+    "silent",
+    "silent"
+   ],
+   "reasons": [
+    "blocked",
+    "blocked",
+    "blocked"
+   ],
+   "blocked_by": [
+    [
+     "to_other_participant",
+     "mentioned_not_asked",
+     "unfinished_thought"
+    ],
+    [
+     "to_other_participant",
+     "mentioned_not_asked",
+     "unfinished_thought"
+    ],
+    [
+     "to_other_participant",
+     "mentioned_not_asked",
+     "unfinished_thought"
+    ]
+   ],
+   "flipped": false,
+   "correct": [
+    true,
+    true,
+    true
+   ],
+   "probabilities": {
+    "to_other_participant": [
+     1.0,
+     1.0,
+     1.0
+    ],
+    "mentioned_not_asked": [
+     0.99,
+     0.99,
+     0.99
+    ],
+    "unfinished_thought": [
+     0.68,
+     0.68,
+     0.68
+    ],
+    "already_answered": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "group_agreeing": [
+     0.05,
+     0.05,
+     0.05
+    ]
+   },
+   "spread": {
+    "to_other_participant": 0.0,
+    "mentioned_not_asked": 0.0,
+    "unfinished_thought": 0.0,
+    "already_answered": 0.0,
+    "group_agreeing": 0.0
+   }
+  },
+  {
+   "id": "nna-01",
+   "category": "named_not_addressed",
+   "expected": "silent",
+   "expected_rule": "mentioned_not_asked",
+   "decisions": [
+    "silent",
+    "silent",
+    "silent"
+   ],
+   "reasons": [
+    "blocked",
+    "blocked",
+    "blocked"
+   ],
+   "blocked_by": [
+    [
+     "to_other_participant",
+     "mentioned_not_asked",
+     "unfinished_thought",
+     "group_agreeing"
+    ],
+    [
+     "to_other_participant",
+     "mentioned_not_asked",
+     "unfinished_thought",
+     "group_agreeing"
+    ],
+    [
+     "to_other_participant",
+     "mentioned_not_asked",
+     "unfinished_thought",
+     "group_agreeing"
+    ]
+   ],
+   "flipped": false,
+   "correct": [
+    true,
+    true,
+    true
+   ],
+   "probabilities": {
+    "to_other_participant": [
+     0.99,
+     0.99,
+     0.99
+    ],
+    "mentioned_not_asked": [
+     0.59,
+     0.59,
+     0.59
+    ],
+    "unfinished_thought": [
+     0.69,
+     0.69,
+     0.69
+    ],
+    "already_answered": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "group_agreeing": [
+     0.65,
+     0.65,
+     0.65
+    ]
+   },
+   "spread": {
+    "to_other_participant": 0.0,
+    "mentioned_not_asked": 0.0,
+    "unfinished_thought": 0.0,
+    "already_answered": 0.0,
+    "group_agreeing": 0.0
+   }
+  },
+  {
+   "id": "nna-02",
+   "category": "named_not_addressed",
+   "expected": "silent",
+   "expected_rule": "mentioned_not_asked",
+   "decisions": [
+    "silent",
+    "silent",
+    "silent"
+   ],
+   "reasons": [
+    "blocked",
+    "blocked",
+    "blocked"
+   ],
+   "blocked_by": [
+    [
+     "to_other_participant",
+     "mentioned_not_asked",
+     "group_agreeing"
+    ],
+    [
+     "to_other_participant",
+     "mentioned_not_asked",
+     "group_agreeing"
+    ],
+    [
+     "to_other_participant",
+     "mentioned_not_asked",
+     "group_agreeing"
+    ]
+   ],
+   "flipped": false,
+   "correct": [
+    true,
+    true,
+    true
+   ],
+   "probabilities": {
+    "to_other_participant": [
+     0.96,
+     0.96,
+     0.96
+    ],
+    "mentioned_not_asked": [
+     0.98,
+     0.98,
+     0.98
+    ],
+    "unfinished_thought": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "already_answered": [
+     0.12,
+     0.12,
+     0.12
+    ],
+    "group_agreeing": [
+     0.91,
+     0.91,
+     0.91
+    ]
+   },
+   "spread": {
+    "to_other_participant": 0.0,
+    "mentioned_not_asked": 0.0,
+    "unfinished_thought": 0.0,
+    "already_answered": 0.0,
+    "group_agreeing": 0.0
+   }
+  },
+  {
+   "id": "nna-03",
+   "category": "named_not_addressed",
+   "expected": "silent",
+   "expected_rule": "mentioned_not_asked",
+   "decisions": [
+    "silent",
+    "silent",
+    "silent"
+   ],
+   "reasons": [
+    "blocked",
+    "blocked",
+    "blocked"
+   ],
+   "blocked_by": [
+    [
+     "to_other_participant"
+    ],
+    [
+     "to_other_participant"
+    ],
+    [
+     "to_other_participant"
+    ]
+   ],
+   "flipped": false,
+   "correct": [
+    true,
+    true,
+    true
+   ],
+   "probabilities": {
+    "to_other_participant": [
+     0.82,
+     0.82,
+     0.82
+    ],
+    "mentioned_not_asked": [
+     0.05,
+     0.05,
+     0.05
+    ],
+    "unfinished_thought": [
+     0.24,
+     0.24,
+     0.24
+    ],
+    "already_answered": [
+     0.1,
+     0.1,
+     0.1
+    ],
+    "group_agreeing": [
+     0.16,
+     0.16,
+     0.16
+    ]
+   },
+   "spread": {
+    "to_other_participant": 0.0,
+    "mentioned_not_asked": 0.0,
+    "unfinished_thought": 0.0,
+    "already_answered": 0.0,
+    "group_agreeing": 0.0
+   }
+  },
+  {
+   "id": "nna-04",
+   "category": "named_not_addressed",
+   "expected": "silent",
+   "expected_rule": "mentioned_not_asked",
+   "decisions": [
+    "silent",
+    "silent",
+    "silent"
+   ],
+   "reasons": [
+    "blocked",
+    "blocked",
+    "blocked"
+   ],
+   "blocked_by": [
+    [
+     "to_other_participant",
+     "mentioned_not_asked",
+     "already_answered",
+     "group_agreeing"
+    ],
+    [
+     "to_other_participant",
+     "mentioned_not_asked",
+     "already_answered",
+     "group_agreeing"
+    ],
+    [
+     "to_other_participant",
+     "mentioned_not_asked",
+     "already_answered",
+     "group_agreeing"
+    ]
+   ],
+   "flipped": false,
+   "correct": [
+    true,
+    true,
+    true
+   ],
+   "probabilities": {
+    "to_other_participant": [
+     0.83,
+     0.83,
+     0.83
+    ],
+    "mentioned_not_asked": [
+     0.99,
+     0.99,
+     0.99
+    ],
+    "unfinished_thought": [
+     0.1,
+     0.1,
+     0.1
+    ],
+    "already_answered": [
+     0.92,
+     0.92,
+     0.92
+    ],
+    "group_agreeing": [
+     0.71,
+     0.71,
+     0.71
+    ]
+   },
+   "spread": {
+    "to_other_participant": 0.0,
+    "mentioned_not_asked": 0.0,
+    "unfinished_thought": 0.0,
+    "already_answered": 0.0,
+    "group_agreeing": 0.0
+   }
+  },
+  {
+   "id": "nna-05",
+   "category": "named_not_addressed",
+   "expected": "silent",
+   "expected_rule": "mentioned_not_asked",
+   "decisions": [
+    "silent",
+    "silent",
+    "silent"
+   ],
+   "reasons": [
+    "blocked",
+    "blocked",
+    "blocked"
+   ],
+   "blocked_by": [
+    [
+     "to_other_participant",
+     "mentioned_not_asked"
+    ],
+    [
+     "to_other_participant",
+     "mentioned_not_asked"
+    ],
+    [
+     "to_other_participant",
+     "mentioned_not_asked"
+    ]
+   ],
+   "flipped": false,
+   "correct": [
+    true,
+    true,
+    true
+   ],
+   "probabilities": {
+    "to_other_participant": [
+     0.93,
+     0.93,
+     0.93
+    ],
+    "mentioned_not_asked": [
+     0.84,
+     0.84,
+     0.84
+    ],
+    "unfinished_thought": [
+     0.12,
+     0.12,
+     0.12
+    ],
+    "already_answered": [
+     0.02,
+     0.02,
+     0.02
+    ],
+    "group_agreeing": [
+     0.06,
+     0.06,
+     0.06
+    ]
+   },
+   "spread": {
+    "to_other_participant": 0.0,
+    "mentioned_not_asked": 0.0,
+    "unfinished_thought": 0.0,
+    "already_answered": 0.0,
+    "group_agreeing": 0.0
+   }
+  },
+  {
+   "id": "unf-01",
+   "category": "unfinished_thought",
+   "expected": "silent",
+   "expected_rule": "unfinished_thought",
+   "decisions": [
+    "silent",
+    "silent",
+    "silent"
+   ],
+   "reasons": [
+    "blocked",
+    "blocked",
+    "blocked"
+   ],
+   "blocked_by": [
+    [
+     "unfinished_thought"
+    ],
+    [
+     "unfinished_thought"
+    ],
+    [
+     "unfinished_thought"
+    ]
+   ],
+   "flipped": false,
+   "correct": [
+    true,
+    true,
+    true
+   ],
+   "probabilities": {
+    "to_other_participant": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "mentioned_not_asked": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "unfinished_thought": [
+     0.97,
+     0.97,
+     0.97
+    ],
+    "already_answered": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "group_agreeing": [
+     0.18,
+     0.18,
+     0.18
+    ]
+   },
+   "spread": {
+    "to_other_participant": 0.0,
+    "mentioned_not_asked": 0.0,
+    "unfinished_thought": 0.0,
+    "already_answered": 0.0,
+    "group_agreeing": 0.0
+   }
+  },
+  {
+   "id": "unf-02",
+   "category": "unfinished_thought",
+   "expected": "silent",
+   "expected_rule": "unfinished_thought",
+   "decisions": [
+    "silent",
+    "silent",
+    "silent"
+   ],
+   "reasons": [
+    "blocked",
+    "blocked",
+    "blocked"
+   ],
+   "blocked_by": [
+    [
+     "to_other_participant",
+     "mentioned_not_asked",
+     "unfinished_thought",
+     "group_agreeing"
+    ],
+    [
+     "to_other_participant",
+     "mentioned_not_asked",
+     "unfinished_thought",
+     "group_agreeing"
+    ],
+    [
+     "to_other_participant",
+     "mentioned_not_asked",
+     "unfinished_thought",
+     "group_agreeing"
+    ]
+   ],
+   "flipped": false,
+   "correct": [
+    true,
+    true,
+    true
+   ],
+   "probabilities": {
+    "to_other_participant": [
+     0.75,
+     0.75,
+     0.75
+    ],
+    "mentioned_not_asked": [
+     1.0,
+     1.0,
+     1.0
+    ],
+    "unfinished_thought": [
+     1.0,
+     1.0,
+     1.0
+    ],
+    "already_answered": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "group_agreeing": [
+     0.57,
+     0.57,
+     0.57
+    ]
+   },
+   "spread": {
+    "to_other_participant": 0.0,
+    "mentioned_not_asked": 0.0,
+    "unfinished_thought": 0.0,
+    "already_answered": 0.0,
+    "group_agreeing": 0.0
+   }
+  },
+  {
+   "id": "unf-03",
+   "category": "unfinished_thought",
+   "expected": "silent",
+   "expected_rule": "unfinished_thought",
+   "decisions": [
+    "silent",
+    "silent",
+    "silent"
+   ],
+   "reasons": [
+    "blocked",
+    "blocked",
+    "blocked"
+   ],
+   "blocked_by": [
+    [
+     "unfinished_thought"
+    ],
+    [
+     "unfinished_thought"
+    ],
+    [
+     "unfinished_thought"
+    ]
+   ],
+   "flipped": false,
+   "correct": [
+    true,
+    true,
+    true
+   ],
+   "probabilities": {
+    "to_other_participant": [
+     0.12,
+     0.12,
+     0.12
+    ],
+    "mentioned_not_asked": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "unfinished_thought": [
+     0.95,
+     0.95,
+     0.95
+    ],
+    "already_answered": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "group_agreeing": [
+     0.23,
+     0.23,
+     0.23
+    ]
+   },
+   "spread": {
+    "to_other_participant": 0.0,
+    "mentioned_not_asked": 0.0,
+    "unfinished_thought": 0.0,
+    "already_answered": 0.0,
+    "group_agreeing": 0.0
+   }
+  },
+  {
+   "id": "unf-04",
+   "category": "unfinished_thought",
+   "expected": "silent",
+   "expected_rule": "unfinished_thought",
+   "decisions": [
+    "silent",
+    "silent",
+    "silent"
+   ],
+   "reasons": [
+    "blocked",
+    "blocked",
+    "blocked"
+   ],
+   "blocked_by": [
+    [
+     "to_other_participant",
+     "mentioned_not_asked",
+     "unfinished_thought"
+    ],
+    [
+     "to_other_participant",
+     "mentioned_not_asked",
+     "unfinished_thought"
+    ],
+    [
+     "to_other_participant",
+     "mentioned_not_asked",
+     "unfinished_thought"
+    ]
+   ],
+   "flipped": false,
+   "correct": [
+    true,
+    true,
+    true
+   ],
+   "probabilities": {
+    "to_other_participant": [
+     0.95,
+     0.95,
+     0.95
+    ],
+    "mentioned_not_asked": [
+     1.0,
+     1.0,
+     1.0
+    ],
+    "unfinished_thought": [
+     0.98,
+     0.98,
+     0.98
+    ],
+    "already_answered": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "group_agreeing": [
+     0.34,
+     0.34,
+     0.34
+    ]
+   },
+   "spread": {
+    "to_other_participant": 0.0,
+    "mentioned_not_asked": 0.0,
+    "unfinished_thought": 0.0,
+    "already_answered": 0.0,
+    "group_agreeing": 0.0
+   }
+  },
+  {
+   "id": "gqa-01",
+   "category": "group_question_answered",
+   "expected": "silent",
+   "expected_rule": "already_answered",
+   "decisions": [
+    "silent",
+    "silent",
+    "silent"
+   ],
+   "reasons": [
+    "blocked",
+    "blocked",
+    "blocked"
+   ],
+   "blocked_by": [
+    [
+     "to_other_participant",
+     "mentioned_not_asked",
+     "already_answered"
+    ],
+    [
+     "to_other_participant",
+     "mentioned_not_asked",
+     "already_answered"
+    ],
+    [
+     "to_other_participant",
+     "mentioned_not_asked",
+     "already_answered"
+    ]
+   ],
+   "flipped": false,
+   "correct": [
+    true,
+    true,
+    true
+   ],
+   "probabilities": {
+    "to_other_participant": [
+     0.94,
+     0.94,
+     0.94
+    ],
+    "mentioned_not_asked": [
+     1.0,
+     1.0,
+     1.0
+    ],
+    "unfinished_thought": [
+     0.03,
+     0.03,
+     0.03
+    ],
+    "already_answered": [
+     1.0,
+     1.0,
+     1.0
+    ],
+    "group_agreeing": [
+     0.16,
+     0.16,
+     0.16
+    ]
+   },
+   "spread": {
+    "to_other_participant": 0.0,
+    "mentioned_not_asked": 0.0,
+    "unfinished_thought": 0.0,
+    "already_answered": 0.0,
+    "group_agreeing": 0.0
+   }
+  },
+  {
+   "id": "gqa-02",
+   "category": "group_question_answered",
+   "expected": "silent",
+   "expected_rule": "already_answered",
+   "decisions": [
+    "silent",
+    "silent",
+    "silent"
+   ],
+   "reasons": [
+    "blocked",
+    "blocked",
+    "blocked"
+   ],
+   "blocked_by": [
+    [
+     "to_other_participant",
+     "mentioned_not_asked",
+     "already_answered"
+    ],
+    [
+     "to_other_participant",
+     "mentioned_not_asked",
+     "already_answered"
+    ],
+    [
+     "to_other_participant",
+     "mentioned_not_asked",
+     "already_answered"
+    ]
+   ],
+   "flipped": false,
+   "correct": [
+    true,
+    true,
+    true
+   ],
+   "probabilities": {
+    "to_other_participant": [
+     0.9,
+     0.9,
+     0.9
+    ],
+    "mentioned_not_asked": [
+     1.0,
+     1.0,
+     1.0
+    ],
+    "unfinished_thought": [
+     0.3,
+     0.3,
+     0.3
+    ],
+    "already_answered": [
+     1.0,
+     1.0,
+     1.0
+    ],
+    "group_agreeing": [
+     0.17,
+     0.17,
+     0.17
+    ]
+   },
+   "spread": {
+    "to_other_participant": 0.0,
+    "mentioned_not_asked": 0.0,
+    "unfinished_thought": 0.0,
+    "already_answered": 0.0,
+    "group_agreeing": 0.0
+   }
+  },
+  {
+   "id": "gqa-03",
+   "category": "group_question_answered",
+   "expected": "silent",
+   "expected_rule": "already_answered",
+   "decisions": [
+    "silent",
+    "silent",
+    "silent"
+   ],
+   "reasons": [
+    "blocked",
+    "blocked",
+    "blocked"
+   ],
+   "blocked_by": [
+    [
+     "to_other_participant",
+     "mentioned_not_asked",
+     "already_answered",
+     "group_agreeing"
+    ],
+    [
+     "to_other_participant",
+     "mentioned_not_asked",
+     "already_answered",
+     "group_agreeing"
+    ],
+    [
+     "to_other_participant",
+     "mentioned_not_asked",
+     "already_answered",
+     "group_agreeing"
+    ]
+   ],
+   "flipped": false,
+   "correct": [
+    true,
+    true,
+    true
+   ],
+   "probabilities": {
+    "to_other_participant": [
+     0.91,
+     0.91,
+     0.91
+    ],
+    "mentioned_not_asked": [
+     1.0,
+     1.0,
+     1.0
+    ],
+    "unfinished_thought": [
+     0.03,
+     0.03,
+     0.03
+    ],
+    "already_answered": [
+     1.0,
+     1.0,
+     1.0
+    ],
+    "group_agreeing": [
+     0.79,
+     0.79,
+     0.79
+    ]
+   },
+   "spread": {
+    "to_other_participant": 0.0,
+    "mentioned_not_asked": 0.0,
+    "unfinished_thought": 0.0,
+    "already_answered": 0.0,
+    "group_agreeing": 0.0
+   }
+  },
+  {
+   "id": "gqa-04",
+   "category": "group_question_answered",
+   "expected": "silent",
+   "expected_rule": "already_answered",
+   "decisions": [
+    "silent",
+    "silent",
+    "silent"
+   ],
+   "reasons": [
+    "blocked",
+    "blocked",
+    "blocked"
+   ],
+   "blocked_by": [
+    [
+     "to_other_participant",
+     "mentioned_not_asked",
+     "already_answered"
+    ],
+    [
+     "to_other_participant",
+     "mentioned_not_asked",
+     "already_answered"
+    ],
+    [
+     "to_other_participant",
+     "mentioned_not_asked",
+     "already_answered"
+    ]
+   ],
+   "flipped": false,
+   "correct": [
+    true,
+    true,
+    true
+   ],
+   "probabilities": {
+    "to_other_participant": [
+     0.97,
+     0.97,
+     0.97
+    ],
+    "mentioned_not_asked": [
+     1.0,
+     1.0,
+     1.0
+    ],
+    "unfinished_thought": [
+     0.1,
+     0.1,
+     0.1
+    ],
+    "already_answered": [
+     0.71,
+     0.71,
+     0.71
+    ],
+    "group_agreeing": [
+     0.09,
+     0.09,
+     0.09
+    ]
+   },
+   "spread": {
+    "to_other_participant": 0.0,
+    "mentioned_not_asked": 0.0,
+    "unfinished_thought": 0.0,
+    "already_answered": 0.0,
+    "group_agreeing": 0.0
+   }
+  },
+  {
+   "id": "bqh-01",
+   "category": "bot_question_human_answered",
+   "expected": "speak",
+   "expected_rule": "direct_address",
+   "decisions": [
+    "silent",
+    "silent",
+    "silent"
+   ],
+   "reasons": [
+    "blocked",
+    "blocked",
+    "blocked"
+   ],
+   "blocked_by": [
+    [
+     "to_other_participant",
+     "already_answered"
+    ],
+    [
+     "to_other_participant",
+     "already_answered"
+    ],
+    [
+     "to_other_participant",
+     "already_answered"
+    ]
+   ],
+   "flipped": false,
+   "correct": [
+    false,
+    false,
+    false
+   ],
+   "probabilities": {
+    "to_other_participant": [
+     1.0,
+     1.0,
+     1.0
+    ],
+    "mentioned_not_asked": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "unfinished_thought": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "already_answered": [
+     1.0,
+     1.0,
+     1.0
+    ],
+    "group_agreeing": [
+     0.25,
+     0.25,
+     0.25
+    ]
+   },
+   "spread": {
+    "to_other_participant": 0.0,
+    "mentioned_not_asked": 0.0,
+    "unfinished_thought": 0.0,
+    "already_answered": 0.0,
+    "group_agreeing": 0.0
+   }
+  },
+  {
+   "id": "bqh-02",
+   "category": "bot_question_human_answered",
+   "expected": "speak",
+   "expected_rule": "direct_address",
+   "decisions": [
+    "silent",
+    "silent",
+    "silent"
+   ],
+   "reasons": [
+    "blocked",
+    "blocked",
+    "blocked"
+   ],
+   "blocked_by": [
+    [
+     "to_other_participant",
+     "already_answered"
+    ],
+    [
+     "to_other_participant",
+     "already_answered"
+    ],
+    [
+     "to_other_participant",
+     "already_answered"
+    ]
+   ],
+   "flipped": false,
+   "correct": [
+    false,
+    false,
+    false
+   ],
+   "probabilities": {
+    "to_other_participant": [
+     0.79,
+     0.79,
+     0.79
+    ],
+    "mentioned_not_asked": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "unfinished_thought": [
+     0.23,
+     0.23,
+     0.23
+    ],
+    "already_answered": [
+     0.74,
+     0.74,
+     0.74
+    ],
+    "group_agreeing": [
+     0.21,
+     0.21,
+     0.21
+    ]
+   },
+   "spread": {
+    "to_other_participant": 0.0,
+    "mentioned_not_asked": 0.0,
+    "unfinished_thought": 0.0,
+    "already_answered": 0.0,
+    "group_agreeing": 0.0
+   }
+  },
+  {
+   "id": "bqh-03",
+   "category": "bot_question_human_answered",
+   "expected": "speak",
+   "expected_rule": "direct_address",
+   "decisions": [
+    "silent",
+    "silent",
+    "silent"
+   ],
+   "reasons": [
+    "blocked",
+    "blocked",
+    "blocked"
+   ],
+   "blocked_by": [
+    [
+     "to_other_participant",
+     "unfinished_thought",
+     "already_answered",
+     "group_agreeing"
+    ],
+    [
+     "to_other_participant",
+     "unfinished_thought",
+     "already_answered",
+     "group_agreeing"
+    ],
+    [
+     "to_other_participant",
+     "unfinished_thought",
+     "already_answered",
+     "group_agreeing"
+    ]
+   ],
+   "flipped": false,
+   "correct": [
+    false,
+    false,
+    false
+   ],
+   "probabilities": {
+    "to_other_participant": [
+     0.85,
+     0.85,
+     0.85
+    ],
+    "mentioned_not_asked": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "unfinished_thought": [
+     0.72,
+     0.72,
+     0.72
+    ],
+    "already_answered": [
+     1.0,
+     1.0,
+     1.0
+    ],
+    "group_agreeing": [
+     0.78,
+     0.78,
+     0.78
+    ]
+   },
+   "spread": {
+    "to_other_participant": 0.0,
+    "mentioned_not_asked": 0.0,
+    "unfinished_thought": 0.0,
+    "already_answered": 0.0,
+    "group_agreeing": 0.0
+   }
+  },
+  {
+   "id": "agr-01",
+   "category": "group_agreeing",
+   "expected": "silent",
+   "expected_rule": "group_agreeing",
+   "decisions": [
+    "silent",
+    "silent",
+    "silent"
+   ],
+   "reasons": [
+    "blocked",
+    "blocked",
+    "blocked"
+   ],
+   "blocked_by": [
+    [
+     "to_other_participant",
+     "mentioned_not_asked",
+     "group_agreeing"
+    ],
+    [
+     "to_other_participant",
+     "mentioned_not_asked",
+     "group_agreeing"
+    ],
+    [
+     "to_other_participant",
+     "mentioned_not_asked",
+     "group_agreeing"
+    ]
+   ],
+   "flipped": false,
+   "correct": [
+    true,
+    true,
+    true
+   ],
+   "probabilities": {
+    "to_other_participant": [
+     0.93,
+     0.93,
+     0.93
+    ],
+    "mentioned_not_asked": [
+     1.0,
+     1.0,
+     1.0
+    ],
+    "unfinished_thought": [
+     0.21,
+     0.21,
+     0.21
+    ],
+    "already_answered": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "group_agreeing": [
+     0.97,
+     0.97,
+     0.97
+    ]
+   },
+   "spread": {
+    "to_other_participant": 0.0,
+    "mentioned_not_asked": 0.0,
+    "unfinished_thought": 0.0,
+    "already_answered": 0.0,
+    "group_agreeing": 0.0
+   }
+  },
+  {
+   "id": "agr-02",
+   "category": "group_agreeing",
+   "expected": "silent",
+   "expected_rule": "group_agreeing",
+   "decisions": [
+    "silent",
+    "silent",
+    "silent"
+   ],
+   "reasons": [
+    "blocked",
+    "blocked",
+    "blocked"
+   ],
+   "blocked_by": [
+    [
+     "to_other_participant",
+     "mentioned_not_asked",
+     "group_agreeing"
+    ],
+    [
+     "to_other_participant",
+     "mentioned_not_asked",
+     "group_agreeing"
+    ],
+    [
+     "to_other_participant",
+     "mentioned_not_asked",
+     "group_agreeing"
+    ]
+   ],
+   "flipped": false,
+   "correct": [
+    true,
+    true,
+    true
+   ],
+   "probabilities": {
+    "to_other_participant": [
+     0.95,
+     0.95,
+     0.95
+    ],
+    "mentioned_not_asked": [
+     1.0,
+     1.0,
+     1.0
+    ],
+    "unfinished_thought": [
+     0.22,
+     0.22,
+     0.22
+    ],
+    "already_answered": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "group_agreeing": [
+     0.95,
+     0.95,
+     0.95
+    ]
+   },
+   "spread": {
+    "to_other_participant": 0.0,
+    "mentioned_not_asked": 0.0,
+    "unfinished_thought": 0.0,
+    "already_answered": 0.0,
+    "group_agreeing": 0.0
+   }
+  },
+  {
+   "id": "agr-03",
+   "category": "group_agreeing",
+   "expected": "silent",
+   "expected_rule": "group_agreeing",
+   "decisions": [
+    "silent",
+    "silent",
+    "silent"
+   ],
+   "reasons": [
+    "blocked",
+    "blocked",
+    "blocked"
+   ],
+   "blocked_by": [
+    [
+     "to_other_participant",
+     "group_agreeing"
+    ],
+    [
+     "to_other_participant",
+     "group_agreeing"
+    ],
+    [
+     "to_other_participant",
+     "group_agreeing"
+    ]
+   ],
+   "flipped": false,
+   "correct": [
+    true,
+    true,
+    true
+   ],
+   "probabilities": {
+    "to_other_participant": [
+     0.8,
+     0.8,
+     0.8
+    ],
+    "mentioned_not_asked": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "unfinished_thought": [
+     0.1,
+     0.1,
+     0.1
+    ],
+    "already_answered": [
+     0.21,
+     0.21,
+     0.21
+    ],
+    "group_agreeing": [
+     0.99,
+     0.99,
+     0.99
+    ]
+   },
+   "spread": {
+    "to_other_participant": 0.0,
+    "mentioned_not_asked": 0.0,
+    "unfinished_thought": 0.0,
+    "already_answered": 0.0,
+    "group_agreeing": 0.0
+   }
+  },
+  {
+   "id": "agr-04",
+   "category": "group_agreeing",
+   "expected": "silent",
+   "expected_rule": "group_agreeing",
+   "decisions": [
+    "silent",
+    "silent",
+    "silent"
+   ],
+   "reasons": [
+    "blocked",
+    "blocked",
+    "blocked"
+   ],
+   "blocked_by": [
+    [
+     "to_other_participant",
+     "mentioned_not_asked",
+     "group_agreeing"
+    ],
+    [
+     "to_other_participant",
+     "mentioned_not_asked",
+     "group_agreeing"
+    ],
+    [
+     "to_other_participant",
+     "mentioned_not_asked",
+     "group_agreeing"
+    ]
+   ],
+   "flipped": false,
+   "correct": [
+    true,
+    true,
+    true
+   ],
+   "probabilities": {
+    "to_other_participant": [
+     0.92,
+     0.92,
+     0.92
+    ],
+    "mentioned_not_asked": [
+     1.0,
+     1.0,
+     1.0
+    ],
+    "unfinished_thought": [
+     0.06,
+     0.06,
+     0.06
+    ],
+    "already_answered": [
+     0.09,
+     0.09,
+     0.09
+    ],
+    "group_agreeing": [
+     0.95,
+     0.95,
+     0.95
+    ]
+   },
+   "spread": {
+    "to_other_participant": 0.0,
+    "mentioned_not_asked": 0.0,
+    "unfinished_thought": 0.0,
+    "already_answered": 0.0,
+    "group_agreeing": 0.0
+   }
+  },
+  {
+   "id": "dir-01",
+   "category": "direct_request",
+   "expected": "speak",
+   "expected_rule": "direct_address",
+   "decisions": [
+    "speak",
+    "speak",
+    "speak"
+   ],
+   "reasons": [
+    "direct_address",
+    "direct_address",
+    "direct_address"
+   ],
+   "blocked_by": [
+    [],
+    [],
+    []
+   ],
+   "flipped": false,
+   "correct": [
+    true,
+    true,
+    true
+   ],
+   "probabilities": {},
+   "spread": {}
+  },
+  {
+   "id": "dir-02",
+   "category": "direct_request",
+   "expected": "speak",
+   "expected_rule": "direct_address",
+   "decisions": [
+    "speak",
+    "speak",
+    "speak"
+   ],
+   "reasons": [
+    "direct_address",
+    "direct_address",
+    "direct_address"
+   ],
+   "blocked_by": [
+    [],
+    [],
+    []
+   ],
+   "flipped": false,
+   "correct": [
+    true,
+    true,
+    true
+   ],
+   "probabilities": {},
+   "spread": {}
+  },
+  {
+   "id": "dir-03",
+   "category": "direct_request",
+   "expected": "speak",
+   "expected_rule": "direct_address",
+   "decisions": [
+    "speak",
+    "speak",
+    "speak"
+   ],
+   "reasons": [
+    "direct_address",
+    "direct_address",
+    "direct_address"
+   ],
+   "blocked_by": [
+    [],
+    [],
+    []
+   ],
+   "flipped": false,
+   "correct": [
+    true,
+    true,
+    true
+   ],
+   "probabilities": {},
+   "spread": {}
+  },
+  {
+   "id": "dir-04",
+   "category": "direct_request",
+   "expected": "speak",
+   "expected_rule": "direct_address",
+   "decisions": [
+    "speak",
+    "speak",
+    "speak"
+   ],
+   "reasons": [
+    "direct_address",
+    "direct_address",
+    "direct_address"
+   ],
+   "blocked_by": [
+    [],
+    [],
+    []
+   ],
+   "flipped": false,
+   "correct": [
+    true,
+    true,
+    true
+   ],
+   "probabilities": {},
+   "spread": {}
+  },
+  {
+   "id": "imp-01",
+   "category": "implicit_request",
+   "expected": "speak",
+   "expected_rule": "none",
+   "decisions": [
+    "silent",
+    "silent",
+    "silent"
+   ],
+   "reasons": [
+    "blocked",
+    "blocked",
+    "blocked"
+   ],
+   "blocked_by": [
+    [
+     "unfinished_thought",
+     "group_agreeing"
+    ],
+    [
+     "unfinished_thought",
+     "group_agreeing"
+    ],
+    [
+     "unfinished_thought",
+     "group_agreeing"
+    ]
+   ],
+   "flipped": false,
+   "correct": [
+    false,
+    false,
+    false
+   ],
+   "probabilities": {
+    "to_other_participant": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "mentioned_not_asked": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "unfinished_thought": [
+     0.89,
+     0.89,
+     0.89
+    ],
+    "already_answered": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "group_agreeing": [
+     0.52,
+     0.52,
+     0.52
+    ]
+   },
+   "spread": {
+    "to_other_participant": 0.0,
+    "mentioned_not_asked": 0.0,
+    "unfinished_thought": 0.0,
+    "already_answered": 0.0,
+    "group_agreeing": 0.0
+   }
+  },
+  {
+   "id": "imp-02",
+   "category": "implicit_request",
+   "expected": "speak",
+   "expected_rule": "none",
+   "decisions": [
+    "speak",
+    "speak",
+    "speak"
+   ],
+   "reasons": [
+    "no_rule_fired",
+    "no_rule_fired",
+    "no_rule_fired"
+   ],
+   "blocked_by": [
+    [],
+    [],
+    []
+   ],
+   "flipped": false,
+   "correct": [
+    true,
+    true,
+    true
+   ],
+   "probabilities": {
+    "to_other_participant": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "mentioned_not_asked": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "unfinished_thought": [
+     0.09,
+     0.09,
+     0.09
+    ],
+    "already_answered": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "group_agreeing": [
+     0.02,
+     0.02,
+     0.02
+    ]
+   },
+   "spread": {
+    "to_other_participant": 0.0,
+    "mentioned_not_asked": 0.0,
+    "unfinished_thought": 0.0,
+    "already_answered": 0.0,
+    "group_agreeing": 0.0
+   }
+  },
+  {
+   "id": "imp-03",
+   "category": "implicit_request",
+   "expected": "speak",
+   "expected_rule": "none",
+   "decisions": [
+    "speak",
+    "speak",
+    "speak"
+   ],
+   "reasons": [
+    "no_rule_fired",
+    "no_rule_fired",
+    "no_rule_fired"
+   ],
+   "blocked_by": [
+    [],
+    [],
+    []
+   ],
+   "flipped": false,
+   "correct": [
+    true,
+    true,
+    true
+   ],
+   "probabilities": {
+    "to_other_participant": [
+     0.03,
+     0.03,
+     0.03
+    ],
+    "mentioned_not_asked": [
+     0.02,
+     0.02,
+     0.02
+    ],
+    "unfinished_thought": [
+     0.38,
+     0.38,
+     0.38
+    ],
+    "already_answered": [
+     0.18,
+     0.18,
+     0.18
+    ],
+    "group_agreeing": [
+     0.28,
+     0.28,
+     0.28
+    ]
+   },
+   "spread": {
+    "to_other_participant": 0.0,
+    "mentioned_not_asked": 0.0,
+    "unfinished_thought": 0.0,
+    "already_answered": 0.0,
+    "group_agreeing": 0.0
+   }
+  },
+  {
+   "id": "imp-04",
+   "category": "implicit_request",
+   "expected": "speak",
+   "expected_rule": "none",
+   "decisions": [
+    "speak",
+    "speak",
+    "speak"
+   ],
+   "reasons": [
+    "no_rule_fired",
+    "no_rule_fired",
+    "no_rule_fired"
+   ],
+   "blocked_by": [
+    [],
+    [],
+    []
+   ],
+   "flipped": false,
+   "correct": [
+    true,
+    true,
+    true
+   ],
+   "probabilities": {
+    "to_other_participant": [
+     0.33,
+     0.33,
+     0.33
+    ],
+    "mentioned_not_asked": [
+     0.38,
+     0.38,
+     0.38
+    ],
+    "unfinished_thought": [
+     0.3,
+     0.3,
+     0.3
+    ],
+    "already_answered": [
+     0.04,
+     0.04,
+     0.04
+    ],
+    "group_agreeing": [
+     0.31,
+     0.31,
+     0.31
+    ]
+   },
+   "spread": {
+    "to_other_participant": 0.0,
+    "mentioned_not_asked": 0.0,
+    "unfinished_thought": 0.0,
+    "already_answered": 0.0,
+    "group_agreeing": 0.0
+   }
+  },
+  {
+   "id": "dab-01",
+   "category": "direct_address_with_block_rule",
+   "expected": "speak",
+   "expected_rule": "direct_address",
+   "decisions": [
+    "speak",
+    "speak",
+    "speak"
+   ],
+   "reasons": [
+    "direct_address",
+    "direct_address",
+    "direct_address"
+   ],
+   "blocked_by": [
+    [],
+    [],
+    []
+   ],
+   "flipped": false,
+   "correct": [
+    true,
+    true,
+    true
+   ],
+   "probabilities": {},
+   "spread": {}
+  },
+  {
+   "id": "dab-02",
+   "category": "direct_address_with_block_rule",
+   "expected": "speak",
+   "expected_rule": "direct_address",
+   "decisions": [
+    "speak",
+    "speak",
+    "speak"
+   ],
+   "reasons": [
+    "direct_address",
+    "direct_address",
+    "direct_address"
+   ],
+   "blocked_by": [
+    [],
+    [],
+    []
+   ],
+   "flipped": false,
+   "correct": [
+    true,
+    true,
+    true
+   ],
+   "probabilities": {},
+   "spread": {}
+  },
+  {
+   "id": "dab-03",
+   "category": "direct_address_with_block_rule",
+   "expected": "speak",
+   "expected_rule": "direct_address",
+   "decisions": [
+    "speak",
+    "speak",
+    "speak"
+   ],
+   "reasons": [
+    "direct_address",
+    "direct_address",
+    "direct_address"
+   ],
+   "blocked_by": [
+    [],
+    [],
+    []
+   ],
+   "flipped": false,
+   "correct": [
+    true,
+    true,
+    true
+   ],
+   "probabilities": {},
+   "spread": {}
+  },
+  {
+   "id": "dab-04",
+   "category": "direct_address_with_block_rule",
+   "expected": "speak",
+   "expected_rule": "direct_address",
+   "decisions": [
+    "speak",
+    "speak",
+    "speak"
+   ],
+   "reasons": [
+    "direct_address",
+    "direct_address",
+    "direct_address"
+   ],
+   "blocked_by": [
+    [],
+    [],
+    []
+   ],
+   "flipped": false,
+   "correct": [
+    true,
+    true,
+    true
+   ],
+   "probabilities": {},
+   "spread": {}
+  },
+  {
+   "id": "ste-01",
+   "category": "transcription_error",
+   "expected": "speak",
+   "expected_rule": "none",
+   "decisions": [
+    "silent",
+    "silent",
+    "silent"
+   ],
+   "reasons": [
+    "blocked",
+    "blocked",
+    "blocked"
+   ],
+   "blocked_by": [
+    [
+     "group_agreeing"
+    ],
+    [
+     "group_agreeing"
+    ],
+    [
+     "group_agreeing"
+    ]
+   ],
+   "flipped": false,
+   "correct": [
+    false,
+    false,
+    false
+   ],
+   "probabilities": {
+    "to_other_participant": [
+     0.13,
+     0.13,
+     0.13
+    ],
+    "mentioned_not_asked": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "unfinished_thought": [
+     0.28,
+     0.28,
+     0.28
+    ],
+    "already_answered": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "group_agreeing": [
+     0.83,
+     0.83,
+     0.83
+    ]
+   },
+   "spread": {
+    "to_other_participant": 0.0,
+    "mentioned_not_asked": 0.0,
+    "unfinished_thought": 0.0,
+    "already_answered": 0.0,
+    "group_agreeing": 0.0
+   }
+  },
+  {
+   "id": "ste-02",
+   "category": "transcription_error",
+   "expected": "silent",
+   "expected_rule": "to_other_participant",
+   "decisions": [
+    "silent",
+    "silent",
+    "silent"
+   ],
+   "reasons": [
+    "blocked",
+    "blocked",
+    "blocked"
+   ],
+   "blocked_by": [
+    [
+     "to_other_participant",
+     "mentioned_not_asked"
+    ],
+    [
+     "to_other_participant",
+     "mentioned_not_asked"
+    ],
+    [
+     "to_other_participant",
+     "mentioned_not_asked"
+    ]
+   ],
+   "flipped": false,
+   "correct": [
+    true,
+    true,
+    true
+   ],
+   "probabilities": {
+    "to_other_participant": [
+     0.92,
+     0.92,
+     0.92
+    ],
+    "mentioned_not_asked": [
+     1.0,
+     1.0,
+     1.0
+    ],
+    "unfinished_thought": [
+     0.03,
+     0.03,
+     0.03
+    ],
+    "already_answered": [
+     0.44,
+     0.44,
+     0.44
+    ],
+    "group_agreeing": [
+     0.33,
+     0.33,
+     0.33
+    ]
+   },
+   "spread": {
+    "to_other_participant": 0.0,
+    "mentioned_not_asked": 0.0,
+    "unfinished_thought": 0.0,
+    "already_answered": 0.0,
+    "group_agreeing": 0.0
+   }
+  },
+  {
+   "id": "ste-03",
+   "category": "transcription_error",
+   "expected": "silent",
+   "expected_rule": "to_other_participant",
+   "decisions": [
+    "silent",
+    "silent",
+    "silent"
+   ],
+   "reasons": [
+    "blocked",
+    "blocked",
+    "blocked"
+   ],
+   "blocked_by": [
+    [
+     "to_other_participant",
+     "unfinished_thought",
+     "already_answered",
+     "group_agreeing"
+    ],
+    [
+     "to_other_participant",
+     "unfinished_thought",
+     "already_answered",
+     "group_agreeing"
+    ],
+    [
+     "to_other_participant",
+     "unfinished_thought",
+     "already_answered",
+     "group_agreeing"
+    ]
+   ],
+   "flipped": false,
+   "correct": [
+    true,
+    true,
+    true
+   ],
+   "probabilities": {
+    "to_other_participant": [
+     0.95,
+     0.95,
+     0.95
+    ],
+    "mentioned_not_asked": [
+     0.04,
+     0.04,
+     0.04
+    ],
+    "unfinished_thought": [
+     0.86,
+     0.86,
+     0.86
+    ],
+    "already_answered": [
+     0.66,
+     0.66,
+     0.66
+    ],
+    "group_agreeing": [
+     0.9,
+     0.9,
+     0.9
+    ]
+   },
+   "spread": {
+    "to_other_participant": 0.0,
+    "mentioned_not_asked": 0.0,
+    "unfinished_thought": 0.0,
+    "already_answered": 0.0,
+    "group_agreeing": 0.0
+   }
+  },
+  {
+   "id": "ste-04",
+   "category": "transcription_error",
+   "expected": "speak",
+   "expected_rule": "none",
+   "decisions": [
+    "silent",
+    "silent",
+    "silent"
+   ],
+   "reasons": [
+    "blocked",
+    "blocked",
+    "blocked"
+   ],
+   "blocked_by": [
+    [
+     "unfinished_thought"
+    ],
+    [
+     "unfinished_thought"
+    ],
+    [
+     "unfinished_thought"
+    ]
+   ],
+   "flipped": false,
+   "correct": [
+    false,
+    false,
+    false
+   ],
+   "probabilities": {
+    "to_other_participant": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "mentioned_not_asked": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "unfinished_thought": [
+     0.82,
+     0.82,
+     0.82
+    ],
+    "already_answered": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "group_agreeing": [
+     0.08,
+     0.08,
+     0.08
+    ]
+   },
+   "spread": {
+    "to_other_participant": 0.0,
+    "mentioned_not_asked": 0.0,
+    "unfinished_thought": 0.0,
+    "already_answered": 0.0,
+    "group_agreeing": 0.0
+   }
+  },
+  {
+   "id": "ste-05",
+   "category": "transcription_error",
+   "expected": "silent",
+   "expected_rule": "to_other_participant",
+   "decisions": [
+    "silent",
+    "silent",
+    "silent"
+   ],
+   "reasons": [
+    "blocked",
+    "blocked",
+    "blocked"
+   ],
+   "blocked_by": [
+    [
+     "to_other_participant",
+     "mentioned_not_asked"
+    ],
+    [
+     "to_other_participant",
+     "mentioned_not_asked"
+    ],
+    [
+     "to_other_participant",
+     "mentioned_not_asked"
+    ]
+   ],
+   "flipped": false,
+   "correct": [
+    true,
+    true,
+    true
+   ],
+   "probabilities": {
+    "to_other_participant": [
+     0.99,
+     0.99,
+     0.99
+    ],
+    "mentioned_not_asked": [
+     0.97,
+     0.97,
+     0.97
+    ],
+    "unfinished_thought": [
+     0.07,
+     0.07,
+     0.07
+    ],
+    "already_answered": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "group_agreeing": [
+     0.25,
+     0.25,
+     0.25
+    ]
+   },
+   "spread": {
+    "to_other_participant": 0.0,
+    "mentioned_not_asked": 0.0,
+    "unfinished_thought": 0.0,
+    "already_answered": 0.0,
+    "group_agreeing": 0.0
+   }
+  },
+  {
+   "id": "ovl-01",
+   "category": "overlapping_turns",
+   "expected": "speak",
+   "expected_rule": "direct_address",
+   "decisions": [
+    "speak",
+    "speak",
+    "speak"
+   ],
+   "reasons": [
+    "direct_address",
+    "direct_address",
+    "direct_address"
+   ],
+   "blocked_by": [
+    [],
+    [],
+    []
+   ],
+   "flipped": false,
+   "correct": [
+    true,
+    true,
+    true
+   ],
+   "probabilities": {},
+   "spread": {}
+  },
+  {
+   "id": "ovl-02",
+   "category": "overlapping_turns",
+   "expected": "speak",
+   "expected_rule": "direct_address",
+   "decisions": [
+    "speak",
+    "speak",
+    "speak"
+   ],
+   "reasons": [
+    "direct_address",
+    "direct_address",
+    "direct_address"
+   ],
+   "blocked_by": [
+    [],
+    [],
+    []
+   ],
+   "flipped": false,
+   "correct": [
+    true,
+    true,
+    true
+   ],
+   "probabilities": {},
+   "spread": {}
+  },
+  {
+   "id": "ovl-03",
+   "category": "overlapping_turns",
+   "expected": "speak",
+   "expected_rule": "direct_address",
+   "decisions": [
+    "speak",
+    "speak",
+    "speak"
+   ],
+   "reasons": [
+    "direct_address",
+    "direct_address",
+    "direct_address"
+   ],
+   "blocked_by": [
+    [],
+    [],
+    []
+   ],
+   "flipped": false,
+   "correct": [
+    true,
+    true,
+    true
+   ],
+   "probabilities": {},
+   "spread": {}
+  },
+  {
+   "id": "sil-01",
+   "category": "unanswered_silence",
+   "expected": "speak",
+   "expected_rule": "none",
+   "decisions": [
+    "silent",
+    "silent",
+    "silent"
+   ],
+   "reasons": [
+    "blocked",
+    "blocked",
+    "blocked"
+   ],
+   "blocked_by": [
+    [
+     "to_other_participant",
+     "mentioned_not_asked"
+    ],
+    [
+     "to_other_participant",
+     "mentioned_not_asked"
+    ],
+    [
+     "to_other_participant",
+     "mentioned_not_asked"
+    ]
+   ],
+   "flipped": false,
+   "correct": [
+    false,
+    false,
+    false
+   ],
+   "probabilities": {
+    "to_other_participant": [
+     0.91,
+     0.91,
+     0.91
+    ],
+    "mentioned_not_asked": [
+     1.0,
+     1.0,
+     1.0
+    ],
+    "unfinished_thought": [
+     0.16,
+     0.16,
+     0.16
+    ],
+    "already_answered": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "group_agreeing": [
+     0.11,
+     0.11,
+     0.11
+    ]
+   },
+   "spread": {
+    "to_other_participant": 0.0,
+    "mentioned_not_asked": 0.0,
+    "unfinished_thought": 0.0,
+    "already_answered": 0.0,
+    "group_agreeing": 0.0
+   }
+  },
+  {
+   "id": "sil-02",
+   "category": "unanswered_silence",
+   "expected": "speak",
+   "expected_rule": "none",
+   "decisions": [
+    "silent",
+    "silent",
+    "silent"
+   ],
+   "reasons": [
+    "blocked",
+    "blocked",
+    "blocked"
+   ],
+   "blocked_by": [
+    [
+     "to_other_participant",
+     "mentioned_not_asked",
+     "unfinished_thought"
+    ],
+    [
+     "to_other_participant",
+     "mentioned_not_asked",
+     "unfinished_thought"
+    ],
+    [
+     "to_other_participant",
+     "mentioned_not_asked",
+     "unfinished_thought"
+    ]
+   ],
+   "flipped": false,
+   "correct": [
+    false,
+    false,
+    false
+   ],
+   "probabilities": {
+    "to_other_participant": [
+     0.9,
+     0.9,
+     0.9
+    ],
+    "mentioned_not_asked": [
+     0.97,
+     0.97,
+     0.97
+    ],
+    "unfinished_thought": [
+     0.67,
+     0.67,
+     0.67
+    ],
+    "already_answered": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "group_agreeing": [
+     0.12,
+     0.12,
+     0.12
+    ]
+   },
+   "spread": {
+    "to_other_participant": 0.0,
+    "mentioned_not_asked": 0.0,
+    "unfinished_thought": 0.0,
+    "already_answered": 0.0,
+    "group_agreeing": 0.0
+   }
+  },
+  {
+   "id": "sil-03",
+   "category": "unanswered_silence",
+   "expected": "speak",
+   "expected_rule": "none",
+   "decisions": [
+    "silent",
+    "silent",
+    "silent"
+   ],
+   "reasons": [
+    "blocked",
+    "blocked",
+    "blocked"
+   ],
+   "blocked_by": [
+    [
+     "to_other_participant",
+     "mentioned_not_asked",
+     "unfinished_thought"
+    ],
+    [
+     "to_other_participant",
+     "mentioned_not_asked",
+     "unfinished_thought"
+    ],
+    [
+     "to_other_participant",
+     "mentioned_not_asked",
+     "unfinished_thought"
+    ]
+   ],
+   "flipped": false,
+   "correct": [
+    false,
+    false,
+    false
+   ],
+   "probabilities": {
+    "to_other_participant": [
+     0.93,
+     0.93,
+     0.93
+    ],
+    "mentioned_not_asked": [
+     1.0,
+     1.0,
+     1.0
+    ],
+    "unfinished_thought": [
+     0.78,
+     0.78,
+     0.78
+    ],
+    "already_answered": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "group_agreeing": [
+     0.1,
+     0.1,
+     0.1
+    ]
+   },
+   "spread": {
+    "to_other_participant": 0.0,
+    "mentioned_not_asked": 0.0,
+    "unfinished_thought": 0.0,
+    "already_answered": 0.0,
+    "group_agreeing": 0.0
+   }
+  },
+  {
+   "id": "ctl-01",
+   "category": "control",
+   "expected": "speak",
+   "expected_rule": "none",
+   "decisions": [
+    "speak",
+    "speak",
+    "speak"
+   ],
+   "reasons": [
+    "no_rule_fired",
+    "no_rule_fired",
+    "no_rule_fired"
+   ],
+   "blocked_by": [
+    [],
+    [],
+    []
+   ],
+   "flipped": false,
+   "correct": [
+    true,
+    true,
+    true
+   ],
+   "probabilities": {
+    "unfinished_thought": [
+     0.07,
+     0.07,
+     0.07
+    ]
+   },
+   "spread": {
+    "unfinished_thought": 0.0
+   }
+  },
+  {
+   "id": "ctl-02",
+   "category": "control",
+   "expected": "speak",
+   "expected_rule": "none",
+   "decisions": [
+    "speak",
+    "speak",
+    "speak"
+   ],
+   "reasons": [
+    "disabled",
+    "disabled",
+    "disabled"
+   ],
+   "blocked_by": [
+    [],
+    [],
+    []
+   ],
+   "flipped": false,
+   "correct": [
+    true,
+    true,
+    true
+   ],
+   "probabilities": {},
+   "spread": {}
+  },
+  {
+   "id": "ctl-03",
+   "category": "control",
+   "expected": "speak",
+   "expected_rule": "none",
+   "decisions": [
+    "silent",
+    "silent",
+    "silent"
+   ],
+   "reasons": [
+    "blocked",
+    "blocked",
+    "blocked"
+   ],
+   "blocked_by": [
+    [
+     "unfinished_thought"
+    ],
+    [
+     "unfinished_thought"
+    ],
+    [
+     "unfinished_thought"
+    ]
+   ],
+   "flipped": false,
+   "correct": [
+    false,
+    false,
+    false
+   ],
+   "probabilities": {
+    "to_other_participant": [
+     0.12,
+     0.12,
+     0.12
+    ],
+    "mentioned_not_asked": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "unfinished_thought": [
+     0.91,
+     0.91,
+     0.91
+    ],
+    "already_answered": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "group_agreeing": [
+     0.08,
+     0.08,
+     0.08
+    ]
+   },
+   "spread": {
+    "to_other_participant": 0.0,
+    "mentioned_not_asked": 0.0,
+    "unfinished_thought": 0.0,
+    "already_answered": 0.0,
+    "group_agreeing": 0.0
+   }
+  },
+  {
+   "id": "ctl-04",
+   "category": "control",
+   "expected": "speak",
+   "expected_rule": "none",
+   "decisions": [
+    "speak",
+    "speak",
+    "speak"
+   ],
+   "reasons": [
+    "no_rule_fired",
+    "no_rule_fired",
+    "no_rule_fired"
+   ],
+   "blocked_by": [
+    [],
+    [],
+    []
+   ],
+   "flipped": false,
+   "correct": [
+    true,
+    true,
+    true
+   ],
+   "probabilities": {
+    "to_other_participant": [
+     0.1,
+     0.1,
+     0.1
+    ],
+    "mentioned_not_asked": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "unfinished_thought": [
+     0.46,
+     0.46,
+     0.46
+    ],
+    "already_answered": [
+     0.09,
+     0.09,
+     0.09
+    ],
+    "group_agreeing": [
+     0.12,
+     0.12,
+     0.12
+    ]
+   },
+   "spread": {
+    "to_other_participant": 0.0,
+    "mentioned_not_asked": 0.0,
+    "unfinished_thought": 0.0,
+    "already_answered": 0.0,
+    "group_agreeing": 0.0
+   }
+  }
+ ],
+ "tokens": {
+  "input": 104049,
+  "output": 0
+ },
+ "cost_usd": 0.0104
+}

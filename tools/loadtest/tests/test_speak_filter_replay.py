@@ -243,6 +243,29 @@ class TestCandidates(unittest.TestCase):
         row = next(line for line in text.splitlines() if line.startswith("| calm_r2"))
         self.assertIn("| 2/3 | 1/4 | 2/3 |", row, "overall false interruptions, missed turns, then on the hard cases")
 
+    def test_the_comparison_counts_each_candidates_first_run_only(self):
+        _, results = compared(repeat="calm_r2")
+        text = comparison(DATA, CANDIDATES, results, threshold=0.5, hard="peers")
+        row = next(line for line in text.splitlines() if line.startswith("| calm_r2"))
+        self.assertIn("| 2/3 | 1/4 | 2/3 |", row, "the repeat run is not added in")
+
+    def test_a_combination_blocks_at_its_threshold(self):
+        """caught's r1 is 0.9: held to 0.9 it is blocked, so two false interruptions, not three."""
+        _, results = compared()
+        e = combine(DATA, results, {"r1": "original", "r2": "original"}, {"r1": 0.9, "r2": 0.95})
+        self.assertEqual((e["overall"]["false_interruptions"], e["overall"]["missed_turns"]), (2, 0))
+
+    def test_fewest_errors_come_before_fewest_missed_turns(self):
+        """Two silent cases and one speak case, all at 0.8: blocking all three is one error (a
+        missed turn), blocking none is two (false interruptions). One error wins."""
+        data = {"rules": [{"id": "r1", "instructions": "Rule one."}],
+                "scenarios": [{"id": i, "category": "c", "expected": e} for i, e in
+                              (("s1", "silent"), ("s2", "silent"), ("p1", "speak"))]}
+        results = {"original": [{"run": 1, "id": i, "probabilities": {"r1": 0.8}} for i in ("s1", "s2", "p1")]}
+        b = best(data, [{"id": "original", "rules": {}}], results)
+        self.assertEqual((b["errors"]["overall"]["false_interruptions"], b["errors"]["overall"]["missed_turns"]), (0, 1))
+        self.assertLessEqual(b["thresholds"]["r1"], 0.8)
+
     def test_the_committed_candidates(self):
         """The owner's wording kept as 'original'; three rewordings of each misfiring rule and
         one of to_other_participant, each changing one rule."""
